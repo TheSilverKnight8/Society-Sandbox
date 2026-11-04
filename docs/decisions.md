@@ -9,8 +9,8 @@ Macro to micro, with a test checkpoint at the end of each stage. Each system's t
 1. **Foundation and maps:** Home, Map mode (generate and paint by hand), the isometric view, saving maps in the browser, map files. **(done)**
 2. **The main screen and people**, in three steps, each tested on its own:
    - 2a. Setups and saved runs; the main screen (the map with the WorldBox-style toolbar and time controls); placing and removing people; inspecting a person; the simulation running in its own thread; a performance check at 2,000+ individuals, which is the test for SPEC 2's Godot rule. **(done)**
-   - 2b. Needs (food, shelter, rest, safety, job) and survival: gathering from tiles, death from unmet needs or injury, the inspect panel showing needs and the current task, editing a person by hand, and the first imperatives (orders to units). **(this step)**
-   - 2c. The life cycle: aging, pairing, births and children, natural death, with their toggles (SPEC 10).
+   - 2b. Needs (food, shelter, rest, safety, job) and survival: gathering from tiles, death from unmet needs or injury, the inspect panel showing needs and the current task, editing a person by hand, and the first imperatives (orders to units). **(done)**
+   - 2c. The life cycle: aging, pairing, births and children, natural death, with their toggles (SPEC 10). **(this step)**
 3. **Settlements, buildings and economy:** settlements founded by individuals, construction, buildings that consume, produce and employ, building placement, jobs (tradesman, trader), goods carried by hand, wealth.
 4. **Cultures, nations and technology:** culture formation and breaks, research, nations (placed and emerging), policies and culture support, technology, diplomacy, officials, influence, unique individuals, succession.
 5. **Military and war:** soldier types, weapons and equipment, armies and their leaders, battles with group orders and individual resolution, war declarations.
@@ -40,6 +40,19 @@ Macro to micro, with a test checkpoint at the end of each stage. Each system's t
 | How is shelter met before houses exist (Stage 3)? | It is not: the inspect panel shows shelter as unmet ("None yet"), and an unmet shelter does no harm until houses can meet it. |
 | What threatens safety before beasts, criminals and war exist? | Nothing yet: safety shows as met. |
 | When do imperatives arrive? | With the systems they order (the rule above). 2b gives people tasks, so it brings the first unit orders: Move, Gather food, Rest and Stop. Orders to settlements, nations and cultures come with those. |
+
+## Questions settled by the builder in Stage 2c (Caleb can change them)
+
+| Question | What 2c does |
+| --- | --- |
+| SPEC 10 lists "Pairing, births, and aging (turning these off freezes the population)" as one item. One switch or three? | One switch, as the spec groups them. It can be split into three. |
+| Who pairs with whom? | One man and one woman, since pairs are what births come from (SPEC 6: "specific individuals pair up and have children"). Close relatives (parent and child, brothers and sisters, half-siblings) never pair. |
+| How do children get fed? | From what a parent nearby carries when there is any; otherwise they forage close by themselves. Households come with houses (Stage 3). |
+
+## Builder's additions in Stage 2c (not named in the spec; easy to remove)
+
+- **End pair** in the inspect panel's Edit (SPEC 1: everything can be modified).
+- **Parents and children** on the inspect panel, as links, alongside the pair the spec names.
 
 ## Builder's additions in Stage 2a (not named in the spec; easy to remove)
 
@@ -164,6 +177,19 @@ A step has 33 ms at 3x, so there is plenty of room for now. People only walk in 
 | What it looks like | Sleeping people lie down with a small "z"; gathering and eating people reach down and forward in turn. |
 | Saving | Needs, carried food, orders and the food left on each tile are saved (world format version 2). Setups and runs saved in 2a open with everyone fed and rested and every bush full. |
 
+## Life cycle (Stage 2c)
+
+| Item | Choice |
+| --- | --- |
+| Ages | Children under 14 (drawn at half an adult's height under 7, about three quarters from 7 to 13), adults, and elders from 55 (drawn with grey hair). A year is a minute at 1x. |
+| Natural death (SPEC 6) | No death of old age before 45; after that the chance each year rises: about 1% at 45, 2.5% at 55, 6% at 65, 15% at 75, 36% at 85. The inspect panel says "died of old age". |
+| Pairing | Unpaired adults from 16 who meet an unpaired person of the other sex within 10 tiles and within 12 years of their own age pair up (a 35% chance each month while they are near). Pairs last until one of them dies; the other may pair again. Pairs keep near each other when nothing else needs doing. |
+| Births (SPEC 6) | A paired woman aged 16 to 45, fed (food over 50), healthy (over 60) and with her pair nearby has a 3% chance each month of becoming pregnant; nine months later she gives birth beside where she is. At least 18 months between births. A child takes skin and hair from either parent and starts fed and rested. In tests this gives about five children per woman over her life when food is plentiful. |
+| Children | Have needs like adults (SPEC 6). They keep within a few tiles of their mother (or father), are fed from what a parent nearby carries, and otherwise forage close by. Light jobs come with jobs (Stage 3). |
+| Growth | From 100 people placed in five groups on a Titanic map, the population was about 160 after 10 years, 215 after 30 and 300 after 60 (simulated). Food limits it where people crowd: foraging only feeds so many, and the hungry have fewer children. |
+| The switch (SPEC 10) | **Rules** in the Main tab: "Pairing, births and aging". Off: nobody pairs, falls pregnant, gives birth, ages or dies of old age (anyone already pregnant stays so until it is turned back on). Needs and death from hunger go on, since SPEC 10 makes those always on. The panel lists what is always on. Saved with the setup or run. |
+| Saving | Pairs, parents, pregnancies, the father of an expected child, and the rules are saved (world format version 3). Setups and runs from 2b open with nobody paired and every rule on. |
+
 ## Imperatives (Stage 2b, units only)
 
 | Item | Choice |
@@ -187,6 +213,10 @@ Measured as in 2a (512 map, 3x, headless Chrome without a graphics card), with e
 | 5,000 | 5 to 11 ms (the crowd starves down to about 4,100) | 52 / 55 / 54 |
 
 Two fixes came out of measuring: picked bushes are redrawn together about once a second rather than on every step, and path searches are held to a firm budget per step (12,000 tiles looked at), so a famine makes people wait a moment for a path instead of slowing the whole world. The slowest single step seen was 24 ms, under the 33 ms a step has at 3x.
+
+## Performance (Stage 2c)
+
+The life cycle adds a monthly check per person and a grid of people rebuilt every 25 steps; measured as in 2b, the numbers did not change: 2,000 people at 55 to 59 frames a second and 2 to 10 ms a step; 5,000 at 48 to 55 frames a second and 6 to 11 ms a step.
 
 ## Look
 

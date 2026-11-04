@@ -79,6 +79,13 @@ ctx.onmessage = (e: MessageEvent<ToSim>) => {
         world?.order(m.ids, m.order);
         sendSoon = true;
         break;
+      case 'toggles':
+        world?.setToggles(m.toggles);
+        break;
+      case 'unpair':
+        world?.unpair(m.id);
+        sendSoon = true;
+        break;
       case 'spawnTest':
         world?.spawnTest(m.n, m.x, m.y);
         sendSoon = true;

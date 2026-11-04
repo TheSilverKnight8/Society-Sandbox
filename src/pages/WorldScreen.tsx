@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router';
-import { Apple, Eraser, Footprints, Hand, Maximize, Minus, Moon, Pause, Pencil, Play, Plus, RotateCcw, Save, User, X } from 'lucide-react';
+import { Apple, Eraser, Footprints, Hand, ListChecks, Maximize, Minus, Moon, Pause, Pencil, Play, Plus, RotateCcw, Save, User, X } from 'lucide-react';
 import { ButtonLink, Button, IconButton, Input, Segmented, Spinner, cx } from '../components/ui';
 import { alertDialog, confirmDialog, notify, promptDialog } from '../components/dialogs';
 import { useApp } from '../lib/store';
@@ -8,7 +8,7 @@ import { closeWorld, openWorld, readSetup, saveRunAs, saveWorld, setWorldUnsaved
 import { brushTiles } from '../map/paint';
 import { SimClient } from '../sim/client';
 import { CLOTHES, SKINS, unpackLook } from '../sim/look';
-import { MONTHS_PER_YEAR, TICKS_PER_MONTH, TICKS_PER_YEAR, type PersonDetails, type PersonEdit, type Speed } from '../sim/types';
+import { ADULT_AGE, DEFAULT_TOGGLES, ELDER_AGE, MONTHS_PER_YEAR, TICKS_PER_MONTH, TICKS_PER_YEAR, type PersonDetails, type PersonEdit, type Speed, type Toggles } from '../sim/types';
 import { Deposit } from '../map/terrain';
 import { STEP } from '../render/iso';
 import { IsoView } from '../render/IsoView';
@@ -85,6 +85,8 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
   const [details, setDetails] = useState<PersonDetails | null>(null);
   const [died, setDied] = useState<string | null>(null);
   const [pending, setPending] = useState<Pending>(null);
+  const [toggles, setTogglesState] = useState<Toggles>({ ...DEFAULT_TOGGLES, ...doc.state.toggles });
+  const [rulesOpen, setRulesOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   /** The tick the world was at when it was loaded or last saved. */
   const [savedTick, setSavedTick] = useState(doc.state.tick);
@@ -406,6 +408,7 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
     if (!setup) return alertDialog({ title: 'The setup is gone', body: 'It was deleted, so there is nothing to start again from.' });
     setSpeed(0);
     clientRef.current?.init(setup.size, setup.terrain, setup.elevation, setup.deposit, setup.state);
+    setTogglesState({ ...DEFAULT_TOGGLES, ...setup.state.toggles });
     empty.current.set(emptyFlags(setup));
     viewRef.current?.replaceTiles({ size: setup.size, terrain: doc.terrain, elevation: doc.elevation, deposit: doc.deposit, empty: empty.current });
     choose([]);
@@ -456,6 +459,11 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
         <InspectPanel
           details={details}
           died={died}
+          onSelect={(id) => choose([id])}
+          onUnpair={() => {
+            clientRef.current?.unpair(inspected);
+            setWorldUnsaved(true);
+          }}
           onClose={() => choose([])}
           onEdit={(edit) => {
             clientRef.current?.edit(inspected, edit);
@@ -477,6 +485,18 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
             Clear
           </Button>
         </div>
+      )}
+
+      {rulesOpen && tab === 'main' && (
+        <RulesPanel
+          toggles={toggles}
+          onChange={(t) => {
+            setTogglesState(t);
+            clientRef.current?.setToggles(t);
+            setWorldUnsaved(true);
+          }}
+          onClose={() => setRulesOpen(false)}
+        />
       )}
 
       {/* Bottom: the toolbar. */}
@@ -540,6 +560,10 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
                   Start again from setup
                 </Button>
               )}
+              <Button size="sm" variant={rulesOpen ? 'navy' : 'secondary'} onClick={() => setRulesOpen((o) => !o)}>
+                <ListChecks className="size-4" />
+                Rules
+              </Button>
               <p className="max-w-64 text-xs text-muted">
                 {isSetup && atStart
                   ? 'This is the setup’s starting point. Place people in Units, save the setup, then press Play to run it.'
@@ -670,15 +694,27 @@ function Bar({ value, warn }: { value: number; warn: boolean }) {
   );
 }
 
+function PersonLink({ id, onSelect }: { id: number; onSelect: (id: number) => void }) {
+  return (
+    <button className="text-ink underline decoration-accent decoration-2 underline-offset-2 hover:text-accent" onClick={() => onSelect(id)}>
+      No. {id}
+    </button>
+  );
+}
+
 function InspectPanel({
   details,
   died,
+  onSelect,
+  onUnpair,
   onClose,
   onEdit,
   onRemove,
 }: {
   details: PersonDetails | null;
   died: string | null;
+  onSelect: (id: number) => void;
+  onUnpair: () => void;
   onClose: () => void;
   onEdit: (e: PersonEdit) => void;
   onRemove: () => void;
@@ -715,7 +751,9 @@ function InspectPanel({
             <dt className="text-muted">Sex</dt>
             <dd>{d.sex === 1 ? 'Male' : 'Female'}</dd>
             <dt className="text-muted">Age</dt>
-            <dd>{d.ageYears}</dd>
+            <dd>
+              {d.ageYears} <span className="text-muted">({d.ageYears < ADULT_AGE ? 'child' : d.ageYears >= ELDER_AGE ? 'elder' : 'adult'})</span>
+            </dd>
             <dt className="text-muted">Health</dt>
             <dd>
               <Bar value={d.health} warn={d.health < 40} />
@@ -725,7 +763,28 @@ function InspectPanel({
             <dt className="text-muted">Culture</dt>
             <dd className="text-muted">None</dd>
             <dt className="text-muted">Pair</dt>
-            <dd className="text-muted">None</dd>
+            <dd>{d.pair !== undefined ? <PersonLink id={d.pair} onSelect={onSelect} /> : <span className="text-muted">None</span>}</dd>
+            {(d.mother !== undefined || d.father !== undefined) && (
+              <>
+                <dt className="text-muted">Parents</dt>
+                <dd className="flex flex-wrap gap-x-1.5">
+                  {d.mother !== undefined && <PersonLink id={d.mother} onSelect={onSelect} />}
+                  {d.mother !== undefined && d.father !== undefined && <span>and</span>}
+                  {d.father !== undefined && <PersonLink id={d.father} onSelect={onSelect} />}
+                </dd>
+              </>
+            )}
+            <dt className="text-muted">Children</dt>
+            <dd className="flex flex-wrap gap-x-1.5">
+              {d.children.length ? d.children.slice(0, 6).map((c) => <PersonLink key={c} id={c} onSelect={onSelect} />) : <span className="text-muted">None</span>}
+              {d.children.length > 6 && <span className="text-muted">and {d.children.length - 6} more</span>}
+            </dd>
+            {d.pregnant && (
+              <>
+                <dt className="text-muted">Expecting</dt>
+                <dd>A child</dd>
+              </>
+            )}
           </dl>
           <p className="label-caps mt-3 text-muted">Needs</p>
           <dl className="mt-1 grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-1">
@@ -761,7 +820,7 @@ function InspectPanel({
               Remove
             </Button>
           </div>
-          {editing && <EditPerson details={d} onEdit={onEdit} />}
+          {editing && <EditPerson details={d} onEdit={onEdit} onUnpair={onUnpair} />}
         </>
       ) : (
         <p className="mt-3 text-muted">{died ? `This person died of ${died}.` : 'This person is no longer in the world.'}</p>
@@ -771,7 +830,7 @@ function InspectPanel({
 }
 
 /** Editing a person by hand (SPEC 1: everything can be modified). */
-function EditPerson({ details, onEdit }: { details: PersonDetails; onEdit: (e: PersonEdit) => void }) {
+function EditPerson({ details, onEdit, onUnpair }: { details: PersonDetails; onEdit: (e: PersonEdit) => void; onUnpair: () => void }) {
   const [age, setAge] = useState(String(details.ageYears));
   const slider = (label: string, key: 'health' | 'food' | 'rest', value: number) => (
     <label className="block space-y-1">
@@ -820,6 +879,54 @@ function EditPerson({ details, onEdit }: { details: PersonDetails; onEdit: (e: P
           }}
         />
       </label>
+      {details.pair !== undefined && (
+        <Button size="xs" variant="secondary" onClick={onUnpair}>
+          End pair
+        </Button>
+      )}
+    </div>
+  );
+}
+
+/** The automatic behaviors the player can turn off (SPEC 10). More are added as their systems are built. */
+function RulesPanel({ toggles, onChange, onClose }: { toggles: Toggles; onChange: (t: Toggles) => void; onClose: () => void }) {
+  const rows: { key: keyof Toggles; label: string; note: string }[] = [
+    { key: 'lifeCycle', label: 'Pairing, births and aging', note: 'Off freezes the population: nobody pairs up, is born, ages, or dies of old age.' },
+  ];
+  return (
+    <div className="absolute bottom-36 left-1/2 w-[28rem] max-w-[calc(100%-1.5rem)] -translate-x-1/2 animate-rise rounded-2xl border border-line bg-surface p-4 text-sm shadow-pop">
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <h2 className="text-xl">Rules</h2>
+          <p className="mt-0.5 text-xs text-muted">Automatic behaviors you can turn off. More appear as their systems are built.</p>
+        </div>
+        <IconButton label="Close" onClick={onClose}>
+          <X className="size-4" />
+        </IconButton>
+      </div>
+      <ul className="mt-3 space-y-2">
+        {rows.map((r) => (
+          <li key={r.key} className="flex items-start gap-3 rounded-lg border border-line bg-raised/40 p-2.5">
+            <button
+              role="switch"
+              aria-checked={toggles[r.key]}
+              aria-label={r.label}
+              onClick={() => onChange({ ...toggles, [r.key]: !toggles[r.key] })}
+              className={cx('relative mt-0.5 h-5 w-9 shrink-0 rounded-full transition', toggles[r.key] ? 'bg-navy' : 'bg-line')}
+            >
+              <span className={cx('absolute top-0.5 size-4 rounded-full bg-surface shadow-card transition-all', toggles[r.key] ? 'left-[1.125rem]' : 'left-0.5')} />
+            </button>
+            <span>
+              <span className="block font-medium">{r.label}</span>
+              <span className="block text-xs text-muted">{r.note}</span>
+            </span>
+          </li>
+        ))}
+      </ul>
+      <p className="mt-3 text-xs text-muted">
+        Always on (SPEC 10): people meeting their needs and doing their tasks, including dying of unmet needs or injury; fights settled by stats and equipment; succession when a leader dies or
+        leaves.
+      </p>
     </div>
   );
 }

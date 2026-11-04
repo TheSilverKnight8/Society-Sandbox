@@ -1,4 +1,4 @@
-import type { FromSim, Order, PersonDetails, PersonEdit, SimState, Snapshot, Speed, ToSim } from './types';
+import type { FromSim, Order, PersonDetails, PersonEdit, SimState, Snapshot, Speed, Toggles, ToSim } from './types';
 
 // The app's side of the simulation: starts the worker, sends it commands, and keeps the
 // last two snapshots so people can be drawn moving smoothly between steps.
@@ -98,6 +98,14 @@ export class SimClient {
       if (test(x, y)) out.push(id);
     });
     return out;
+  }
+
+  setToggles(toggles: Toggles) {
+    this.send({ type: 'toggles', toggles });
+  }
+
+  unpair(id: number) {
+    this.send({ type: 'unpair', id });
   }
 
   spawnTest(n: number, x: number, y: number) {

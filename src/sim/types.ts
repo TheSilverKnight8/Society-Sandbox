@@ -51,7 +51,30 @@ export interface Person {
   carry: number;
   /** An order from the player, carried out before anything they would choose themselves. */
   order?: Order;
+  /** Their pair (SPEC 6), if any. */
+  pair?: number;
+  /** Their parents, if born in the world. */
+  mother?: number;
+  father?: number;
+  /** Steps until the birth, while pregnant. */
+  pregnant?: number;
+  /** The father of the child she is expecting. */
+  childFather?: number;
+  /** The step of their last birth, so births are spaced out. */
+  lastBirth?: number;
 }
+
+/** Automatic behaviors the player can turn off (SPEC 10). More are added as their systems are built. */
+export interface Toggles {
+  /** Pairing, births and aging. Off freezes the population: nobody pairs, is born, ages, or dies of old age. */
+  lifeCycle: boolean;
+}
+
+export const DEFAULT_TOGGLES: Toggles = { lifeCycle: true };
+
+/** Life stages, for drawing and the inspect panel. */
+export const ADULT_AGE = 14;
+export const ELDER_AGE = 55;
 
 /** Everything about a running world that is saved, apart from the map's tiles. */
 export interface SimState {
@@ -62,10 +85,11 @@ export interface SimState {
   people: Person[];
   /** Food left on each tile with a food deposit (berries, fish); grows back over time. 0 elsewhere. */
   stock?: Uint8Array;
+  toggles?: Toggles;
 }
 
 export function emptyState(seed: number): SimState {
-  return { tick: 0, nextId: 1, rng: seed >>> 0, people: [] };
+  return { tick: 0, nextId: 1, rng: seed >>> 0, people: [], toggles: { ...DEFAULT_TOGGLES } };
 }
 
 /** What the inspect panel shows about one person. */
@@ -81,6 +105,12 @@ export interface PersonDetails {
   rest: number;
   carry: number;
   order?: Order['kind'];
+  pair?: number;
+  mother?: number;
+  father?: number;
+  /** Living children. */
+  children: number[];
+  pregnant: boolean;
 }
 
 /** Changes the player can make to a person by hand (SPEC 1: everything can be modified). */
@@ -104,12 +134,16 @@ export type ToSim =
   | { type: 'edit'; id: number; edit: PersonEdit }
   /** An order to some people; 'stop' cancels their orders. */
   | { type: 'order'; ids: number[]; order: Order | { kind: 'stop' } }
+  | { type: 'toggles'; toggles: Toggles }
+  | { type: 'unpair'; id: number }
   | { type: 'save'; req: number }
   /** Development only: adds n people on land near (x, y), for speed tests. */
   | { type: 'spawnTest'; n: number; x: number; y: number };
 
 /** Poses for drawing. */
 export const Pose = { Stand: 0, Sleep: 1, Work: 2 } as const;
+/** How old someone looks, for drawing: young child, older child, adult, elder. */
+export const AgeLook = { Adult: 0, Young: 1, Child: 2, Elder: 3 } as const;
 
 export interface Snapshot {
   tick: number;
@@ -118,7 +152,7 @@ export interface Snapshot {
   /** x, y per person, in tiles. */
   pos: Float32Array;
   look: Uint16Array;
-  /** Bit 0: walking. Bit 1: facing left. Bit 2: male. Bits 3-4: pose (see Pose). */
+  /** Bit 0: walking. Bit 1: facing left. Bit 2: male. Bits 3-4: pose (see Pose). Bits 5-6: age (see AgeLook). */
   flags: Uint8Array;
   /** Food tiles that ran out (stored as tile + 1) or came back (stored as -(tile + 1)) since the last snapshot. */
   stockChanges: Int32Array;

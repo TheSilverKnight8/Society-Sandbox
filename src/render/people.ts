@@ -1,6 +1,6 @@
 import { CLOTHES, HAIRS, SKINS, unpackLook } from '../sim/look';
 import type { SimClient } from '../sim/client';
-import { Pose } from '../sim/types';
+import { AgeLook, Pose } from '../sim/types';
 import { isoX, isoY } from './iso';
 import type { IsoView } from './IsoView';
 import { NAVY } from './style';
@@ -15,6 +15,10 @@ const HEIGHT = 0.42;
 /** Below this height on screen (device pixels), people are dots. */
 const MIN_FIGURE_PX = 10;
 const LEGS = '#5a4232';
+/** Elders' hair. */
+const GREY = '#cfcbc4';
+/** How tall children are drawn, against an adult. */
+const AGE_SCALE = [1, 0.5, 0.72, 0.97];
 
 interface Sprite {
   canvas: HTMLCanvasElement;
@@ -25,12 +29,12 @@ interface Sprite {
 
 const sprites = new Map<string, Sprite>();
 
-function sprite(look: number, male: boolean, pose: number, frame: number, px: number): Sprite {
-  const key = `${look}|${male ? 1 : 0}|${pose}|${frame}|${px}`;
+function sprite(look: number, male: boolean, pose: number, frame: number, px: number, elder: boolean): Sprite {
+  const key = `${look}|${male ? 1 : 0}|${pose}|${frame}|${px}|${elder ? 1 : 0}`;
   const hit = sprites.get(key);
   if (hit) return hit;
   if (sprites.size > 4000) sprites.clear();
-  const s = pose === Pose.Sleep ? drawSleeping(look, male, px) : drawStanding(look, male, pose, frame, px);
+  const s = pose === Pose.Sleep ? drawSleeping(look, male, px, elder) : drawStanding(look, male, pose, frame, px, elder);
   sprites.set(key, s);
   return s;
 }
@@ -51,7 +55,7 @@ function limbOf(ctx: CanvasRenderingContext2D, H: number, lw: number) {
 }
 
 /** Lying on the ground asleep, head to the left, with a small "z". */
-function drawSleeping(look: number, male: boolean, px: number): Sprite {
+function drawSleeping(look: number, male: boolean, px: number, elder: boolean): Sprite {
   const H = px;
   const lw = Math.max(1.2, H * 0.08);
   const w = Math.ceil(H * 1.0 + lw * 2);
@@ -96,7 +100,7 @@ function drawSleeping(look: number, male: boolean, px: number): Sprite {
   ctx.fill();
   ctx.save();
   ctx.clip();
-  ctx.fillStyle = HAIRS[hair];
+  ctx.fillStyle = elder ? GREY : HAIRS[hair];
   ctx.fillRect(-0.46 * H, -0.24 * H, 0.1 * H, 0.3 * H);
   ctx.restore();
   ctx.beginPath();
@@ -120,7 +124,7 @@ function drawSleeping(look: number, male: boolean, px: number): Sprite {
   return { canvas, ax, ay };
 }
 
-function drawStanding(look: number, male: boolean, pose: number, frame: number, px: number): Sprite {
+function drawStanding(look: number, male: boolean, pose: number, frame: number, px: number, elder: boolean): Sprite {
   const H = px;
   const lw = Math.max(1.2, H * 0.08);
   const w = Math.ceil(H * 0.7 + lw * 2);
@@ -136,7 +140,7 @@ function drawStanding(look: number, male: boolean, pose: number, frame: number, 
   ctx.lineJoin = 'round';
   const { skin, hair, clothes } = unpackLook(look);
   const skinC = SKINS[skin];
-  const hairC = HAIRS[hair];
+  const hairC = elder ? GREY : HAIRS[hair];
   const clothC = CLOTHES[clothes];
   const work = pose === Pose.Work;
   const swing = work ? 0 : frame === 1 ? 1 : frame === 3 ? -1 : 0;
@@ -268,8 +272,10 @@ export function drawPeople(ctx: CanvasRenderingContext2D, view: IsoView, client:
     const flags = buf[o + 4];
     const id = buf[o + 5];
     if (selected.has(id)) drawSelection(ctx, sx, sy, z);
+    const ageLook = (flags >> 5) & 3;
+    const px = Math.round(figurePx * AGE_SCALE[ageLook]);
     if (figurePx < MIN_FIGURE_PX) {
-      const r = Math.max(1.6, 0.06 * z);
+      const r = Math.max(ageLook === AgeLook.Young || ageLook === AgeLook.Child ? 1.1 : 1.6, 0.06 * z * AGE_SCALE[ageLook]);
       ctx.beginPath();
       ctx.arc(sx, sy - r, r, 0, Math.PI * 2);
       ctx.fillStyle = CLOTHES[unpackLook(look).clothes];
@@ -281,8 +287,8 @@ export function drawPeople(ctx: CanvasRenderingContext2D, view: IsoView, client:
     }
     const pose = (flags >> 3) & 3;
     const frame = flags & 1 ? (t + id) % 4 : pose === Pose.Work ? Math.floor((t + id) / 2) % 2 : 0;
-    const sp = sprite(look, (flags & 4) !== 0, pose, frame, Math.min(figurePx, 90));
-    const scale = figurePx > 90 ? figurePx / 90 : 1;
+    const sp = sprite(look, (flags & 4) !== 0, pose, frame, Math.max(6, Math.min(px, 90)), ageLook === AgeLook.Elder);
+    const scale = px > 90 ? px / 90 : 1;
     ctx.drawImage(sp.canvas, sx - (sp.ax * scale) / dpr, sy - (sp.ay * scale) / dpr, (sp.canvas.width * scale) / dpr, (sp.canvas.height * scale) / dpr);
   }
 }

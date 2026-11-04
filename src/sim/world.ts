@@ -1,7 +1,23 @@
 import { Deposit, isWater } from '../map/terrain';
 import { randomLook } from './look';
 import { PathFinder } from './path';
-import { Pose, TICKS_PER_MONTH, TICKS_PER_YEAR, type Order, type Person, type PersonDetails, type PersonEdit, type SimState, type Snapshot } from './types';
+import { packLook, unpackLook } from './look';
+import {
+  ADULT_AGE,
+  AgeLook,
+  DEFAULT_TOGGLES,
+  ELDER_AGE,
+  Pose,
+  TICKS_PER_MONTH,
+  TICKS_PER_YEAR,
+  type Order,
+  type Person,
+  type PersonDetails,
+  type PersonEdit,
+  type SimState,
+  type Snapshot,
+  type Toggles,
+} from './types';
 
 // The running world, inside the simulation worker. Every individual is simulated in
 // full each step, on screen or not (SPEC 2).
@@ -11,6 +27,13 @@ import { Pose, TICKS_PER_MONTH, TICKS_PER_YEAR, type Order, type Person, type Pe
 // takes health, and at no health a person dies (SPEC 10: death from unmet needs). Shelter
 // has nothing to meet it until houses exist (Stage 3), and safety has nothing to threaten
 // it until beasts, criminals and war exist, so neither does anything yet.
+//
+// Stage 2c: the life cycle (SPEC 6). People age; from middle age, death of old age grows
+// more likely each year. Unpaired adults who meet someone of the other sex near their own
+// age may pair up, and pairs keep near each other. A paired woman who is fed and healthy
+// may become pregnant and gives birth nine months later. Children stay near their mother,
+// are fed from what their parents carry when they can be, and otherwise forage close by.
+// All of this can be turned off together (SPEC 10), which freezes the population.
 
 /** Tiles a search may look at per step, shared by everyone waiting for a path. */
 const PATH_BUDGET = 12_000;
@@ -44,6 +67,28 @@ const isFood = (d: number) => d === Deposit.Berries || d === Deposit.Fish;
 
 /** Food tiles are grouped in cells of this many tiles a side, to find the nearest quickly. */
 const CELL = 16;
+
+// Life cycle. Ages are in years; a year is a minute at 1x.
+const PAIR_AGE = 16;
+/** How near (tiles) two people must be to pair up, and how far apart in age at most. */
+const PAIR_RANGE = 10;
+const PAIR_AGE_GAP = 12;
+/** Chance each month that an unpaired adult pairs with someone suitable nearby. */
+const PAIR_CHANCE = 0.35;
+const FERTILE_MIN = 16;
+const FERTILE_MAX = 45;
+/** Chance each month that a fed, healthy, paired woman with her pair nearby becomes pregnant. */
+const CONCEIVE_CHANCE = 0.03;
+const PREGNANCY = 9 * TICKS_PER_MONTH;
+/** At least this long between births. */
+const BIRTH_GAP = 18 * TICKS_PER_MONTH;
+/** How near a parent must be to share food with a hungry child. */
+const SHARE_RANGE = 6;
+
+/** Chance of dying of old age within a year, by age: none before 45, then rising (about 6% at 65, 15% at 75, 36% at 85). */
+function oldAgeChance(age: number) {
+  return age < 45 ? 0 : Math.min(1, 0.01 * Math.exp(0.09 * (age - 45)));
+}
 
 /** A seeded random number generator whose state can be saved. */
 class Rand {
@@ -106,6 +151,9 @@ export class World {
   /** A food tile each person could not reach last time, so they look elsewhere next. */
   private avoid = new Map<number, number>();
   private stockChanges: number[] = [];
+  /** People by cell, rebuilt every so often, for finding someone to pair with. */
+  private grid = new Map<number, Person[]>();
+  private toggles: Toggles;
   /** Why people died recently (for the inspect panel); cleared as it is read. */
   readonly deaths = new Map<number, string>();
 
@@ -137,6 +185,8 @@ export class World {
       this.foodCells[Math.floor(y / CELL) * cells + Math.floor(x / CELL)].push(i);
     }
     state.stock = this.stock;
+    this.toggles = { ...DEFAULT_TOGGLES, ...state.toggles };
+    state.toggles = this.toggles;
     for (const t of this.foodTiles) if (this.stock[t] > 0) this.cellFree[this.cellOf(t)]++;
     for (const p of state.people) {
       complete(p);
@@ -170,9 +220,133 @@ export class World {
     this.finder.expanded = 0;
     this.servePaths();
     this.regrow();
-    // Copy the list: people can die during the step.
+    if (this.toggles.lifeCycle) {
+      if (st.tick % 25 === 0) this.buildGrid();
+    } else {
+      // Aging is off: everyone stays the age they are.
+      for (const p of st.people) {
+        p.born++;
+        if (p.lastBirth !== undefined) p.lastBirth++;
+      }
+    }
+    // Copy the list: people can die or be born during the step.
     for (const p of st.people.slice()) this.update(p);
     st.rng = this.rand.s;
+  }
+
+  private buildGrid() {
+    this.grid.clear();
+    const cells = Math.ceil(this.size / CELL);
+    for (const p of this.state.people) {
+      const c = Math.floor(p.y / CELL) * cells + Math.floor(p.x / CELL);
+      const list = this.grid.get(c);
+      if (list) list.push(p);
+      else this.grid.set(c, [p]);
+    }
+  }
+
+  private ageOf(p: Person) {
+    return (this.state.tick - p.born) / TICKS_PER_YEAR;
+  }
+
+  private near(a: Person, b: Person, range: number) {
+    const dx = a.x - b.x;
+    const dy = a.y - b.y;
+    return dx * dx + dy * dy <= range * range;
+  }
+
+  // ---------------------------------------------------------------- life cycle
+
+  /** Once a month for each person: old age, pairing, and pregnancy. Returns false if they died. */
+  private monthly(p: Person): boolean {
+    const age = this.ageOf(p);
+    const yearly = oldAgeChance(age);
+    if (yearly > 0 && this.rand.next() < 1 - Math.pow(1 - yearly, 1 / 12)) {
+      this.die(p, 'old age');
+      return false;
+    }
+    if (p.pair === undefined && age >= PAIR_AGE) this.tryPair(p, age);
+    if (
+      p.sex === 0 &&
+      p.pair !== undefined &&
+      p.pregnant === undefined &&
+      age >= FERTILE_MIN &&
+      age <= FERTILE_MAX &&
+      (p.lastBirth === undefined || this.state.tick - p.lastBirth >= BIRTH_GAP) &&
+      p.food > 50 &&
+      p.health > 60
+    ) {
+      const partner = this.byId.get(p.pair);
+      if (partner && this.near(p, partner, 8) && this.rand.next() < CONCEIVE_CHANCE) {
+        p.pregnant = PREGNANCY;
+        p.childFather = partner.id;
+      }
+    }
+    return true;
+  }
+
+  private related(a: Person, b: Person) {
+    if (a.mother !== undefined && (a.mother === b.mother || a.mother === b.id)) return true;
+    if (a.father !== undefined && (a.father === b.father || a.father === b.id)) return true;
+    return b.mother === a.id || b.father === a.id;
+  }
+
+  private tryPair(p: Person, age: number) {
+    const cells = Math.ceil(this.size / CELL);
+    const cx = Math.floor(p.x / CELL);
+    const cy = Math.floor(p.y / CELL);
+    let best: Person | null = null;
+    let bestD = Infinity;
+    for (let gy = cy - 1; gy <= cy + 1; gy++) {
+      for (let gx = cx - 1; gx <= cx + 1; gx++) {
+        if (gx < 0 || gy < 0 || gx >= cells || gy >= cells) continue;
+        for (const q of this.grid.get(gy * cells + gx) ?? []) {
+          if (q === p || q.sex === p.sex || q.pair !== undefined || !this.byId.has(q.id)) continue;
+          const qa = this.ageOf(q);
+          if (qa < PAIR_AGE || Math.abs(qa - age) > PAIR_AGE_GAP || this.related(p, q)) continue;
+          const d = (q.x - p.x) ** 2 + (q.y - p.y) ** 2;
+          if (d <= PAIR_RANGE * PAIR_RANGE && d < bestD) {
+            bestD = d;
+            best = q;
+          }
+        }
+      }
+    }
+    if (best && this.rand.next() < PAIR_CHANCE) {
+      p.pair = best.id;
+      best.pair = p.id;
+    }
+  }
+
+  private giveBirth(mother: Person) {
+    const st = this.state;
+    const fatherId = mother.childFather;
+    delete mother.childFather;
+    const father = fatherId !== undefined ? this.byId.get(fatherId) : undefined;
+    const ml = unpackLook(mother.look);
+    const fl = father ? unpackLook(father.look) : ml;
+    const pick = <T,>(a: T, b: T) => (this.rand.next() < 0.5 ? a : b);
+    const child: Person = {
+      id: st.nextId++,
+      sex: this.rand.next() < 0.5 ? 0 : 1,
+      born: st.tick,
+      health: 100,
+      // Skin and hair from either parent; clothes of their own.
+      look: packLook(pick(ml.skin, fl.skin), pick(ml.hair, fl.hair), this.rand.int(10)),
+      x: mother.x + (this.rand.next() - 0.5) * 0.4,
+      y: mother.y + (this.rand.next() - 0.5) * 0.4,
+      task: 'idle',
+      wait: 20,
+      food: 80,
+      rest: 100,
+      carry: 0,
+      mother: mother.id,
+      father: fatherId,
+    };
+    st.people.push(child);
+    this.byId.set(child.id, child);
+    delete mother.pregnant;
+    mother.lastBirth = st.tick;
   }
 
   private servePaths() {
@@ -221,6 +395,10 @@ export class World {
   }
 
   private update(p: Person) {
+    if (this.toggles.lifeCycle) {
+      if ((this.state.tick + p.id) % TICKS_PER_MONTH === 0 && !this.monthly(p)) return;
+      if (p.pregnant !== undefined && --p.pregnant <= 0) this.giveBirth(p);
+    }
     // Needs change every step.
     p.food = Math.max(0, p.food - FOOD_DECAY);
     if (p.task === 'sleep') p.rest = Math.min(100, p.rest + REST_GAIN);
@@ -289,10 +467,22 @@ export class World {
       }
     }
     if (p.rest < TIRED) return this.sleep(p);
+    const child = this.ageOf(p) < ADULT_AGE;
     if (p.food < HUNGRY) {
       if (p.carry > 0) return this.eat(p);
-      // Look close first; only the very hungry look far (far searches cost the most).
-      for (const r of p.food < 20 ? [14, 40, 90] : [14, 40]) {
+      // A hungry child is fed from what a parent nearby carries.
+      if (child) {
+        for (const id of [p.mother, p.father]) {
+          const parent = id !== undefined ? this.byId.get(id) : undefined;
+          if (parent && parent.carry > 0 && this.near(p, parent, SHARE_RANGE)) {
+            parent.carry--;
+            p.carry++;
+            return this.eat(p);
+          }
+        }
+      }
+      // Look close first; only the very hungry look far (far searches cost the most). Children stay closer.
+      for (const r of child ? (p.food < 20 ? [14, 40] : [14]) : p.food < 20 ? [14, 40, 90] : [14, 40]) {
         const t = this.findFood(p, this.tileOf(p), r);
         if (t >= 0) return this.headFor(p, t);
       }
@@ -303,7 +493,11 @@ export class World {
       const t = this.findFood(p, this.tileOf(p), 10);
       if (t >= 0) return this.headFor(p, t);
     }
-    if (this.rand.next() < 0.6) this.stroll(p, 8);
+    // Children keep near their mother (or father); pairs keep near each other.
+    const anchorId = child ? (p.mother !== undefined && this.byId.has(p.mother) ? p.mother : p.father) : p.pair;
+    const anchor = anchorId !== undefined ? this.byId.get(anchorId) : undefined;
+    if (anchor && !this.near(p, anchor, child ? 5 : 8)) return this.stroll(p, child ? 2 : 3, anchor);
+    if (this.rand.next() < 0.6) this.stroll(p, child ? 4 : 8, anchor);
     else p.wait = 20 + this.rand.int(40);
   }
 
@@ -317,8 +511,8 @@ export class World {
     p.wait = EAT_STEPS;
   }
 
-  private stroll(p: Person, radius: number) {
-    const goal = this.randomNearby(p, radius);
+  private stroll(p: Person, radius: number, around?: Person) {
+    const goal = this.randomNearby(around ?? p, radius);
     if (goal < 0) p.wait = 20;
     else this.goTo(p, goal, 'stroll');
   }
@@ -491,6 +685,7 @@ export class World {
 
   private die(p: Person, cause: string) {
     this.stop(p);
+    this.unpair(p.id);
     this.deaths.set(p.id, cause);
     this.removeWhere((q) => q === p);
   }
@@ -559,6 +754,10 @@ export class World {
     const keep: Person[] = [];
     for (const p of this.state.people) {
       if (test(p)) {
+        if (p.pair !== undefined) {
+          const q = this.byId.get(p.pair);
+          if (q && q.pair === p.id) delete q.pair;
+        }
         this.byId.delete(p.id);
         this.routes.delete(p.id);
         this.avoid.delete(p.id);
@@ -566,6 +765,19 @@ export class World {
       } else keep.push(p);
     }
     this.state.people = keep;
+  }
+
+  /** Ends a person's pair, if they have one (by hand, or when one of them dies). */
+  unpair(id: number) {
+    const p = this.byId.get(id);
+    if (!p || p.pair === undefined) return;
+    const q = this.byId.get(p.pair);
+    if (q && q.pair === p.id) delete q.pair;
+    delete p.pair;
+  }
+
+  setToggles(t: Toggles) {
+    Object.assign(this.toggles, t);
   }
 
   /** Changes a person by hand (SPEC 1). */
@@ -629,6 +841,11 @@ export class World {
       rest: Math.round(p.rest),
       carry: p.carry,
       order: p.order?.kind,
+      pair: p.pair,
+      mother: p.mother,
+      father: p.father,
+      children: this.state.people.filter((q) => q.mother === p.id || q.father === p.id).map((q) => q.id),
+      pregnant: p.pregnant !== undefined,
     };
   }
 
@@ -646,7 +863,9 @@ export class World {
       pos[k * 2 + 1] = p.y;
       look[k] = p.look;
       const pose = p.task === 'sleep' ? Pose.Sleep : p.task === 'gather' || p.task === 'eat' ? Pose.Work : Pose.Stand;
-      let f = (p.task === 'walk' ? 1 : 0) | (p.sex === 1 ? 4 : 0) | (pose << 3);
+      const age = (this.state.tick - p.born) / TICKS_PER_YEAR;
+      const ageLook = age < 7 ? AgeLook.Young : age < ADULT_AGE ? AgeLook.Child : age >= ELDER_AGE ? AgeLook.Elder : AgeLook.Adult;
+      let f = (p.task === 'walk' ? 1 : 0) | (p.sex === 1 ? 4 : 0) | (pose << 3) | (ageLook << 5);
       const r = p.task === 'walk' ? this.routes.get(p.id) : undefined;
       if (r && r.step < r.tiles.length) {
         // Facing left on screen when heading toward smaller (x - y).
@@ -668,6 +887,7 @@ export class World {
       ...this.state,
       rng: this.rand.s,
       stock: this.stock.slice(),
+      toggles: { ...this.toggles },
       people: this.state.people.map((p) => {
         const q: Person = { ...p, wait: Number.isFinite(p.wait) ? Math.min(p.wait, 100) : 0 };
         // Routes and claims are not saved; anyone on the move starts again from standing.

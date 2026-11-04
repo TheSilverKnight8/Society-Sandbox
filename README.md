@@ -6,7 +6,7 @@
 
 It is an installable web app (PWA) for Chrome on a computer, hosted on GitHub Pages. Everything runs in the browser. Maps are saved in the browser on your computer and nowhere else.
 
-## What is in it (Stage 1, Stage 2a and Stage 2b)
+## What is in it (Stages 1 and 2)
 
 | Area | What it does |
 | --- | --- |
@@ -16,10 +16,11 @@ It is an installable web app (PWA) for Chrome on a computer, hosted on GitHub Pa
 | Setups and runs | A setup keeps its own copy of the map. Build it, **Save setup**, press Play; **Save run…** keeps a moment of a run as a saved run. |
 | People | Get hungry and tired. They gather berries and fish (which run out and grow back), carry and eat food, and sleep where they stand. Starving takes health; at none they die. Inspect shows their needs and what they are doing; **Edit** changes health, food, rest, sex and age. |
 | Imperatives | Orders to people: Move, Gather food, Rest, Stop. Choose people (click one, or drag a box) then the order, or the order then the people. |
+| Life cycle | People age (children are drawn smaller, elders grey-haired) and can die of old age. Adults pair up, pairs have children, and children stay near their mother. Inspect shows the pair, parents and children. **Rules** (Main tab) turns pairing, births and aging off together, which freezes the population. |
 | Moving around | Wheel zooms toward the pointer. Right or middle drag moves the map; so do WASD and the arrow keys. **+** and **−** zoom; the corner button shows the whole map. |
 | Map files | The download button on a map saves it as one file (`<name>.map.json`). **Import map** adds a map from such a file. |
 
-Coming next (Stage 2c): the life cycle (aging, pairing, births, natural death).
+Coming next (Stage 3): settlements, buildings and the economy.
 
 ## Run it on your computer
 
