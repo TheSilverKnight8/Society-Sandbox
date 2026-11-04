@@ -15,5 +15,5 @@
 - Settlements, building work and town fences are in `src/sim/towns.ts`; jobs, workplaces, the store, coins, prices, traders and what settlements build are in `src/sim/economy.ts`; building kinds, sizes, goods, prices and jobs are defined in `src/sim/buildings.ts`.
 - Measure simulation step time and frame rate at 2,000+ people at the end of each step of a stage, and record it in `docs/decisions.md`.
 - The renderer (`src/render/`) reads tiles through `TileSource`; Map mode and the main screen both provide one.
-- Look (Caleb's direction): the environment uses only cream, navy and red and blends of them; objects (trees, deposits, people, buildings) have natural colors; everything has a navy outline (`src/render/style.ts`).
+- Look (Caleb's direction): each biome has its natural color and objects (trees, deposits, people, buildings) have natural colors, all drawn in the same flat style with a navy outline on everything (`src/render/style.ts`). Cream, navy and red are the interface's colors.
 - `npm run typecheck` and `npm run build` must pass.

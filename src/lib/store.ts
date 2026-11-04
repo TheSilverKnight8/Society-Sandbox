@@ -1,11 +1,12 @@
 import { useSyncExternalStore } from 'react';
-import { deleteMapData, listMaps, listWorlds, readMap, storageMessage, writeMap } from './db';
+import { deleteMapData, listMaps, listWorlds, readMap, readWorld, storageMessage, writeMap, writeMapMeta, writeWorldMeta } from './db';
 import { newId } from './ids';
 import { FORMAT_VERSION, download, fileName, fromFile, toFile, upgrade } from '../map/format';
 import { blankTiles, generateTiles } from '../map/generate';
-import { makeThumbnail } from '../map/thumbnail';
+import { PICTURE_STYLE, makeThumbnail } from '../map/thumbnail';
 import { metaOf, type GenSettings, type MapData, type MapMeta } from '../map/types';
 import type { WorldDoc, WorldMeta } from '../world/types';
+import { upgradeWorld } from '../world/format';
 
 export interface SaveStatus {
   state: 'saved' | 'saving' | 'error';
@@ -108,6 +109,45 @@ export async function initApp() {
     return;
   }
   void refreshStorage();
+  void redrawOldPictures();
+}
+
+/**
+ * Redraws, once, the Home pictures of maps, setups and runs that were drawn in an older
+ * style (after the map's colors changed). Only the list entry is saved again; the map,
+ * setup or run itself is not touched. A picture that cannot be redrawn is left as it is.
+ */
+async function redrawOldPictures() {
+  for (const m of state.maps) {
+    if (m.pictureStyle === PICTURE_STYLE) continue;
+    try {
+      const stored = await readMap(m.id);
+      if (!stored) continue;
+      const map = upgrade(stored.version, stored.map);
+      const now = state.maps.find((x) => x.id === m.id);
+      if (!now || now.pictureStyle === PICTURE_STYLE) continue;
+      const meta: MapMeta = { ...now, thumbnail: makeThumbnail(map, map.size), pictureStyle: PICTURE_STYLE };
+      await writeMapMeta(meta);
+      setMapMeta(meta);
+    } catch {
+      // Leave this picture as it is.
+    }
+  }
+  for (const w of state.worlds) {
+    if (w.pictureStyle === PICTURE_STYLE) continue;
+    try {
+      const stored = await readWorld(w.id);
+      if (!stored) continue;
+      const doc = upgradeWorld(stored.version, stored.doc);
+      const now = state.worlds.find((x) => x.id === w.id);
+      if (!now || now.pictureStyle === PICTURE_STYLE) continue;
+      const meta: WorldMeta = { ...now, thumbnail: makeThumbnail(doc, doc.size), pictureStyle: PICTURE_STYLE };
+      await writeWorldMeta(meta);
+      set({ worlds: state.worlds.map((x) => (x.id === meta.id ? meta : x)) });
+    } catch {
+      // Leave this picture as it is.
+    }
+  }
 }
 
 /**
@@ -142,7 +182,7 @@ export async function createMap(opts: { name: string; size: number; gen: GenSett
     createdAt: now,
     updatedAt: now,
   };
-  const meta = metaOf(map, makeThumbnail(tiles, map.size));
+  const meta = metaOf(map, makeThumbnail(tiles, map.size), PICTURE_STYLE);
   try {
     await writeMap(meta, { id: map.id, version: FORMAT_VERSION, map });
   } catch (e) {
@@ -186,7 +226,7 @@ export async function importMap(file: File): Promise<Result<MapMeta>> {
   } catch (e) {
     return { ok: false, reason: (e as Error).message };
   }
-  const meta = metaOf(map, makeThumbnail(map, map.size));
+  const meta = metaOf(map, makeThumbnail(map, map.size), PICTURE_STYLE);
   try {
     await writeMap(meta, { id: map.id, version: FORMAT_VERSION, map });
   } catch (e) {
@@ -297,7 +337,7 @@ export async function flushSaves(): Promise<void> {
   pendingMap = null;
   saving = (async () => {
     try {
-      const meta = metaOf(map, makeThumbnail(map, map.size));
+      const meta = metaOf(map, makeThumbnail(map, map.size), PICTURE_STYLE);
       await writeMap(meta, { id: map.id, version: FORMAT_VERSION, map });
       setMapMeta(meta);
       if (!pendingMap) set({ save: { state: 'saved' } });

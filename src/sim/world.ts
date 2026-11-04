@@ -55,6 +55,8 @@ const CARRY_MAX = 3;
 const REST_DECAY = 0.08;
 const REST_GAIN = 0.6;
 const TIRED = 25;
+/** Below this much food, finding food comes before sleep. */
+const STARVING = 15;
 const RESTED = 95;
 /** Health lost per step with no food at all: from full to dead in about 25 seconds at 1x. */
 const STARVE = 0.4;
@@ -81,7 +83,7 @@ const PAIR_CHANCE = 0.35;
 const FERTILE_MIN = 16;
 const FERTILE_MAX = 45;
 /** Chance each month that a fed, healthy, paired woman with her pair nearby becomes pregnant. */
-const CONCEIVE_CHANCE = 0.03;
+const CONCEIVE_CHANCE = 0.04;
 const PREGNANCY = 9 * TICKS_PER_MONTH;
 /** At least this long between births. */
 const BIRTH_GAP = 18 * TICKS_PER_MONTH;
@@ -302,7 +304,9 @@ export class World {
       p.health > 60
     ) {
       const partner = this.byId.get(p.pair);
-      if (partner && this.near(p, partner, 8) && this.rand.next() < CONCEIVE_CHANCE) {
+      // Together: near each other, or sharing a home (pairs with jobs are often apart by day).
+      const together = partner && (this.near(p, partner, 8) || (p.home !== undefined && p.home === partner.home));
+      if (partner && together && this.rand.next() < CONCEIVE_CHANCE) {
         p.pregnant = PREGNANCY;
         p.childFather = partner.id;
       }
@@ -447,7 +451,8 @@ export class World {
 
     switch (p.task) {
       case 'sleep':
-        if (p.rest >= RESTED) {
+        // Hunger wakes a sleeper once they have had some rest.
+        if (p.rest >= RESTED || (p.food <= 0 && (p.carry > 0 || p.rest >= 40) && p.order?.kind !== 'rest')) {
           p.task = 'idle';
           delete p.indoors;
           p.wait = 5 + this.rand.int(15);
@@ -478,7 +483,11 @@ export class World {
         }
         return;
       case 'idle':
-        if (p.wait === Infinity) return; // waiting for a path
+        if (p.wait === Infinity) {
+          // Waiting for a path: someone hungry with food in hand eats meanwhile (the search is then dropped).
+          if (p.food < HUNGRY && p.carry > 0) this.eat(p);
+          return;
+        }
         if (--p.wait <= 0) this.decide(p);
         return;
       default:
@@ -504,7 +513,11 @@ export class World {
       }
     }
     if (p.settleAt !== undefined) return this.goTo(p, p.settleAt, 'settle');
-    if (p.rest < TIRED) {
+    // Someone hungry with food in hand eats before anything else; someone starving looks for food
+    // before lying down, unless they cannot stay awake.
+    if (p.food < HUNGRY && p.carry > 0) return this.eat(p);
+    const starving = p.food < STARVING && p.rest > 5;
+    if (p.rest < TIRED && !starving) {
       const bed = this.towns.bed(p);
       if (bed >= 0 && bed !== this.tileOf(p)) return this.goTo(p, bed, 'home');
       this.sleep(p);
@@ -585,6 +598,11 @@ export class World {
   }
 
   goTo(p: Person, goal: number, purpose: Person['purpose'], far = false) {
+    // A goal that cannot be walked on (a fence, deep water): stand beside it instead.
+    if (!this.finder.walkable(goal)) {
+      const a = this.approach(goal);
+      if (a >= 0) goal = a;
+    }
     p.purpose = purpose;
     p.wait = Infinity; // until the path search answers
     const req = ++this.reqCounter;

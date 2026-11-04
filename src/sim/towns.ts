@@ -270,7 +270,7 @@ export class Towns {
       const i = tiles[this.treeCursor];
       this.treeCursor = (this.treeCursor + 1) % tiles.length;
       const [x, y] = this.tileXY(i);
-      if (this.trees[i] < maxTrees(x, y) && !this.bByTile.has(i) && this.w.rand.next() < TREE_REGROW) this.setTrees(i, this.trees[i] + 1);
+      if (this.trees[i] < maxTrees(x, y) && !this.bByTile.has(i) && this.walls[i] === Wall.None && this.w.rand.next() < TREE_REGROW) this.setTrees(i, this.trees[i] + 1);
     }
   }
 

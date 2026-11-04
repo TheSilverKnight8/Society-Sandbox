@@ -1,12 +1,15 @@
 import { GROUND_RGB } from '../render/style';
 import type { Tiles } from './generate';
 
+/** How Home's pictures are drawn. Pictures made in an older style are redrawn once when the app starts. */
+export const PICTURE_STYLE = 2;
+
 /** The same ground colors as the map view. */
 const TOPS = GROUND_RGB;
 
 /**
  * A small picture of a map for Home: each tile's ground color, with slopes facing away
- * from the light shaded toward navy, turned into the same diamond the map view uses.
+ * from the light darker, turned into the same diamond the map view uses.
  */
 export function makeThumbnail(tiles: Tiles, size: number, width = 480): string {
   const flat = document.createElement('canvas');
@@ -20,12 +23,12 @@ export function makeThumbnail(tiles: Tiles, size: number, width = 480): string {
       const i = y * size + x;
       const c = TOPS[terrain[i]] ?? TOPS[0];
       const back = x > 0 && y > 0 ? elevation[i - size - 1] : elevation[i];
-      // Slopes facing away from the light are shaded toward navy.
-      const k = Math.max(0, Math.min(0.2, (back - elevation[i]) * 0.07));
+      // Slopes facing away from the light are darker, as cliff sides are in the map view.
+      const k = 1 - Math.max(0, Math.min(0.3, (back - elevation[i]) * 0.1));
       const o = i * 4;
-      img.data[o] = c[0] + (0 - c[0]) * k;
-      img.data[o + 1] = c[1] + (38 - c[1]) * k;
-      img.data[o + 2] = c[2] + (87 - c[2]) * k;
+      img.data[o] = c[0] * k;
+      img.data[o + 1] = c[1] * k;
+      img.data[o + 2] = c[2] * k;
       img.data[o + 3] = 255;
     }
   }

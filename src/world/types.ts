@@ -36,9 +36,11 @@ export interface WorldMeta {
   createdAt: string;
   updatedAt: string;
   thumbnail?: string;
+  /** Which style the picture was drawn in (see PICTURE_STYLE in map/thumbnail.ts); none for the first style. */
+  pictureStyle?: number;
 }
 
-export function worldMetaOf(doc: WorldDoc, thumbnail?: string): WorldMeta {
+export function worldMetaOf(doc: WorldDoc, thumbnail?: string, pictureStyle?: number): WorldMeta {
   return {
     id: doc.id,
     name: doc.name,
@@ -52,5 +54,6 @@ export function worldMetaOf(doc: WorldDoc, thumbnail?: string): WorldMeta {
     createdAt: doc.createdAt,
     updatedAt: doc.updatedAt,
     thumbnail,
+    pictureStyle,
   };
 }

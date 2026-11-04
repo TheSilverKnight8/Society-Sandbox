@@ -23,7 +23,8 @@ import type { World } from './world';
 const LIGHT_JOB_AGE = 8;
 /** How much growth one adult's step of tending gives a field (a child's gives half). About 2.5 harvests a year with two farmers. */
 const TEND_GROWTH = 1 / 180;
-const TEND_STEPS = 80;
+/** How long a farmer stays in the field each time (they leave early when the field is ripe, or when very hungry or tired). */
+const TEND_STEPS = 200;
 const HARVEST_STEPS = 50;
 const HARVEST_YIELD = 10;
 /** Months a field grows in: March to November. */
@@ -490,6 +491,12 @@ export class Economy {
     if (!best) return false;
     hs[best.g] -= best.n;
     p.load = { kind: best.g, n: best.n };
+    // Provisions for the road, from the store.
+    const food = Math.min(3 - p.carry, Math.floor(hs.food));
+    if (food > 0) {
+      hs.food -= food;
+      p.carry += food;
+    }
     p.tradeTo = best.dest.id;
     // What the trader owes home for the goods, paid when they come back.
     p.tradeOwed = best.n * this.price(home, best.g);
@@ -545,7 +552,8 @@ export class Economy {
         p.task = 'harvest';
         p.wait = this.steps(p, HARVEST_STEPS);
       } else if (step === 'collect') {
-        const n = Math.min(LOAD_TARGET.food, b.output ?? 0);
+        // A farmer carries a whole harvest's sheaves at once.
+        const n = Math.min(HARVEST_YIELD, b.output ?? 0);
         if (n > 0) {
           b.output = (b.output ?? 0) - n;
           p.load = { kind: 'food', n };
@@ -719,7 +727,7 @@ export class Economy {
         if (this.cropLook(b) !== before) this.t.buildingsChanged = true;
       }
       // Very hungry or tired: stop and see to it.
-      if (--p.wait <= 0 || (b.growth ?? 0) >= 1 || p.food < 30 || p.rest < 15) {
+      if (--p.wait <= 0 || (b.growth ?? 0) >= 1 || p.food < 20 || p.rest < 10) {
         this.wear(p);
         return this.done(p);
       }
@@ -814,10 +822,11 @@ export class Economy {
     const count = (k: BuildingKind) => mine.filter((b) => b.kind === k).length;
     const farms = count(BuildingKind.Farm);
     const fishing = count(BuildingKind.FishingHut);
-    const fed = farms * 16 + fishing * 10;
+    // What its farms and fishing huts feed, reckoned low (farmers also build, and nothing grows in winter), with a margin.
+    const fed = farms * 12 + fishing * 8;
     const st = this.stockOf(s);
     const food = st.food;
-    const wantFood = fed < people && food < people * 2;
+    const wantFood = (fed < people * 1.2 && food < people * 2) || food < people;
     const center = s.center;
     const near = (list: number[], r: number) => list.some((t) => this.w.stock[t] > 0 && this.t.dist2(t, center) <= r * r);
     const fishNear = near(this.fishTiles, 26);

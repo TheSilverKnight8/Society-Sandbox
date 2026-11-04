@@ -42,6 +42,8 @@ export interface MapMeta {
   updatedAt: string;
   /** A small picture of the map (PNG data URL). */
   thumbnail?: string;
+  /** Which style the picture was drawn in (see PICTURE_STYLE in map/thumbnail.ts); none for the first style. */
+  pictureStyle?: number;
 }
 
 /** Sizes offered when making a map. WorldBox's "Titanic" world is 512 x 512 tiles (SPEC 2 compares the scale to it). */
@@ -64,6 +66,6 @@ export const DEFAULT_GEN: Omit<GenSettings, 'seed'> = {
   resources: 0.5,
 };
 
-export function metaOf(map: MapData, thumbnail?: string): MapMeta {
-  return { id: map.id, name: map.name, size: map.size, createdAt: map.createdAt, updatedAt: map.updatedAt, thumbnail };
+export function metaOf(map: MapData, thumbnail?: string, pictureStyle?: number): MapMeta {
+  return { id: map.id, name: map.name, size: map.size, createdAt: map.createdAt, updatedAt: map.updatedAt, thumbnail, pictureStyle };
 }

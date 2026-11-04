@@ -11,10 +11,10 @@ import { biomeDetail, biomeSparse, deposit as drawDepositMark, fence } from './s
 // view picks the level nearest above the current zoom and scales it down slightly.
 // Pictures are dropped least recently used first when they pass a memory budget.
 //
-// The look follows Stickman Arena: each biome's ground is a shade of the cream, water is
-// navy, everything has navy outlines with round ends, and a few drawings sit on the
-// tiles (navy line art for the environment, natural colors for objects such as trees).
-// Zoomed far out, one larger drawing stands for a patch of tiles.
+// The look: each biome's ground has its natural color, cliff sides are that color shaded,
+// everything has navy outlines with round ends, and a few drawings sit on the tiles in the
+// same flat, outlined style as the trees, people and buildings. The map's outer edge is a
+// navy slab. Zoomed far out, one larger drawing stands for a patch of tiles.
 
 export const LEVELS = [4, 8, 16, 32, 64, 128] as const;
 
@@ -280,7 +280,7 @@ function drawChunkTiles(ctx: CanvasRenderingContext2D, src: TileSource, cx: numb
         ctx.fill();
       }
 
-      // Top face: each biome's own shade of cream; navy water.
+      // Top face: the biome's natural color.
       ctx.fillStyle = GROUND[t];
       ctx.beginPath();
       ctx.moveTo(X, Y - e);

@@ -2,7 +2,7 @@ import { deleteWorldData, readMap, readWorld, storageMessage, writeWorld } from 
 import { newId } from './ids';
 import { getState, lockName, patchState, refreshStorage, type Result } from './store';
 import { upgrade } from '../map/format';
-import { makeThumbnail } from '../map/thumbnail';
+import { PICTURE_STYLE, makeThumbnail } from '../map/thumbnail';
 import { emptyState, type SimState } from '../sim/types';
 import { WORLD_FORMAT_VERSION, upgradeWorld } from '../world/format';
 import { worldMetaOf, type WorldDoc, type WorldMeta } from '../world/types';
@@ -36,7 +36,7 @@ export async function createSetup(name: string, mapId: string): Promise<Result<s
       createdAt: now,
       updatedAt: now,
     };
-    const meta = worldMetaOf(doc, makeThumbnail(doc, doc.size));
+    const meta = worldMetaOf(doc, makeThumbnail(doc, doc.size), PICTURE_STYLE);
     await writeWorld(meta, { id: doc.id, version: WORLD_FORMAT_VERSION, doc });
     setWorldMeta(meta);
     void refreshStorage();
@@ -109,11 +109,17 @@ export function setWorldUnsaved(v: boolean) {
   if (getState().worldUnsaved !== v) patchState({ worldUnsaved: v });
 }
 
+/** A world's Home picture: the one it has if it is in the current style (the land never changes in a run), else a new one. */
+function pictureFor(id: string, doc: WorldDoc): string {
+  const old = getState().worlds.find((w) => w.id === id);
+  return old?.thumbnail && old.pictureStyle === PICTURE_STYLE ? old.thumbnail : makeThumbnail(doc, doc.size);
+}
+
 /** Saves the open world's current state over its stored copy (a setup's starting state, or a saved run). */
 export async function saveWorld(doc: WorldDoc, state: SimState, deposit: Uint8Array): Promise<Result<WorldDoc>> {
   const next: WorldDoc = { ...doc, state, deposit, updatedAt: new Date().toISOString() };
   try {
-    const meta = worldMetaOf(next, getState().worlds.find((w) => w.id === doc.id)?.thumbnail ?? makeThumbnail(next, next.size));
+    const meta = worldMetaOf(next, pictureFor(doc.id, next), PICTURE_STYLE);
     await writeWorld(meta, { id: next.id, version: WORLD_FORMAT_VERSION, doc: next });
     setWorldMeta(meta);
     patchState({ world: { kind: 'ready', doc: next }, worldUnsaved: false });
@@ -140,7 +146,7 @@ export async function saveRunAs(from: WorldDoc, name: string, state: SimState, d
     updatedAt: now,
   };
   try {
-    const meta = worldMetaOf(doc, getState().worlds.find((w) => w.id === from.id)?.thumbnail ?? makeThumbnail(doc, doc.size));
+    const meta = worldMetaOf(doc, pictureFor(from.id, doc), PICTURE_STYLE);
     const r = await lockName(`world:${doc.id}`);
     await writeWorld(meta, { id: doc.id, version: WORLD_FORMAT_VERSION, doc });
     setWorldMeta(meta);

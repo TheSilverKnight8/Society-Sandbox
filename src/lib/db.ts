@@ -70,6 +70,22 @@ export async function readMap(id: string): Promise<StoredMap | undefined> {
   return result(db.transaction('mapData').objectStore('mapData').get(id) as IDBRequest<StoredMap | undefined>);
 }
 
+/** Saves only a map's list entry (for example a redrawn picture). */
+export async function writeMapMeta(meta: MapMeta): Promise<void> {
+  const db = await open();
+  const tx = db.transaction('maps', 'readwrite');
+  tx.objectStore('maps').put(meta);
+  return finished(tx);
+}
+
+/** Saves only a world's list entry (for example a redrawn picture). */
+export async function writeWorldMeta(meta: WorldMeta): Promise<void> {
+  const db = await open();
+  const tx = db.transaction('worlds', 'readwrite');
+  tx.objectStore('worlds').put(meta);
+  return finished(tx);
+}
+
 /** Saves a map's list entry and its data together, so they never disagree. */
 export async function writeMap(meta: MapMeta, stored: StoredMap): Promise<void> {
   const db = await open();

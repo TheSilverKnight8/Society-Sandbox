@@ -1,11 +1,11 @@
 import { hash2 } from '../lib/rng';
 import { Deposit, Terrain } from '../map/terrain';
-import { CREAM, NAVY, OBJ, SHADE } from './style';
+import { CREAM, LAND, NAVY, OBJ } from './style';
 
 // Drawings on the tiles, in the stick figures' style: navy outlines with round ends.
-// The environment's marks (grass, hills, peaks, dunes, reeds, waves) are navy line art on
-// cream; objects the simulation will act on (trees, deposits) have natural colors inside
-// their navy outline. All sizes are in tile widths; `s` scales a drawing up when it stands
+// Everything has its natural color inside a navy outline: hills, grey peaks with snow caps,
+// reeds, trees, deposits. Small line marks (grass tufts, dunes, sand) are drawn in navy,
+// like the outlines. All sizes are in tile widths; `s` scales a drawing up when it stands
 // for several tiles at once (zoomed far out).
 
 type Ctx = CanvasRenderingContext2D;
@@ -84,7 +84,7 @@ export function hill(ctx: Ctx, px: number, py: number, s: number) {
     ctx.closePath();
   };
   dome();
-  ctx.fillStyle = CREAM;
+  ctx.fillStyle = LAND.hill;
   ctx.fill();
   // Shade the right part: clip to the dome and fill from a line just right of the top.
   ctx.save();
@@ -96,7 +96,7 @@ export function hill(ctx: Ctx, px: number, py: number, s: number) {
   ctx.lineTo(px + w * 1.1, py + 0.01);
   ctx.lineTo(px + w * 0.3, py + 0.01);
   ctx.closePath();
-  ctx.fillStyle = SHADE;
+  ctx.fillStyle = LAND.hillShade;
   ctx.fill();
   ctx.restore();
   dome();
@@ -104,7 +104,7 @@ export function hill(ctx: Ctx, px: number, py: number, s: number) {
   ctx.stroke();
 }
 
-/** A mountain peak, its right side shaded. Snowy peaks are taller, with a snow line and a cream cap. */
+/** A mountain peak of grey rock, its right side shaded. Snowy peaks are taller, with a white cap above a jagged snow line. */
 export function peak(ctx: Ctx, px: number, py: number, s: number, snow: boolean) {
   const w = 0.24 * s;
   const h = (snow ? 0.5 : 0.42) * s;
@@ -116,27 +116,49 @@ export function peak(ctx: Ctx, px: number, py: number, s: number, snow: boolean)
   ctx.lineTo(tx, ty);
   ctx.lineTo(px + w, py);
   ctx.closePath();
-  ctx.fillStyle = CREAM;
+  ctx.fillStyle = LAND.rock;
   ctx.fill();
   ctx.beginPath();
   ctx.moveTo(tx, ty);
   ctx.lineTo(px + w, py);
   ctx.lineTo(mx, py);
   ctx.closePath();
-  ctx.fillStyle = SHADE;
+  ctx.fillStyle = LAND.rockShade;
   ctx.fill();
   const k = 0.42;
   const lx = tx + (px - w - tx) * k;
   const rx = tx + (px + w - tx) * k;
   const sy = ty + h * k;
+  // The jagged snow line, left to right.
+  const line: [number, number][] = [
+    [lx, sy],
+    [lx + (rx - lx) * 0.25, sy - h * 0.08],
+    [lx + (rx - lx) * 0.5, sy + h * 0.02],
+    [lx + (rx - lx) * 0.75, sy - h * 0.08],
+    [rx, sy],
+  ];
   if (snow) {
+    // The cap: white on the lit side, a cool shade on the dark side.
     ctx.beginPath();
     ctx.moveTo(tx, ty);
-    ctx.lineTo(rx, sy);
-    ctx.lineTo(tx + (mx - tx) * k, sy);
+    for (const [x, y] of line) ctx.lineTo(x, y);
     ctx.closePath();
-    ctx.fillStyle = CREAM;
+    ctx.fillStyle = LAND.snow;
     ctx.fill();
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(tx, ty);
+    ctx.lineTo(px + w, py);
+    ctx.lineTo(mx, py);
+    ctx.closePath();
+    ctx.clip();
+    ctx.beginPath();
+    ctx.moveTo(tx, ty);
+    for (const [x, y] of line) ctx.lineTo(x, y);
+    ctx.closePath();
+    ctx.fillStyle = LAND.snowShade;
+    ctx.fill();
+    ctx.restore();
   }
   ctx.beginPath();
   ctx.moveTo(px - w, py);
@@ -145,11 +167,8 @@ export function peak(ctx: Ctx, px: number, py: number, s: number, snow: boolean)
   stroke(ctx);
   if (snow) {
     ctx.beginPath();
-    ctx.moveTo(lx, sy);
-    ctx.lineTo(lx + (rx - lx) * 0.25, sy - h * 0.08);
-    ctx.lineTo(lx + (rx - lx) * 0.5, sy + h * 0.02);
-    ctx.lineTo(lx + (rx - lx) * 0.75, sy - h * 0.08);
-    ctx.lineTo(rx, sy);
+    ctx.moveTo(line[0][0], line[0][1]);
+    for (const [x, y] of line.slice(1)) ctx.lineTo(x, y);
     stroke(ctx);
   }
 }
@@ -179,34 +198,35 @@ export function sandDots(ctx: Ctx, px: number, py: number, s: number, lw: number
   }
 }
 
-/** Reeds standing in still water. */
+/** Reeds standing in still water: green stems with brown heads, outlined in navy. */
 export function reeds(ctx: Ctx, px: number, py: number, s: number) {
   ctx.beginPath();
   ctx.moveTo(px - 0.17 * s, py + 0.04 * s);
   ctx.lineTo(px - 0.04 * s, py + 0.04 * s);
   ctx.moveTo(px + 0.06 * s, py + 0.07 * s);
   ctx.lineTo(px + 0.18 * s, py + 0.07 * s);
+  stroke(ctx);
+  ctx.beginPath();
   for (const dx of [-0.05, 0.01, 0.07]) {
     ctx.moveTo(px + dx * s, py + 0.02 * s);
     ctx.lineTo(px + dx * s + 0.01 * s, py - 0.14 * s);
   }
-  stroke(ctx);
-  ctx.fillStyle = NAVY;
+  limb(ctx, LAND.reed);
   for (const dx of [-0.05, 0.07]) {
     ctx.beginPath();
-    ctx.ellipse(px + dx * s + 0.01 * s, py - 0.13 * s, 0.014 * s, 0.035 * s, 0, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.ellipse(px + dx * s + 0.01 * s, py - 0.13 * s, 0.016 * s, 0.038 * s, 0, 0, Math.PI * 2);
+    fillStroke(ctx, LAND.cattail);
   }
 }
 
-/** A small wave on water, in cream. */
+/** A small wave on water: white foam. */
 export function wave(ctx: Ctx, px: number, py: number, s: number, alpha: number) {
   ctx.globalAlpha = alpha;
   ctx.beginPath();
   ctx.moveTo(px - 0.12 * s, py);
   ctx.quadraticCurveTo(px - 0.06 * s, py - 0.05 * s, px, py);
   ctx.quadraticCurveTo(px + 0.06 * s, py + 0.05 * s, px + 0.12 * s, py);
-  stroke(ctx, CREAM);
+  stroke(ctx, LAND.foam);
   ctx.globalAlpha = 1;
 }
 
