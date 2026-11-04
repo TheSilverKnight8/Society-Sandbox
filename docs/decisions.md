@@ -216,17 +216,19 @@ A step has 33 ms at 3x, so there is plenty of room for now. People only walk in 
 | Stages | Camp, village, town, city. A village needs 10 people and 3 homes, a town 60 people and 12 homes, a city 200 and 40. In 3a only villages are reached in practice; towns and cities come into their own in 3c. |
 | Land | Grows each month to 3 tiles plus the square root of its people plus one per three buildings (at most 14), taking only land nobody holds. Shown as a light red tint with a dashed navy border. Unowned buildings on newly claimed land become the settlement's. |
 | What gets built | Each month a settlement starts homes when it has more homeless than planned beds (huts while a camp, houses once a village if there is stone within 40 tiles), a storehouse once a village, and anything it has been ordered to build, first. A camp works on one site at a time, a village on two (one more with the housing focus, one more while orders wait). |
-| Buildings | Campfire (the middle; not built); hut (6 wood; 4 beds); house (8 wood, 4 stone; 6 beds; villages); storehouse (10 wood, 6 stone; villages; it stores goods from 3b on). Building work takes from about 12 to 26 seconds at 1x for one builder; up to 4 build at once. |
+| Buildings | Campfire (the middle; 1 tile; not built); hut (2 by 2 tiles; 9 wood; 4 beds); house (2 by 3; 12 wood, 6 stone; 6 beds; villages); storehouse (3 by 3; 15 wood, 9 stone; villages; it stores goods from 3b on). Building work takes from about 16 to 34 seconds at 1x for one builder; up to 4 build at once. |
+| Size (Caleb's direction after 3a: bigger and more realistic, "like how WorldBox buildings are 2x3 or similar") | Buildings cover several tiles, with walls taller than a person (a house's walls are about 1.4 times a person's height, with a roof as tall again). Huts have woven wattle walls and a tall pointed thatch roof; houses are timber-framed plaster with a thatch gable roof, a chimney, shuttered windows and a door; the storehouse is a plank barn with a shingle roof and big double doors. A house or other long building can be turned (R while placing or ordering it). Ground under a building may be at most one level uneven; it then stands on a stone base. Terrain drawings (grass, hills, deposits) are left off the tiles under a building. |
+| Where settlements build | A free spot on their own land as near the middle as possible, with a one-tile lane kept clear around every building so people can walk between them. Land grows faster than before to make room (4 tiles plus 1.3 times the square root of its people plus one per two buildings, at most 22).
 | Building work (SPEC 8) | Settled adults with their needs met take building work (three times in four when free): cut a tree (wood 3, about 4 seconds) or break stone (stone 2, about 5 seconds), carry it to the site, and once the materials are all there, put the building up. Cut trees leave stumps and grow back slowly (about one tree per forest tile every two years); a stone deposit holds 20 and does not come back. Builders go up to 60 tiles for wood and 40 for stone. |
 | Homes and shelter (SPEC 6) | A finished home takes in a homeless family (a pair and their children) or a single adult. People sleep at home when it is within 40 tiles, and are not drawn while inside. Sleeping at home rests fully; sleeping out in the open rests at 60% of the speed. Newborns live in their mother's settlement and home. |
 | The rule (SPEC 10) | "Settlement founding by units" in Rules. Off: nobody founds a settlement by themselves; people still join settlements, and campfires and settlers still work. |
-| Saving | Settlements, buildings, land, trees standing and stone left are saved (world format version 4). Older setups and runs open with no settlements, every tree standing and every stone deposit full. |
+| Saving | Settlements, buildings, land, trees standing and stone left are saved (world format version 4; version 5 adds which way a building is turned). Older setups and runs open with no settlements, every tree standing and every stone deposit full. Buildings saved before buildings grew keep their corner tile and take their new size from there. |
 
 ## Settlement imperatives (Stage 3a)
 
 | Order | What it does |
 | --- | --- |
-| Build (a hut, house or storehouse) | Click a settlement, then where: on its land, or just beside it (it claims the spot). It goes first in what the settlement builds. |
+| Build (a hut, house or storehouse) | Click a settlement, then where (the building's middle; R turns it): on its land, or on unclaimed land beside it (it claims the spot). It goes first in what the settlement builds. |
 | Focus | Balanced, food, housing or goods. In 3a housing lets it build one more home at a time and goods brings the storehouse forward; food and goods do more once jobs and workshops exist (3b, 3c). |
 | Send settlers | About a quarter of its people (whole families) leave and walk to the spot clicked, where the first to arrive founds a new settlement and the rest join it. |
 | Abandon | Asks first. Its people leave, its land is given up, its campfire and unfinished buildings go, and its finished buildings stand empty for anyone to take over. |
@@ -263,7 +265,7 @@ The life cycle adds a monthly check per person and a grid of people rebuilt ever
 
 ## Performance (Stage 3a)
 
-2,000 people placed in 40 groups across a Titanic map founded about 90 settlements in the first year; by year 6 there were 2,360 people, 66 villages, 590 buildings and 1,700 people housed. Simulation step: 2 to 2.7 ms on average, at most 9 ms (Node, same code as the worker). In headless Chrome at 3x, with all of that on screen: 57 frames a second for the whole map and 56 at mid zoom.
+2,000 people placed in 40 groups across a Titanic map founded about 90 settlements in the first year; by year 6 there were 2,360 people, 66 villages, 590 buildings and 1,700 people housed. Simulation step: 2 to 2.7 ms on average, at most 9 ms (Node, same code as the worker). In headless Chrome at 3x, with all of that on screen: 57 frames a second for the whole map and 56 at mid zoom. With the bigger buildings: 2 to 4 ms a step (at most 14 ms in the first busy year) and 51 to 57 frames a second.
 
 ## Look
 

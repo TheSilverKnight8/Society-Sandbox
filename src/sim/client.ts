@@ -107,8 +107,8 @@ export class SimClient {
     return out;
   }
 
-  placeBuilding(kind: BuildingKind, tile: number) {
-    this.send({ type: 'placeBuilding', kind, tile });
+  placeBuilding(kind: BuildingKind, tile: number, rot: 0 | 1) {
+    this.send({ type: 'placeBuilding', kind, tile, rot });
   }
 
   removeBuildings(tiles: number[]) {

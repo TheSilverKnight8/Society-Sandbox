@@ -10,7 +10,7 @@ import { SimClient } from '../sim/client';
 import { CLOTHES, SKINS, unpackLook } from '../sim/look';
 import { ADULT_AGE, DEFAULT_TOGGLES, ELDER_AGE, MONTHS_PER_YEAR, TICKS_PER_MONTH, TICKS_PER_YEAR, type PersonDetails, type PersonEdit, type Speed, type Toggles } from '../sim/types';
 import { Deposit, Terrain } from '../map/terrain';
-import { BUILDINGS, BuildingKind, STAGE_NAME } from '../sim/buildings';
+import { BUILDINGS, BuildingKind, STAGE_NAME, anchorFor, footprint } from '../sim/buildings';
 import { maxTrees } from '../sim/towns';
 import { TileField, type BuildingView, type Focus, type SettlementDetails, type SettlementView } from '../sim/types';
 import { STEP } from '../render/iso';
@@ -105,6 +105,8 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
   const unsaved = useApp((s) => s.worldUnsaved);
   const [tab, setTab] = useState<Tab>('main');
   const [tool, setTool] = useState<UnitTool>('person');
+  /** Which way round a building being placed or ordered goes (R turns it). */
+  const [rot, setRot] = useState<0 | 1>(0);
   const [radius, setRadius] = useState(2);
   const [speed, setSpeedState] = useState<Speed>(0);
   const [tick, setTick] = useState(doc.state.tick);
@@ -126,6 +128,7 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
   const empty = useRef(emptyFlags(doc));
   const trees = useRef(treeCounts(doc));
   const territory = useRef(territoryOf(doc));
+  const covered = useRef(new Uint8Array(doc.size * doc.size));
   const buildingsRef = useRef<BuildingView[]>([]);
   const buildingAt = useRef(new Map<number, BuildingView>());
   const settlementsRef = useRef<SettlementView[]>([]);
@@ -137,8 +140,8 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
   const [pendingS, setPendingS] = useState<PendingSettlement>(null);
 
   const selectedSet = useRef<Set<number>>(new Set());
-  const live = useRef({ tab, tool, radius, pending, selection, pendingS, chosenSettlement });
-  live.current = { tab, tool, radius, pending, selection, pendingS, chosenSettlement };
+  const live = useRef({ tab, tool, radius, pending, selection, pendingS, chosenSettlement, rot });
+  live.current = { tab, tool, radius, pending, selection, pendingS, chosenSettlement, rot };
   /** The box being dragged out to choose people, in screen pixels. */
   const box = useRef<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const atStart = tick === savedTick;
@@ -185,7 +188,7 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
     if (!client) return;
     const name = settlementsRef.current.find((x) => x.id === id)?.name ?? 'The settlement';
     if (ps.kind === 'build' && ps.building !== undefined && tile !== undefined) {
-      client.settlementOrder(id, { kind: 'build', building: ps.building, tile });
+      client.settlementOrder(id, { kind: 'build', building: ps.building, tile, rot: live.current.rot });
       notify(`${name}: build a ${BUILDINGS[ps.building].name.toLowerCase()} there.`);
     } else if (ps.kind === 'focus' && ps.focus) {
       client.settlementOrder(id, { kind: 'focus', focus: ps.focus });
@@ -222,7 +225,7 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
   // Start the simulation and the view once, when the screen opens.
   useEffect(() => {
     const canvas = canvasRef.current!;
-    const view = new IsoView(canvas, { size: doc.size, terrain: doc.terrain, elevation: doc.elevation, deposit: doc.deposit, empty: empty.current, trees: trees.current, territory: territory.current });
+    const view = new IsoView(canvas, { size: doc.size, terrain: doc.terrain, elevation: doc.elevation, deposit: doc.deposit, empty: empty.current, trees: trees.current, territory: territory.current, covered: covered.current });
     const client = new SimClient();
     viewRef.current = view;
     clientRef.current = client;
@@ -253,7 +256,23 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
       }
       if (s.buildings) {
         buildingsRef.current = s.buildings;
-        buildingAt.current = new Map(s.buildings.map((b) => [b.tile, b]));
+        // Every tile a building stands on, so clicking anywhere on it finds it.
+        const at = new Map<number, BuildingView>();
+        for (const b of s.buildings) {
+          const bx = b.tile % doc.size;
+          const by = Math.floor(b.tile / doc.size);
+          for (let y = by; y < by + b.d; y++) for (let x = bx; x < bx + b.w; x++) at.set(y * doc.size + x, b);
+        }
+        buildingAt.current = at;
+        // Tiles newly covered or uncovered are redrawn without (or with) their drawings.
+        const cov = covered.current;
+        for (let t = 0; t < cov.length; t++) {
+          const now = at.has(t) ? 1 : 0;
+          if (cov[t] !== now) {
+            cov[t] = now;
+            stockDirty.add(t);
+          }
+        }
       }
       if (s.settlements) {
         settlementsRef.current = s.settlements;
@@ -298,7 +317,7 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
       } else {
         if (placed.has(i)) return;
         placed.add(i);
-        client.placeBuilding(tool, i);
+        client.placeBuilding(tool, i, live.current.rot);
       }
       setWorldUnsaved(true);
     };
@@ -418,14 +437,41 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
         }
         drawLabels(ctx, v, settlementsRef.current, chosenSettlementRef.current);
         const h = v.hover;
-        const { tab, tool, radius, pending, pendingS } = live.current;
+        const { tab, tool, radius, pending, pendingS, rot } = live.current;
         const showTile = tab === 'imperatives' && (pending?.stage === 'where' || pendingS?.stage === 'where');
         if (!h || (tab !== 'units' && !showTile)) return;
         ctx.beginPath();
-        const r = tab === 'units' && tool === 'remove' ? radius - 0.5 : 0.5;
-        void tool;
-        for (const [x, y] of brushTiles(h.x, h.y, r, doc.size)) v.traceTile(ctx, x, y);
-        ctx.fillStyle = 'rgba(252, 63, 63, 0.18)';
+        // A building's whole footprint, red where it fits and navy where it does not.
+        const placing = tab === 'units' && typeof tool === 'number' ? tool : pendingS?.stage === 'where' && pendingS.kind === 'build' ? pendingS.building : undefined;
+        let fits = true;
+        if (placing !== undefined && placing !== BuildingKind.Campfire) {
+          const { w, d } = footprint(placing, rot);
+          const anchor = anchorFor(placing, rot, h.y * doc.size + h.x, doc.size);
+          const ax = anchor % doc.size;
+          const ay = Math.floor(anchor / doc.size);
+          let lo = Infinity;
+          let hi = -Infinity;
+          for (let y = ay; y < ay + d; y++) {
+            for (let x = ax; x < ax + w; x++) {
+              if (x < 0 || y < 0 || x >= doc.size || y >= doc.size) {
+                fits = false;
+                continue;
+              }
+              const t = y * doc.size + x;
+              v.traceTile(ctx, x, y);
+              const ter = doc.terrain[t];
+              const ok = ter === Terrain.Grassland || ter === Terrain.Sand || ter === Terrain.Desert || ter === Terrain.Hills || (ter === Terrain.Forest && trees.current[t] === 0);
+              if (!ok || buildingAt.current.has(t)) fits = false;
+              lo = Math.min(lo, doc.elevation[t]);
+              hi = Math.max(hi, doc.elevation[t]);
+            }
+          }
+          if (hi - lo > 1) fits = false;
+        } else {
+          const r = tab === 'units' && tool === 'remove' ? radius - 0.5 : 0.5;
+          for (const [x, y] of brushTiles(h.x, h.y, r, doc.size)) v.traceTile(ctx, x, y);
+        }
+        ctx.fillStyle = fits ? 'rgba(252, 63, 63, 0.18)' : 'rgba(0, 38, 87, 0.28)';
         ctx.fill();
         ctx.lineWidth = 1.5;
         ctx.lineJoin = 'round';
@@ -449,7 +495,7 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
   useEffect(() => {
     if (viewRef.current) viewRef.current.animating = speed > 0;
   }, [speed]);
-  useEffect(() => viewRef.current?.redraw(), [tab, tool, radius, selection, pending, pendingS, chosenSettlement]);
+  useEffect(() => viewRef.current?.redraw(), [tab, tool, radius, selection, pending, pendingS, chosenSettlement, rot]);
   // Changing tabs drops a half-given imperative.
   useEffect(() => {
     setPending(null);
@@ -470,6 +516,7 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
         e.preventDefault();
         setSpeed(speed === 0 ? 1 : 0);
       } else if (e.key === '1' || e.key === '2' || e.key === '3') setSpeed(Number(e.key) as Speed);
+      else if (e.key === 'r' || e.key === 'R') setRot((r) => (r ? 0 : 1));
       else if (e.key === 'Escape') {
         if (pendingS) setPendingS(null);
         else if (pending) setPending(null);
@@ -559,9 +606,10 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
     empty.current.set(emptyFlags(setup));
     trees.current.set(treeCounts(setup));
     territory.current.set(territoryOf(setup));
+    covered.current.fill(0);
     buildingsRef.current = [];
     buildingAt.current = new Map();
-    viewRef.current?.replaceTiles({ size: setup.size, terrain: doc.terrain, elevation: doc.elevation, deposit: doc.deposit, empty: empty.current, trees: trees.current, territory: territory.current });
+    viewRef.current?.replaceTiles({ size: setup.size, terrain: doc.terrain, elevation: doc.elevation, deposit: doc.deposit, empty: empty.current, trees: trees.current, territory: territory.current, covered: covered.current });
     choose([]);
     chooseSettlement(null);
     setSavedTick(setup.state.tick);
@@ -781,7 +829,7 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
                     ? 'Removes everyone and every building inside the brush. Removing a campfire abandons its settlement.'
                     : tool === BuildingKind.Campfire
                       ? 'A campfire founds a camp; unsettled people nearby join it.'
-                      : 'Placed buildings appear finished. They belong to the settlement whose land they are on, or the nearest within 15 tiles.'}
+                      : `Placed buildings appear finished (${footprint(tool, rot).w} by ${footprint(tool, rot).d} tiles; R turns it). They belong to the settlement whose land they are on, or the nearest within 15 tiles.`}
               </p>
             </div>
           )}
@@ -827,7 +875,7 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
                   ? 'Now click a settlement (one of its buildings, or its land). Esc cancels.'
                   : pendingS?.stage === 'where'
                     ? pendingS.kind === 'build'
-                      ? `Click where to build the ${BUILDINGS[pendingS.building ?? 1].name.toLowerCase()}, on or beside its land. Esc cancels.`
+                      ? `Click where to build the ${BUILDINGS[pendingS.building ?? 1].name.toLowerCase()}, on or beside its land. R turns it. Esc cancels.`
                       : 'Click where the settlers should found their settlement. Esc cancels.'
                     : pending?.stage === 'who'
                   ? `${ORDER_LABEL[pending.kind]}: now click a person or drag a box around people. Esc cancels.`

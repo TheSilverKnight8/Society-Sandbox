@@ -2,7 +2,7 @@ import { CLOTHES, HAIRS, SKINS, unpackLook } from '../sim/look';
 import type { SimClient } from '../sim/client';
 import { AgeLook, Pose, type BuildingView } from '../sim/types';
 import { drawBuilding } from './buildings';
-import { isoX, isoY } from './iso';
+import { STEP, isoX, isoY } from './iso';
 import type { IsoView } from './IsoView';
 import { NAVY } from './style';
 
@@ -272,19 +272,34 @@ export function drawPeople(
     order[count] = count;
     count++;
   });
-  // Buildings: marked with look = -1, their index in `buildings` in the id slot.
+  // Buildings: marked with look = -1, their index in `buildings` in the id slot, and how
+  // many levels lower their lowest tile is than their highest (they stand on a stone base).
   for (let k = 0; k < buildings.length; k++) {
     const b = buildings[k];
     const bx = b.tile % size;
     const by = (b.tile - bx) / size;
-    const [sx, sy] = view.toScreen(isoX(bx + 0.5, by + 0.5), isoY(bx + 0.5, by + 0.5, elevation[b.tile]));
-    if (sx < -z * 1.2 || sy < -z * 1.2 || sx > W + z * 1.2 || sy > Hs + z) continue;
+    let hi = 0;
+    let lo = Infinity;
+    for (let y = by; y < by + b.d; y++) {
+      for (let x = bx; x < bx + b.w; x++) {
+        if (x >= size || y >= size) continue;
+        const e = elevation[y * size + x];
+        hi = Math.max(hi, e);
+        lo = Math.min(lo, e);
+      }
+    }
+    // Sorted by the footprint's middle: someone behind it is hidden, someone in front is not.
+    const cx = bx + b.w / 2;
+    const cy = by + b.d / 2;
+    const [sx, sy] = view.toScreen(isoX(cx, cy), isoY(cx, cy, hi));
+    const reach = z * (b.w + b.d) * 0.6;
+    if (sx < -reach || sy < -reach || sx > W + reach || sy > Hs + reach) continue;
     const o = count * 6;
     buf[o] = sx;
     buf[o + 1] = sy;
-    buf[o + 2] = bx + by + 1;
+    buf[o + 2] = cx + cy;
     buf[o + 3] = -1;
-    buf[o + 4] = 0;
+    buf[o + 4] = Math.min(3, Math.max(0, hi - (lo === Infinity ? hi : lo)));
     buf[o + 5] = k;
     order[count] = count;
     count++;
@@ -304,7 +319,7 @@ export function drawPeople(
     if (look < 0) {
       const b = buildings[id];
       if (b.kind === 0 && b.settlement === selectedSettlement && selectedSettlement !== null) drawSelection(ctx, sx, sy, z * 1.6);
-      drawBuilding(ctx, b, sx, sy, z, dpr, now);
+      drawBuilding(ctx, b, sx, sy, z, dpr, now, flags, STEP);
       continue;
     }
     if (selected.has(id)) drawSelection(ctx, sx, sy, z);

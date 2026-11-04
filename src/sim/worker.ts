@@ -89,7 +89,7 @@ ctx.onmessage = (e: MessageEvent<ToSim>) => {
         sendSoon = true;
         break;
       case 'placeBuilding':
-        world?.towns.place(m.kind, m.tile);
+        world?.towns.place(m.kind, m.tile, m.rot);
         sendSoon = true;
         break;
       case 'removeBuildings':

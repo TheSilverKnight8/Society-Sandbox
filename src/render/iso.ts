@@ -27,4 +27,6 @@ export interface TileSource {
   trees?: Uint8Array;
   /** Which settlement owns each tile (0: none), drawn as a tint with a dashed border. */
   territory?: Uint16Array;
+  /** 1 where a building stands: the tile's drawings (grass, hills, deposits) are left off. */
+  covered?: Uint8Array;
 }

@@ -26,14 +26,31 @@ export interface BuildingDef {
   stage: SettlementStage;
   /** Whether a settlement can be ordered to build it, and the player can place it. */
   buildable: boolean;
+  /** Footprint in tiles (along x, along y), before turning. WorldBox-like sizes (Caleb: "2x3 or similar"). */
+  w: number;
+  d: number;
 }
 
 export const BUILDINGS: BuildingDef[] = [
-  { kind: BuildingKind.Campfire, name: 'Campfire', wood: 0, stone: 0, work: 0, homes: 0, stage: 'camp', buildable: false },
-  { kind: BuildingKind.Hut, name: 'Hut', wood: 6, stone: 0, work: 120, homes: 4, stage: 'camp', buildable: true },
-  { kind: BuildingKind.House, name: 'House', wood: 8, stone: 4, work: 220, homes: 6, stage: 'village', buildable: true },
-  { kind: BuildingKind.Storehouse, name: 'Storehouse', wood: 10, stone: 6, work: 260, homes: 0, stage: 'village', buildable: true },
+  { kind: BuildingKind.Campfire, name: 'Campfire', wood: 0, stone: 0, work: 0, homes: 0, stage: 'camp', buildable: false, w: 1, d: 1 },
+  { kind: BuildingKind.Hut, name: 'Hut', wood: 9, stone: 0, work: 160, homes: 4, stage: 'camp', buildable: true, w: 2, d: 2 },
+  { kind: BuildingKind.House, name: 'House', wood: 12, stone: 6, work: 280, homes: 6, stage: 'village', buildable: true, w: 2, d: 3 },
+  { kind: BuildingKind.Storehouse, name: 'Storehouse', wood: 15, stone: 9, work: 340, homes: 0, stage: 'village', buildable: true, w: 3, d: 3 },
 ];
+
+/** A building's footprint once turned (rot 1 swaps its sides). */
+export function footprint(kind: BuildingKind, rot: number | undefined): { w: number; d: number } {
+  const b = BUILDINGS[kind];
+  return rot ? { w: b.d, d: b.w } : { w: b.w, d: b.d };
+}
+
+/** The footprint's corner tile (smallest x and y) for a building centered on a tile. */
+export function anchorFor(kind: BuildingKind, rot: number | undefined, center: number, size: number): number {
+  const { w, d } = footprint(kind, rot);
+  const x = (center % size) - Math.floor((w - 1) / 2);
+  const y = Math.floor(center / size) - Math.floor((d - 1) / 2);
+  return y * size + x;
+}
 
 export const STAGES: SettlementStage[] = ['camp', 'village', 'town', 'city'];
 export const STAGE_NAME: Record<SettlementStage, string> = { camp: 'Camp', village: 'Village', town: 'Town', city: 'City' };

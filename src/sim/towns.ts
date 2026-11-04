@@ -1,6 +1,6 @@
 import { hash2 } from '../lib/rng';
 import { Deposit, Terrain, isWater } from '../map/terrain';
-import { BUILDINGS, BuildingKind, STAGES, STAGE_NEEDS, settlementName, type BuildingDef } from './buildings';
+import { BUILDINGS, BuildingKind, STAGES, STAGE_NEEDS, anchorFor, footprint, settlementName, type BuildingDef } from './buildings';
 import { ADULT_AGE, TICKS_PER_MONTH, TICKS_PER_YEAR, TileField, type Building, type BuildingView, type Focus, type Person, type Settlement, type SettlementDetails, type SettlementView } from './types';
 import type { World } from './world';
 
@@ -133,9 +133,20 @@ export class Towns {
     this.w.tileChange(t, TileField.Trees, v);
   }
 
+  /** The tiles a building stands on. */
+  tilesOf(b: { kind: BuildingKind; tile: number; rot?: number }): number[] {
+    const { w, d } = footprint(b.kind, b.rot);
+    const size = this.w.size;
+    const x0 = b.tile % size;
+    const y0 = (b.tile - x0) / size;
+    const out: number[] = [];
+    for (let y = y0; y < y0 + d; y++) for (let x = x0; x < x0 + w; x++) if (x >= 0 && y >= 0 && x < size && y < size) out.push(y * size + x);
+    return out;
+  }
+
   private index(b: Building) {
     this.bById.set(b.id, b);
-    this.bByTile.set(b.tile, b);
+    for (const t of this.tilesOf(b)) this.bByTile.set(t, b);
   }
 
   /** Fresh stone deposits start with this much stone. */
@@ -165,6 +176,42 @@ export class Towns {
     const ter = w.terrain[t];
     if (isWater(ter) || !buildableTerrain(ter) || this.bByTile.has(t)) return false;
     if (ter === Terrain.Forest && this.trees[t] > 0) return false;
+    return true;
+  }
+
+  /**
+   * Whether a building of this footprint fits with its corner at `anchor`: every tile
+   * buildable and the ground no more than one level uneven. With `owner`, every tile must be
+   * that settlement's (or nobody's, if `allowFree`). With `lanes`, no other building may touch
+   * it, so a path stays open around every building.
+   */
+  areaFree(anchor: number, w: number, d: number, owner?: number, allowFree = false, lanes = false): boolean {
+    const size = this.w.size;
+    const x0 = anchor % size;
+    const y0 = (anchor - x0) / size;
+    if (x0 < 0 || y0 < 0 || x0 + w > size || y0 + d > size) return false;
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (let y = y0; y < y0 + d; y++) {
+      for (let x = x0; x < x0 + w; x++) {
+        const t = y * size + x;
+        if (!this.buildable(t)) return false;
+        if (owner !== undefined && this.territory[t] !== owner && !(allowFree && this.territory[t] === 0)) return false;
+        const e = this.w.elevation[t];
+        lo = Math.min(lo, e);
+        hi = Math.max(hi, e);
+      }
+    }
+    if (hi - lo > 1) return false;
+    if (lanes) {
+      for (let y = y0 - 1; y <= y0 + d; y++) {
+        for (let x = x0 - 1; x <= x0 + w; x++) {
+          if (x < 0 || y < 0 || x >= size || y >= size) continue;
+          if (x >= x0 && x < x0 + w && y >= y0 && y < y0 + d) continue;
+          if (this.bByTile.has(y * size + x)) return false;
+        }
+      }
+    }
     return true;
   }
 
@@ -304,7 +351,8 @@ export class Towns {
     const c = this.counts.get(s.id) ?? { people: 0, housed: 0, homes: 0, homeBuildings: 0 };
     const mine = this.buildings.filter((b) => b.settlement === s.id);
     // Land grows with people and buildings.
-    const radius = Math.min(14, 3 + Math.floor(Math.sqrt(c.people)) + Math.floor(mine.length / 3));
+    // (Buildings are several tiles across, so land grows faster than people alone would need.)
+    const radius = Math.min(22, 4 + Math.floor(Math.sqrt(c.people) * 1.3) + Math.floor(mine.length / 2));
     this.claim(s, radius);
     // Stage up when big enough.
     const next = STAGES[STAGES.indexOf(s.stage) + 1];
@@ -321,8 +369,9 @@ export class Towns {
     // Ordered buildings first.
     while (s.queue.length) {
       const q = s.queue.shift()!;
-      if (this.buildable(q.tile)) {
-        this.addBuilding(q.kind, q.tile, s.id, false);
+      const { w, d } = footprint(q.kind, q.rot);
+      if (this.areaFree(q.tile, w, d)) {
+        this.addBuilding(q.kind, q.tile, s.id, false, q.rot);
         return;
       }
     }
@@ -332,14 +381,14 @@ export class Towns {
     const stoneNear = this.stoneNear(s.center);
     if (homeless > planned) {
       const kind = s.stage !== 'camp' && stoneNear ? BuildingKind.House : BuildingKind.Hut;
-      const t = this.freeTile(s);
-      if (t >= 0) this.addBuilding(kind, t, s.id, false);
+      const spot = this.freeSpot(s, kind);
+      if (spot) this.addBuilding(kind, spot.tile, s.id, false, spot.rot);
       return;
     }
     const hasStore = mine.some((b) => b.kind === BuildingKind.Storehouse);
     if (s.stage !== 'camp' && !hasStore && stoneNear && s.focus !== 'housing') {
-      const t = this.freeTile(s);
-      if (t >= 0) this.addBuilding(BuildingKind.Storehouse, t, s.id, false);
+      const spot = this.freeSpot(s, BuildingKind.Storehouse);
+      if (spot) this.addBuilding(BuildingKind.Storehouse, spot.tile, s.id, false, spot.rot);
     }
   }
 
@@ -348,32 +397,34 @@ export class Towns {
     return this.stoneTiles.some((t) => this.w.stock[t] > 0 && this.dist2(t, center) <= r2);
   }
 
-  /** A free tile on the settlement's land, close to its middle (but not right beside the fire). */
-  private freeTile(s: Settlement): number {
+  /** A place on the settlement's land for a building, close to its middle, with a lane around it; or null. */
+  private freeSpot(s: Settlement, kind: BuildingKind): { tile: number; rot: 0 | 1 } | null {
     const w = this.w;
     const [cx, cy] = this.tileXY(s.center);
-    for (let r = 2; r <= 14; r++) {
-      const options: number[] = [];
+    for (let r = 2; r <= 22; r++) {
+      const options: { tile: number; rot: 0 | 1 }[] = [];
       for (let dy = -r; dy <= r; dy++) {
         for (let dx = -r; dx <= r; dx++) {
           if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
           const x = cx + dx;
           const y = cy + dy;
           if (x < 0 || y < 0 || x >= w.size || y >= w.size) continue;
-          const t = y * w.size + x;
-          // Every other tile, so buildings keep a path between them.
-          if ((x + y) % 2 !== 0 && r > 2) continue;
-          if (this.territory[t] === s.id && this.buildable(t)) options.push(t);
+          const center = y * w.size + x;
+          for (const rot of [0, 1] as const) {
+            const { w: fw, d: fd } = footprint(kind, rot);
+            const anchor = anchorFor(kind, rot, center, w.size);
+            if (this.areaFree(anchor, fw, fd, s.id, false, true)) options.push({ tile: anchor, rot });
+          }
         }
       }
       if (options.length) return options[w.rand.int(options.length)];
     }
-    return -1;
+    return null;
   }
 
-  addBuilding(kind: BuildingKind, tile: number, settlement: number | undefined, finished: boolean): Building {
+  addBuilding(kind: BuildingKind, tile: number, settlement: number | undefined, finished: boolean, rot: 0 | 1 = 0): Building {
     const st = this.w.state;
-    const b: Building = { id: st.nextBuildingId!++, kind, tile, settlement, progress: finished ? 1 : 0, wood: 0, stone: 0 };
+    const b: Building = { id: st.nextBuildingId!++, kind, tile, rot, settlement, progress: finished ? 1 : 0, wood: 0, stone: 0 };
     this.buildings.push(b);
     this.index(b);
     this.buildingsChanged = true;
@@ -712,26 +763,27 @@ export class Towns {
 
   // ---------------------------------------------------------------- the player
 
-  /** Places a finished building (SPEC 4). A campfire founds a camp with nobody in it yet. */
-  place(kind: BuildingKind, tile: number): boolean {
-    if (!this.buildable(tile)) return false;
-    if (kind === BuildingKind.Campfire) return this.found(tile, []) !== null;
-    let owner = this.territory[tile] || undefined;
+  /** Places a finished building centered on a tile (SPEC 4). A campfire founds a camp with nobody in it yet. */
+  place(kind: BuildingKind, center: number, rot: 0 | 1 = 0): boolean {
+    if (kind === BuildingKind.Campfire) return this.buildable(center) && this.found(center, []) !== null;
+    const { w, d } = footprint(kind, rot);
+    const anchor = anchorFor(kind, rot, center, this.w.size);
+    if (!this.areaFree(anchor, w, d)) return false;
+    let owner = this.territory[center] || undefined;
     if (owner === undefined) {
       let bestD = 15 * 15;
       for (const s of this.settlements) {
         if (s.abandoned) continue;
-        const d = this.dist2(s.center, tile);
-        if (d < bestD) {
-          bestD = d;
+        const dd = this.dist2(s.center, center);
+        if (dd < bestD) {
+          bestD = dd;
           owner = s.id;
         }
       }
     }
-    const b = this.addBuilding(kind, tile, owner, true);
+    this.addBuilding(kind, anchor, owner, true, rot);
     const s = owner !== undefined ? this.sById.get(owner) : undefined;
-    if (s) this.claim(s, 1.5, tile);
-    void b;
+    if (s) this.claim(s, Math.max(w, d), center);
     return true;
   }
 
@@ -753,7 +805,7 @@ export class Towns {
     const i = this.buildings.indexOf(b);
     if (i >= 0) this.buildings.splice(i, 1);
     this.bById.delete(b.id);
-    this.bByTile.delete(b.tile);
+    for (const t of this.tilesOf(b)) if (this.bByTile.get(t) === b) this.bByTile.delete(t);
     this.bookTick = -1;
     for (const p of this.w.state.people) {
       if (p.home === b.id) {
@@ -768,21 +820,22 @@ export class Towns {
     this.buildingsChanged = true;
   }
 
-  order(id: number, o: { kind: 'build'; building: BuildingKind; tile: number } | { kind: 'focus'; focus: Focus } | { kind: 'settlers'; tile: number } | { kind: 'abandon' }) {
+  order(id: number, o: { kind: 'build'; building: BuildingKind; tile: number; rot: 0 | 1 } | { kind: 'focus'; focus: Focus } | { kind: 'settlers'; tile: number } | { kind: 'abandon' }) {
     const s = this.sById.get(id);
     if (!s || s.abandoned) return;
     const w = this.w;
     switch (o.kind) {
-      case 'build':
-        if (!this.buildable(o.tile)) return;
-        if (this.territory[o.tile] !== s.id) {
-          if (this.territory[o.tile] !== 0) return;
-          this.claim(s, 1.5, o.tile);
-        }
-        s.queue.push({ kind: o.building, tile: o.tile });
+      case 'build': {
+        // The tile clicked is the building's middle; it must be on the settlement's land or nobody's.
+        const { w: fw, d: fd } = footprint(o.building, o.rot);
+        const anchor = anchorFor(o.building, o.rot, o.tile, w.size);
+        if (!this.areaFree(anchor, fw, fd, s.id, true)) return;
+        this.claim(s, Math.max(fw, fd), o.tile);
+        s.queue.push({ kind: o.building, tile: anchor, rot: o.rot });
         // Start it now rather than at the next monthly look.
         this.manage(s);
         return;
+      }
       case 'focus':
         s.focus = o.focus;
         this.settlementsChanged = true;
@@ -894,7 +947,10 @@ export class Towns {
   }
 
   buildingViews(): BuildingView[] {
-    return this.buildings.map((b) => ({ id: b.id, kind: b.kind, tile: b.tile, settlement: b.settlement ?? 0, progress: b.progress }));
+    return this.buildings.map((b) => {
+      const { w, d } = footprint(b.kind, b.rot);
+      return { id: b.id, kind: b.kind, tile: b.tile, w, d, rot: b.rot ?? 0, settlement: b.settlement ?? 0, progress: b.progress };
+    });
   }
 
   settlementViews(): SettlementView[] {

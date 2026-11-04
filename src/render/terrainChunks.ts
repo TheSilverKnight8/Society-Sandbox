@@ -364,7 +364,9 @@ function drawChunkTiles(ctx: CanvasRenderingContext2D, src: TileSource, cx: numb
       // What the tile is: a line drawing on it.
       const cxp = X;
       const cyp = Y + 0.27;
-      if (st.grid === 1) {
+      if (src.covered?.[i]) {
+        // A building stands here.
+      } else if (st.grid === 1) {
         biomeDetail(ctx, t, x, y, h, cxp, cyp, lw, src.trees ? src.trees[i] : undefined);
         const d = deposit[i];
         if (d !== Deposit.None) {

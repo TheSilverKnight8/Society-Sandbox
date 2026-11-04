@@ -9,8 +9,10 @@ import type { WorldDoc } from './types';
 //   2  Stage 2b: people's needs (food, rest), the food they carry, their orders; food left on each tile.
 //   3  Stage 2c: pairs, parents, pregnancy and births; the rules the player has turned on or off.
 //   4  Stage 3a: settlements, buildings, land, trees standing, stone left; people's settlement and home.
+//   5  Buildings span several tiles and can be turned (Building.rot). Buildings saved in 4 keep
+//      their corner tile and take their new size from there (nothing to change in the data).
 
-export const WORLD_FORMAT_VERSION = 4;
+export const WORLD_FORMAT_VERSION = 5;
 
 export function upgradeWorld(version: number, doc: WorldDoc): WorldDoc {
   if (version > WORLD_FORMAT_VERSION) throw new Error('This was saved by a newer version of the app. Reload the app to update it, then try again.');

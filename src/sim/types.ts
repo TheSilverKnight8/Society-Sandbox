@@ -90,14 +90,17 @@ export interface Settlement {
   /** What it puts first (a settlement imperative). */
   focus: Focus;
   /** Buildings it has been ordered to build, in order, not yet started. */
-  queue: { kind: BuildingKind; tile: number }[];
+  queue: { kind: BuildingKind; tile: number; rot: 0 | 1 }[];
   abandoned?: boolean;
 }
 
 export interface Building {
   id: number;
   kind: BuildingKind;
+  /** The footprint's corner tile (smallest x and y). */
   tile: number;
+  /** 1: turned a quarter, so its footprint's sides are swapped. */
+  rot?: 0 | 1;
   /** The settlement it belongs to, if any. */
   settlement?: number;
   /** Building work done, 0 to 1; 1 is finished. */
@@ -164,7 +167,11 @@ export interface SettlementDetails {
 export interface BuildingView {
   id: number;
   kind: BuildingKind;
+  /** The footprint's corner tile, and its size in tiles once turned. */
   tile: number;
+  w: number;
+  d: number;
+  rot: 0 | 1;
   settlement: number;
   progress: number;
 }
@@ -226,10 +233,10 @@ export type ToSim =
   | { type: 'order'; ids: number[]; order: Order | { kind: 'stop' } }
   | { type: 'toggles'; toggles: Toggles }
   /** Places finished buildings (SPEC 4: placed buildings appear finished). A campfire founds a camp. */
-  | { type: 'placeBuilding'; kind: BuildingKind; tile: number }
+  | { type: 'placeBuilding'; kind: BuildingKind; tile: number; rot: 0 | 1 }
   | { type: 'removeBuildings'; tiles: number[] }
   | { type: 'watchSettlement'; id: number | null }
-  | { type: 'settlementOrder'; id: number; order: { kind: 'build'; building: BuildingKind; tile: number } | { kind: 'focus'; focus: Focus } | { kind: 'settlers'; tile: number } | { kind: 'abandon' } }
+  | { type: 'settlementOrder'; id: number; order: { kind: 'build'; building: BuildingKind; tile: number; rot: 0 | 1 } | { kind: 'focus'; focus: Focus } | { kind: 'settlers'; tile: number } | { kind: 'abandon' } }
   | { type: 'unpair'; id: number }
   | { type: 'save'; req: number }
   /** Development only: adds n people on land near (x, y), for speed tests. */
