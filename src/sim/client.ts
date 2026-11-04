@@ -1,5 +1,5 @@
 import type { BuildingKind } from './buildings';
-import type { CultureEdit, FromSim, NationEdit, NationOrder, Order, PersonDetails, PersonEdit, SettlementDetails, SimState, Snapshot, Speed, Toggles, ToSim } from './types';
+import type { CultureEdit, FromSim, NationEdit, NationOrder, Order, PersonDetails, PersonEdit, SettlementDetails, SimState, Snapshot, SoldierKind, Speed, Toggles, ToSim } from './types';
 
 type SettlementOrder = Extract<ToSim, { type: 'settlementOrder' }>['order'];
 
@@ -127,6 +127,10 @@ export class SimClient {
     this.send({ type: 'nationEdit', id, edit });
   }
 
+  placeSoldiers(tiles: number[], kind: SoldierKind) {
+    if (tiles.length) this.send({ type: 'placeSoldiers', tiles, kind });
+  }
+
   placeNation(settlement: number) {
     this.send({ type: 'placeNation', settlement });
   }
@@ -172,7 +176,7 @@ export class SimClient {
    * Calls `fn` for each person with their position blended between the last two
    * snapshots, so movement looks smooth between steps.
    */
-  forEach(now: number, fn: (k: number, id: number, x: number, y: number, look: number, flags: number) => void) {
+  forEach(now: number, fn: (k: number, id: number, x: number, y: number, look: number, flags: number, gear: number) => void) {
     const c = this.curr;
     if (!c) return;
     const p = this.prev;
@@ -190,7 +194,7 @@ export class SimClient {
           y = py + (y - py) * a;
         }
       }
-      fn(k, id, x, y, c.look[k], c.flags[k]);
+      fn(k, id, x, y, c.look[k], c.flags[k], c.gear ? c.gear[k] : 0);
     }
   }
 

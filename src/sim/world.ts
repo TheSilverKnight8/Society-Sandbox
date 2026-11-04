@@ -6,6 +6,7 @@ import { Towns } from './towns';
 import { Cultures } from './cultures';
 import { Nations } from './nations';
 import { Technology } from './tech';
+import { Military } from './military';
 import { BUILDINGS } from './buildings';
 import {
   ADULT_AGE,
@@ -168,6 +169,7 @@ export class World {
   readonly cultures: Cultures;
   readonly nations: Nations;
   readonly tech: Technology;
+  readonly military: Military;
   /** Why people died recently (for the inspect panel); cleared as it is read. */
   readonly deaths = new Map<number, string>();
 
@@ -218,6 +220,7 @@ export class World {
     this.cultures = new Cultures(this);
     this.nations = new Nations(this);
     this.tech = new Technology(this);
+    this.military = new Military(this);
   }
 
   /** Records that a tile's drawing changed (deposit used up or back, trees, land). */
@@ -257,9 +260,11 @@ export class World {
     this.servePaths();
     this.regrow();
     this.towns.step();
+    this.military.step();
     if (st.tick % TICKS_PER_MONTH === 13) this.cultures.monthly();
     if (st.tick % TICKS_PER_MONTH === 19) this.nations.monthly();
     if (st.tick % TICKS_PER_MONTH === 23) this.tech.monthly();
+    if (st.tick % TICKS_PER_MONTH === 29) this.military.monthly();
     if (this.toggles.lifeCycle) {
       if (st.tick % 25 === 0) this.buildGrid();
     } else {
@@ -447,6 +452,8 @@ export class World {
   }
 
   private update(p: Person) {
+    // Struck down earlier in this step.
+    if (!this.byId.has(p.id)) return;
     if ((this.state.tick + p.id) % TICKS_PER_MONTH === 0) {
       if (this.toggles.lifeCycle && !this.monthly(p)) return;
       this.towns.monthly(p);
@@ -465,6 +472,8 @@ export class World {
     }
     // Too tired to stay awake: they fall asleep wherever they are.
     if (p.rest <= 0 && p.task !== 'sleep') this.sleep(p);
+    // Fighting comes before anything else (Stage 5).
+    if (this.military.fight(p)) return;
 
     switch (p.task) {
       case 'sleep':
@@ -519,7 +528,7 @@ export class World {
     const o = p.order;
     if (o) {
       if (o.kind === 'rest') return this.sleep(p);
-      if (o.kind === 'move' && o.tile !== undefined) return this.goTo(p, o.tile, 'order');
+      if ((o.kind === 'move' || o.kind === 'attack') && o.tile !== undefined) return this.goTo(p, o.tile, 'order');
       if (o.kind === 'gather') {
         if (p.carry >= CARRY_MAX) {
           delete p.order;
@@ -535,13 +544,19 @@ export class World {
     if (p.food < HUNGRY && p.carry > 0) return this.eat(p);
     const starving = p.food < STARVING && p.rest > 5;
     if (p.rest < TIRED && !starving) {
-      const bed = this.towns.bed(p);
+      // Soldiers away on campaign sleep where they are.
+      const bed = this.military.onCampaign(p) ? -1 : this.towns.bed(p);
       if (bed >= 0 && bed !== this.tileOf(p)) return this.goTo(p, bed, 'home');
       this.sleep(p);
       if (bed >= 0) p.indoors = true;
       return;
     }
     const child = this.ageOf(p) < ADULT_AGE;
+    // Children run home when enemy soldiers are near (Stage 5).
+    if (child && this.military.danger(p)) {
+      const bed = this.towns.bed(p);
+      if (bed >= 0 && bed !== this.tileOf(p)) return this.goTo(p, bed, 'home');
+    }
     if (p.food < HUNGRY) {
       if (p.carry > 0) return this.eat(p);
       // A hungry child is fed from what a parent nearby carries.
@@ -556,7 +571,8 @@ export class World {
         }
       }
       // Settled people eat from their settlement's store when it has food.
-      const store = this.towns.economy.foodStore(p);
+      // Soldiers away on campaign live off the land.
+      const store = this.military.onCampaign(p) && this.military.awayFromHome(p) ? -1 : this.towns.economy.foodStore(p);
       if (store >= 0) return this.goTo(p, store, 'store');
       // Look close first; only the very hungry look far (far searches cost the most). Children stay closer.
       for (const r of child ? (p.food < 20 ? [14, 40] : [14]) : p.food < 20 ? [14, 40, 90] : [14, 40]) {
@@ -573,6 +589,8 @@ export class World {
       const t = this.findFood(p, this.tileOf(p), 10);
       if (t >= 0) return this.headFor(p, t);
     }
+    // Soldiers serve full time (Stage 5).
+    if (p.soldier && this.military.soldierWork(p)) return;
     // Their job first (now and then they help with building instead), then building work.
     const eco = this.towns.economy;
     if (p.job !== undefined && (p.load || this.rand.next() < 0.85) && eco.work(p)) return;
@@ -673,8 +691,15 @@ export class World {
     }
     const size = this.size;
     let budget = WALK_SPEED / this.finder.cost(this.tileOf(p));
+    if (p.horse || p.engine) budget *= this.military.speedOf(p);
     while (budget > 0 && r.step < r.tiles.length) {
       const next = r.tiles[r.step];
+      // An enemy gate or fence in a soldier's way: they break it (Stage 5: sieges).
+      if (p.soldier && this.military.bars(p, next)) {
+        p.siegeTile = next;
+        p.task = 'fight';
+        return;
+      }
       const tx = (next % size) + 0.5;
       const ty = Math.floor(next / size) + 0.5;
       const dx = tx - p.x;
@@ -697,6 +722,11 @@ export class World {
     const purpose = p.purpose;
     delete p.purpose;
     p.task = 'idle';
+    if (purpose === 'muster' || purpose === 'chase') {
+      this.military.muster(p);
+      p.wait = purpose === 'chase' ? 0 : 10 + this.rand.int(30);
+      return;
+    }
     if (this.towns.arrive(p, purpose) || this.towns.economy.arrive(p, purpose)) return;
     if (purpose === 'food' && p.target !== undefined) {
       if (this.stock[p.target] > 0) {
@@ -709,7 +739,7 @@ export class World {
       p.wait = 0;
       return;
     }
-    if (purpose === 'order' && p.order?.kind === 'move') delete p.order;
+    if (purpose === 'order' && (p.order?.kind === 'move' || p.order?.kind === 'attack')) delete p.order;
     p.wait = purpose === 'order' ? 30 : 20 + this.rand.int(50);
   }
 
@@ -788,6 +818,11 @@ export class World {
       }
     }
     return -1;
+  }
+
+  /** Someone is killed (Stage 5: in battle). */
+  kill(p: Person, cause: string) {
+    this.die(p, cause);
   }
 
   private die(p: Person, cause: string) {
@@ -984,6 +1019,8 @@ export class World {
       office: this.nations.officeOf(p),
       influence: this.nations.influence(p),
       nation: this.nations.nationOfPerson(p)?.id,
+      soldier: this.military.detailsOf(p),
+      danger: this.military.danger(p),
     };
   }
 
@@ -1006,6 +1043,7 @@ export class World {
     const pos = new Float32Array(n * 2);
     const look = new Uint16Array(n);
     const flags = new Uint16Array(n);
+    const gear = new Uint16Array(n);
     for (let k = 0; k < n; k++) {
       const p = people[k];
       ids[k] = p.id;
@@ -1025,6 +1063,7 @@ export class World {
         if (nx - ny < p.x - p.y) f |= 2;
       }
       flags[k] = f;
+      if (p.soldier) gear[k] = this.military.gearOf(p);
     }
     const tileChanges = Int32Array.from(this.tileChanges);
     this.tileChanges = [];
@@ -1032,13 +1071,14 @@ export class World {
     const buildings = t.buildingsChanged ? t.buildingViews() : undefined;
     const settlements = t.settlementsChanged ? t.settlementViews() : undefined;
     const cultures = this.cultures.changed || this.tech.changed ? this.cultures.views() : undefined;
-    const nations = this.nations.changed ? this.nations.views() : undefined;
+    const nations = this.nations.changed || this.military.changed ? this.nations.views() : undefined;
     t.buildingsChanged = false;
     t.settlementsChanged = false;
     this.cultures.changed = false;
     this.nations.changed = false;
     this.tech.changed = false;
-    return { tick: this.state.tick, ids, pos, look, flags, tileChanges, buildings, settlements, cultures, nations, stepMs };
+    this.military.changed = false;
+    return { tick: this.state.tick, ids, pos, look, flags, gear, tileChanges, buildings, settlements, cultures, nations, stepMs };
   }
 
   /** A copy of everything that is saved. */
@@ -1056,7 +1096,8 @@ export class World {
       buildings: this.towns.buildings.map((b) => ({ ...b })),
       cultures: this.cultures.list.map((c) => ({ ...c, traits: { ...c.traits }, support: c.support ? { ...c.support } : undefined, techs: c.techs ? [...c.techs] : undefined, progress: c.progress ? { ...c.progress } : undefined })),
       nations: this.nations.list.map((n) => ({ ...n, policies: { ...n.policies }, techs: n.techs ? [...n.techs] : undefined })),
-      relations: this.nations.relations.map((r) => ({ ...r })),
+      relations: this.nations.relations.map((r) => ({ ...r, war: r.war ? { ...r.war, strength: { ...r.war.strength }, lost: { ...r.war.lost }, taken: { ...r.war.taken } } : undefined })),
+      armies: this.military.armies.map((a) => ({ ...a, order: a.order ? { ...a.order } : undefined })),
       people: this.state.people.map((p) => {
         const q: Person = { ...p, wait: Number.isFinite(p.wait) ? Math.min(p.wait, 100) : 0 };
         // Routes and claims are not saved; anyone on the move starts again from standing.

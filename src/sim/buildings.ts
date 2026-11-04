@@ -4,15 +4,34 @@
 // produce food and materials; workshops come in 3c.
 
 /** Goods a settlement keeps in its store (SPEC 8: goods are carried by individuals). */
-export type Good = 'food' | 'wood' | 'stone' | 'iron' | 'gold' | 'tools' | 'pottery' | 'clay';
+export type Good = 'food' | 'wood' | 'stone' | 'iron' | 'gold' | 'tools' | 'pottery' | 'clay' | 'spear' | 'sword' | 'bow' | 'crossbow' | 'mail' | 'plate' | 'horse' | 'engine';
 /** Goods kept in a store (clay goes straight from the pit to the pottery). */
-export const GOODS: Good[] = ['food', 'wood', 'stone', 'iron', 'gold', 'tools', 'pottery'];
-export const GOOD_NAME: Record<Good, string> = { food: 'Food', wood: 'Wood', stone: 'Stone', iron: 'Iron ore', gold: 'Gold ore', tools: 'Tools', pottery: 'Pottery', clay: 'Clay' };
+export const GOODS: Good[] = ['food', 'wood', 'stone', 'iron', 'gold', 'tools', 'pottery', 'spear', 'sword', 'bow', 'crossbow', 'mail', 'plate', 'horse', 'engine'];
+/** Arms (Stage 5: made as goods at the armory and stable, and carried to soldiers; Caleb). */
+export const ARMS: Good[] = ['spear', 'sword', 'bow', 'crossbow', 'mail', 'plate', 'horse', 'engine'];
+export const GOOD_NAME: Record<Good, string> = {
+  food: 'Food',
+  wood: 'Wood',
+  stone: 'Stone',
+  iron: 'Iron ore',
+  gold: 'Gold ore',
+  tools: 'Tools',
+  pottery: 'Pottery',
+  clay: 'Clay',
+  spear: 'Spears',
+  sword: 'Swords',
+  bow: 'Bows',
+  crossbow: 'Crossbows',
+  mail: 'Mail armor',
+  plate: 'Plate armor',
+  horse: 'Horses',
+  engine: 'Catapults',
+};
 /** What each good is worth in coins where it is neither scarce nor plentiful (Caleb: goods have prices). */
-export const BASE_PRICE: Record<Good, number> = { food: 2, wood: 1, stone: 1, iron: 3, gold: 6, tools: 10, pottery: 5, clay: 1 };
+export const BASE_PRICE: Record<Good, number> = { food: 2, wood: 1, stone: 1, iron: 3, gold: 6, tools: 10, pottery: 5, clay: 1, spear: 6, sword: 12, bow: 6, crossbow: 14, mail: 16, plate: 30, horse: 20, engine: 40 };
 
 /** The jobs a tradesman can hold (SPEC 6: "generic tradesman (works at various buildings)"). */
-export type JobKind = 'farmer' | 'woodcutter' | 'quarryman' | 'miner' | 'fisher' | 'trader' | 'smith' | 'potter' | 'minter' | 'official' | 'scholar';
+export type JobKind = 'farmer' | 'woodcutter' | 'quarryman' | 'miner' | 'fisher' | 'trader' | 'smith' | 'potter' | 'minter' | 'official' | 'scholar' | 'soldier' | 'armorer' | 'groom';
 export const JOB_NAME: Record<JobKind, string> = {
   farmer: 'Farmer',
   woodcutter: 'Woodcutter',
@@ -25,6 +44,9 @@ export const JOB_NAME: Record<JobKind, string> = {
   minter: 'Minter',
   official: 'Official',
   scholar: 'Scholar',
+  soldier: 'Soldier',
+  armorer: 'Armorer',
+  groom: 'Groom',
 };
 /** Children's light jobs (SPEC 6: "children ... can hold light jobs"). */
 export const LIGHT_JOB_NAME: Partial<Record<JobKind, string>> = { farmer: 'Farm helper', fisher: "Fisher's helper" };
@@ -47,6 +69,9 @@ export const BuildingKind = {
   Hall: 14,
   Scriptorium: 15,
   University: 16,
+  Barracks: 17,
+  Armory: 18,
+  Stable: 19,
 } as const;
 export type BuildingKind = (typeof BuildingKind)[keyof typeof BuildingKind];
 
@@ -97,6 +122,9 @@ export const BUILDINGS: BuildingDef[] = [
   { kind: BuildingKind.Hall, name: 'Hall', wood: 16, stone: 12, work: 320, homes: 0, stage: 'village', buildable: true, w: 3, d: 2, jobs: 3, lightJobs: 0, job: 'official' },
   { kind: BuildingKind.Scriptorium, name: 'Scriptorium', wood: 10, stone: 10, work: 260, homes: 0, stage: 'village', buildable: true, w: 2, d: 3, jobs: 2, lightJobs: 0, job: 'scholar' },
   { kind: BuildingKind.University, name: 'University', wood: 20, stone: 24, tools: 2, work: 420, homes: 0, stage: 'town', buildable: true, w: 3, d: 3, jobs: 3, lightJobs: 0, job: 'scholar' },
+  { kind: BuildingKind.Barracks, name: 'Barracks', wood: 16, stone: 14, work: 340, homes: 0, stage: 'village', buildable: true, w: 3, d: 2, jobs: 10, lightJobs: 0, job: 'soldier' },
+  { kind: BuildingKind.Armory, name: 'Armory', wood: 10, stone: 10, work: 260, homes: 0, stage: 'village', buildable: true, w: 2, d: 2, jobs: 2, lightJobs: 0, job: 'armorer' },
+  { kind: BuildingKind.Stable, name: 'Stable', wood: 14, stone: 4, work: 240, homes: 0, stage: 'village', buildable: true, w: 3, d: 2, jobs: 2, lightJobs: 0, job: 'groom' },
 ];
 
 /** Whether a building of this kind may stand on a tile of this terrain (fields need fertile ground). `cleared`: a forest tile with no trees left. */

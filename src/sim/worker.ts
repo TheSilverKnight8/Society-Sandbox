@@ -29,7 +29,7 @@ function post(msg: FromSim, transfer: Transferable[] = []) {
 function sendSnapshot() {
   if (!world) return;
   const s = world.snapshot(stepMs);
-  post({ type: 'snap', ...s }, [s.ids.buffer, s.pos.buffer, s.look.buffer, s.flags.buffer, s.tileChanges.buffer]);
+  post({ type: 'snap', ...s }, [s.ids.buffer, s.pos.buffer, s.look.buffer, s.flags.buffer, s.gear.buffer, s.tileChanges.buffer]);
   if (watchingSettlement !== null) post({ type: 'watchedSettlement', settlement: world.towns.details(watchingSettlement) });
   if (watching !== null) {
     const person = world.details(watching);
@@ -114,6 +114,10 @@ ctx.onmessage = (e: MessageEvent<ToSim>) => {
         break;
       case 'nationOrder':
         if (m.order.kind === 'expand') world?.nations.orderExpand(m.id, m.order.tile);
+        sendSoon = true;
+        break;
+      case 'placeSoldiers':
+        world?.military.place(m.tiles, m.kind);
         sendSoon = true;
         break;
       case 'cultureEdit':

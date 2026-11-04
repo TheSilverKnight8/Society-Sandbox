@@ -18,8 +18,8 @@ Macro to micro, with a test checkpoint at the end of each stage. Each system's t
 4. **Cultures, nations and technology**, in three steps:
    - 4a. Cultures: formation, membership, traits, breaks from a culture far from home, editing cultures, the culture map view, the culture formation rule. **(done; settlements spreading added after it)**
    - 4b. Nations: influence, leaders claiming rule, placed nations, settlements joining, rulers and succession, unique individuals, officials and taxes, policies and culture support, unrest, revolts and breaks over policies, nations sending settlers, diplomacy, the nation map view, their rules. (Caleb kept this as one step.) **(done)**
-   - 4c. Technology and research: research by cultures at a research building with its own workers, the technologies and what they open up, nations' technology from their cultures, the research rule. **(this step)**
-5. **Military and war:** soldier types, weapons and equipment, armies and their leaders, battles with group orders and individual resolution, war declarations.
+   - 4c. Technology and research: research by cultures at a research building with its own workers, the technologies and what they open up, nations' technology from their cultures, the research rule. **(done)**
+5. **Military and war:** soldier types, weapons and equipment, armies and their leaders, battles with group orders and individual resolution, war declarations, sieges, conquest, plunder and tribute, peace. (Caleb kept it as one step.) **(done)**
 6. **Disasters, effects, beasts and criminals;** scenario events (player- and sim-triggered) and the record of events.
 7. **Finishing:** a pass over every toggle and imperative against SPEC 10, tuning, and content additions Caleb asks for.
 
@@ -71,6 +71,36 @@ Macro to micro, with a test checkpoint at the end of each stage. Each system's t
 | Who decides what a culture researches | The sim picks by the culture's traits; the player can set what a culture researches next (from its panel, or as a culture imperative). |
 | How technology is organized | A tree: individual technologies with prerequisites, researched one at a time. |
 | Whether grown settlements spread (asked at the 4a checkpoint) | "Grown villages should spread when some sort of expansion threshold is hit, whether it is a small family or group of people striking out, a village exceeds its max population, people are leaving due to a revolt, a nation want to expand more, etc." Families striking out and settlements past their most people (or crowded) came after 4a; revolts and nations wanting land come with nations (4b). |
+
+## Caleb's answers for Stage 5
+
+| Question | Answer |
+| --- | --- |
+| What winning a war does | All of: conquest (settlements whose defenders are beaten change hands, their people staying), plunder and tribute (winners carry off goods and coins; a beaten nation may pay tribute to make peace), peace when worn out (wars end when one side has lost enough, or after long enough), and destruction (armies can burn buildings and fences in enemy settlements). |
+| How nations get soldiers | "Standing armies, but regular citizens can fight if the fight comes to them." |
+| Where weapons and armor come from | Made as goods: made at workshops (from iron and wood) and carried to soldiers; a nation short of them fields worse-equipped armies; technology opens better kinds. |
+| Whether to split Stage 5 | Keep it as one step. |
+
+## Questions settled by the builder in Stage 5 (Caleb can change them)
+
+| Question | What Stage 5 does |
+| --- | --- |
+| Where standing armies live | In barracks (3 by 2; 16 wood, 14 stone; 10 soldiers). A nation's capital and its towns and cities build one once they have 30 people, a store and enough food (a city builds two), while the war rule is on. Each barracks has its own army ("First Army of …"). Soldiers the player places serve in an army of their nation without a barracks. |
+| How soldiers are raised (the conscription policy from 4b) | A levy fills the barracks first: fit adults (16 to 45) are called up from other work, though not officials, scholars, rulers or traders on a run. Volunteers enlist only while the nation's and their settlement's treasuries hold at least 12 coins between them: the jobless first, and now and then people leave other work for it. Either way, at most 15% of a settlement's people serve, so its work goes on. |
+| Soldiers' pay | Each month, a levy is paid half a coin and a volunteer 1 coin, from the nation's treasury, or else from their home settlement's. Unpaid volunteers may leave (1 in 4 a month). In testing, nations' treasuries alone held only a few coins (taxes are 10% to 25% of what settlements hold), so armies paid only from them could not form; settlements' treasuries have real turnover from food sales and rent. |
+| Arms (Caleb: made as goods, technology opens better kinds) | An armory (2 by 2; 10 wood, 10 stone; 2 armorers; needs Iron working) makes spears (1 iron ore, 1 wood), swords (2 iron ore), bows (2 wood; Archery), crossbows (2 iron ore, 1 wood; Crossbows), mail (3 iron ore; Mail armor), plate (5 iron ore; Plate armor) and catapults (10 wood, 2 iron ore; Engineering). A stable (3 by 2; 14 wood, 4 stone; 2 grooms; needs Horsemanship) raises horses (4 food each). They are built beside a barracks. Armorers make whatever their settlement's soldiers lack most that the store has the makings of, and carry it to the store; soldiers fetch it from there. Arms are not traded. |
+| Kinds of soldier (SPEC 6: types such as cavalry, artillery, infantry) | A soldier's part in their army follows from their number, as their nation's technology allows: 1 in 20 artillery (Engineering), 5 in 20 cavalry (Horsemanship), 6 in 20 archers (Archery), the rest infantry. Each fetches the best arms their part calls for: infantry and cavalry a sword (else a spear) and plate (else mail), archers a crossbow (else a bow) and mail, cavalry a horse, artillery a catapult and a spear. Without arms they fight with what they have. |
+| New technologies | Archery (Classical, 70), Horsemanship (Classical, 90), Mail armor (Early Medieval, 120; needs Iron working; 6 iron ore), Engineering (High Medieval, 160; needs Mathematics and Masonry), Crossbows (High Medieval, 150; needs Archery and Engineering), Plate armor (Late Medieval, 220; needs Mail armor and Guilds; 10 iron ore). 23 technologies in all. |
+| How a fight is settled (SPEC 9: individual stats and equipment; SPEC 10: always on) | Blow by blow between individuals, each with 100 health. Damage: bare hands or tools 4 (reach 1.1 tiles, a blow every 10 steps), spear 9 (reach 1.5), sword 12, bow 7 (range 7, every 14 steps), crossbow 11 (range 8, every 18), catapult 12 (range 9, every 30). Mail turns aside 35% of each blow, plate 55%. A horse carries its rider 1.6 times as fast and makes melee blows a quarter harder; a catapult moves at 0.6 speed. Soldiers strike half again as hard as townspeople (drill; a levy a little less), 2% harder for each foe they have struck down (at most 30%), and each blow varies by a quarter either way. Someone at 0 health falls ("fell in battle"). |
+| Who fights (Caleb: regular citizens fight if the fight comes to them) | Soldiers fight enemy soldiers within 9 tiles, and townspeople who fight them. Grown-ups (14 to 59, awake) fight enemy soldiers who come onto their settlement's land, within 6 tiles of them, and leave the fight and go home below 35 health. Children run home when enemy soldiers are near. Someone the player orders to attack fights like a soldier on the way. |
+| Safety (SPEC 6) | Someone is in danger when enemy soldiers are within 10 tiles; the inspect panel shows it as an unmet need. |
+| Sieges | A town's fence and gates bar enemy soldiers (its own people pass the gates as before). Soldiers whose way an enemy fence or gate blocks break it: a fence takes 40, a gate 80; melee blows count in full, arrows for 30%, a catapult for four times its blow. A broken stretch is open ground until the town builds it again. |
+| Army leaders (SPEC 9: unique leaders; SPEC 10: succession) | The soldier of an army with the most foes struck down (then the most influence) leads it and becomes unique ("leads an army"). When a leader falls or leaves, the next one takes over at the month's turn. Leaders carry their nation's banner. |
+| When nations go to war (SPEC 10: units declaring war, a rule) | Once a year, a nation with at least 5 soldiers may declare war on a nation it is at rivalry with: 12% a year, twice that for a martial main culture, half again as likely when it has 1.2 times the other's soldiers and half as likely when not. The other's allies join it. Beginning and ending a war are major events (SPEC 7). While at war, nations do not trade and their relation does not drift. |
+| What armies do in a war | Each month: defend one of their nation's settlements where enemy soldiers are (within 90 tiles of home); otherwise, with at least 5 soldiers, march on the nearest enemy settlement within 150 tiles; go home after taking one (for a year), and when fewer than 5 are left. Soldiers marching out take 3 food from the store; more than 20 tiles from home they live off the land and sleep in the open. |
+| Conquest, plunder and destruction (Caleb) | An army takes a settlement when at least 3 of its soldiers are within 8 tiles of its middle and no enemy soldier is within 10. The settlement changes hands with its people (its unrest ends). 40% of its treasury and 30% of each good in its store (not arms) are carried off by the soldiers there and handed into their nation's treasury at their barracks. Up to two of its buildings may be set alight (an even chance each, never the campfire); a burning building burns for half a year and is then gone. A nation left with no settlements falls (4b). |
+| Peace and tribute (Caleb: peace when worn out) | Once a year, after at least a year of war: each side's weariness is the share of its fighters lost (everyone of the nation who fell, against those lost plus its soldiers now) plus a quarter for each settlement it lost. Peace comes with a chance of the higher weariness less one half, plus 8% for each year past six (at most 90%). The more worn-out side pays 30% of its treasury as tribute. Afterwards they are rivals, or at peace if the war lasted 5 years or more. |
+| What the player can do (SPEC 4 and 10) | Declare war or make peace from a nation's panel (Edit, Relations: War; making peace this way has no tribute). Place soldiers of four kinds (Units, Soldier: infantry with a sword and mail, archer with a bow, cavalry with a sword, mail and a horse, artillery with a catapult and a spear) on a nation's land. Order people to attack (Imperatives, Attack): they go to the spot and fight any enemy of their nation on the way. The war rule. |
 
 ## Questions settled by the builder in Stage 3c (Caleb can change them)
 
@@ -371,6 +401,20 @@ A step has 33 ms at 3x, so there is plenty of room for now. People only walk in 
 | Saving | Cultures, people's cultures, and how long a settlement has been without a culture or far from home are saved (world format version 8). Older setups and runs open with no cultures, which form as the run goes on. |
 | In testing | From 360 people in six groups on a Titanic map, the first cultures formed in year 4. Before settlements spread, by year 30 there were 12 to 14 living cultures on two maps, most with one settlement each. With spreading (below), by year 40 the larger cultures held 5 to 9 settlements each, and one far-off settlement on each map had broken away. |
 
+## Military and war (Stage 5)
+
+| Item | Choice |
+| --- | --- |
+| Rules | See "Questions settled by the builder in Stage 5" above. The code is in `src/sim/military.ts`; arms and buildings in `buildings.ts`; armorers, grooms and conscription in `economy.ts`; war relations in `nations.ts`. |
+| What the app shows | Soldiers wear a tunic in their nation's color and a helmet, with their weapon, mail (grey) or plate (steel), a horse with a saddlecloth, or a catapult beside them; leaders carry a banner. Zoomed far out, soldiers are dots in their nation's color. Burning buildings show flames. New buildings are drawn: barracks (stone, slate roof, the nation's banner), armory (spears and a shield by the wall), stable (a paddock fence and hay). The nation panel shows its soldiers, its armies (leader, soldiers, what each is doing) and its wars (how long, who declared, the fallen on both sides, settlements taken and lost); its relations can be set to War. The settlement panel shows its garrison and when it is under attack; its store lists arms when it holds some. The inspect panel shows a soldier's kind, army, arms and foes struck down, and safety. |
+| The rule (SPEC 10: units declaring war; Caleb's armies) | "Nations raising armies; units declaring war." Off: nations build no new barracks and declare no wars by themselves. Armies already raised stay, wars already begun go on until peace, and the player can still declare war and make peace. Fights themselves are always on (SPEC 10). |
+| Saving | Armies, wars on relations, soldiers and their arms, arms in stores, buildings burning, armorers' work, the war rule (world format version 13). Older setups and runs open with no armies and the rule on. |
+
+## Fixes found while building Stage 5
+
+- **Halls stood empty.** Jobs went only to people without one, and by the time a settlement's hall was finished everyone already had a job, so in testing no nation had officials and taxes were never collected. A hall, scriptorium or university with open places now draws one worker a month from ordinary work (first from work whose goods the store has plenty of, food last).
+- **Chasing round obstacles.** A soldier going round something to reach a foe asked for a new path on every step and never walked it; they now walk the path they get.
+
 ## After 4c (Caleb: the rules menu, where workplaces stand, pavement)
 
 | Item | Choice |
@@ -506,6 +550,10 @@ With nations: 2,000 people placed in 40 groups grew to 2,540 by year 5. Simulati
 ## Performance (Stage 4c)
 
 With technology: 2,000 people placed in 40 groups grew to 2,420 by year 5. Simulation step 3 to 3.9 ms on average, at most 18 ms (Node). In headless Chrome at 3x with about 2,200 people: 51 frames a second for the whole map and 49 to 57 at mid zoom. One fix came out of measuring: research progress was sent to the app after every scholar's spell of study, redrawing the panels on almost every update (the whole map fell to 31 to 35 frames a second); it is now sent once a month and when a technology is learned or chosen.
+
+## Performance (Stage 5)
+
+With a war: a run grown for 30 years, with people added to pass 2,000 and two neighbouring nations at war with 142 soldiers between them. Simulation step 4.4 to 5.6 ms on average, at most 14 ms (Node), through the battle (94 fell). In headless Chrome at 3x with 2,100 to 2,600 people and a battle on: 45 to 47 frames a second for the whole map (52 to 53 in the same run before the war; the first reading after zooming out is lower while the terrain is drawn), 46 to 58 at mid zoom at the battle, 51 to 58 close in. One fix came out of measuring: the nation panel's figures were rebuilt each time someone fell, about 2 ms each; they are now counted in one pass and refreshed for losses at most every 25 steps.
 
 ## Fixes found while building 4a
 

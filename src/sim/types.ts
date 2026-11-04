@@ -13,16 +13,48 @@ export type Speed = 0 | 1 | 2 | 3;
 import type { BuildingKind, Good, JobKind, SettlementStage } from './buildings';
 
 /** What a person is doing right now. */
-export type Task = 'idle' | 'walk' | 'gather' | 'eat' | 'sleep' | 'chop' | 'quarry' | 'build' | 'farm' | 'harvest' | 'mine' | 'fish' | 'dig' | 'craft' | 'trade' | 'study';
+export type Task = 'idle' | 'walk' | 'gather' | 'eat' | 'sleep' | 'chop' | 'quarry' | 'build' | 'farm' | 'harvest' | 'mine' | 'fish' | 'dig' | 'craft' | 'trade' | 'study' | 'fight' | 'drill';
 
 /** Why a person is walking. */
-export type Purpose = 'stroll' | 'food' | 'order' | 'home' | 'wood' | 'stone' | 'site' | 'settle' | 'job' | 'deliver' | 'fetch' | 'store' | 'trade' | 'tradeHome' | 'fence' | 'tax' | 'taxHome' | 'pave';
+export type Purpose = 'stroll' | 'food' | 'order' | 'home' | 'wood' | 'stone' | 'site' | 'settle' | 'job' | 'deliver' | 'fetch' | 'store' | 'trade' | 'tradeHome' | 'fence' | 'tax' | 'taxHome' | 'pave' | 'muster' | 'chase';
 
 /** An imperative given to a unit by the player (SPEC 4). */
 export interface Order {
-  kind: 'move' | 'gather' | 'rest';
-  /** Where to go (move), or where to look for food (gather). */
+  /** 'attack': go there and fight any enemy met on the way (Stage 5: WorldBox-style group orders). */
+  kind: 'move' | 'gather' | 'rest' | 'attack';
+  /** Where to go (move, attack), or where to look for food (gather). */
   tile?: number;
+}
+
+export type Weapon = 'spear' | 'sword' | 'bow' | 'crossbow';
+export type Armor = 'mail' | 'plate';
+/** Kinds of soldier the player can place (SPEC 6: types such as cavalry, artillery, infantry). */
+export type SoldierKind = 'infantry' | 'archer' | 'cavalry' | 'artillery';
+
+/** An army (SPEC 9): a nation's soldiers from one barracks, commanded by a unique leader. */
+export interface Army {
+  id: number;
+  nation: number;
+  /** The settlement it musters at (its barracks'), and the barracks. */
+  home: number;
+  barracks?: number;
+  name: string;
+  leader?: number;
+  /** What the nation (or the player) has it doing. */
+  order?: { kind: 'attack'; settlement: number } | { kind: 'defend'; settlement: number } | { kind: 'return' };
+  /** When it last took a settlement (it goes home after a while). */
+  tookAt?: number;
+}
+
+/** How a war stands (on the relation between two nations at war). */
+export interface War {
+  start: number;
+  /** Who declared it (a nation's ID). */
+  by: number;
+  /** Soldiers each side had when it began, soldiers each has lost, and settlements each has taken. Keyed by nation ID. */
+  strength: Record<number, number>;
+  lost: Record<number, number>;
+  taken: Record<number, number>;
 }
 
 /** One individual. Most are not unique and have no name (SPEC 6). */
@@ -72,7 +104,7 @@ export interface Person {
   /** Their workplace (a building), if they have a job. */
   job?: number;
   /** What they are doing for their job, while walking to it. */
-  jobStep?: 'tend' | 'harvest' | 'collect' | 'gather' | 'fetch-wood' | 'fetch-stone' | 'fetch-tools' | 'fetch-input' | 'craft' | 'fetch-fence' | 'trade-load' | 'study' | 'fetch-pave';
+  jobStep?: 'tend' | 'harvest' | 'collect' | 'gather' | 'fetch-wood' | 'fetch-stone' | 'fetch-tools' | 'fetch-input' | 'craft' | 'fetch-fence' | 'trade-load' | 'study' | 'fetch-pave' | 'fetch-gear' | 'drill';
   /** Their own coins (Caleb: coins; SPEC 6: wealth earned from jobs and trade). */
   coins?: number;
   /** Household goods they own (pottery). Wealth is coins plus what they own. */
@@ -103,6 +135,24 @@ export interface Person {
   taxFrom?: number;
   /** Settlers leaving in a revolt: the settlement they found belongs to no nation. */
   settleFree?: boolean;
+  /** A soldier (SPEC 6), their army, and their arms (SPEC 9: combat is resolved by stats and equipment). */
+  soldier?: boolean;
+  army?: number;
+  weapon?: Weapon;
+  armor?: Armor;
+  horse?: boolean;
+  engine?: boolean;
+  /** Enemies they have struck down. */
+  kills?: number;
+  /** The enemy they are fighting, and steps until they can strike again. */
+  foe?: number;
+  cooldown?: number;
+  /** Coins carried off from a taken settlement, for their nation's treasury. */
+  loot?: number;
+  /** A gate or fence of an enemy settlement they are breaking (it bars their way). */
+  siegeTile?: number;
+  /** An armorer or groom carrying the makings of these arms (or a horse) to their workplace. */
+  making?: Good;
 }
 
 export type Focus = 'balanced' | 'food' | 'housing' | 'goods';
@@ -175,7 +225,7 @@ export interface Culture {
 }
 
 /** Why someone is unique (SPEC 6). */
-export type UniqueWhy = 'ruler' | 'founder' | 'chosen' | 'influence' | 'revolt';
+export type UniqueWhy = 'ruler' | 'founder' | 'chosen' | 'influence' | 'revolt' | 'leader';
 
 /** A nation's policies (SPEC 7: like WorldBox's culture traits; SPEC 11: the list is the builder's). */
 export interface Policies {
@@ -188,7 +238,7 @@ export interface Policies {
 export type PolicyKey = keyof Policies;
 
 /** How two nations stand with each other (SPEC 7: basic relations). */
-export type RelationKind = 'alliance' | 'trade' | 'peace' | 'rivalry';
+export type RelationKind = 'alliance' | 'trade' | 'peace' | 'rivalry' | 'war';
 
 /** A nation (SPEC 7: the political layer). */
 export interface Nation {
@@ -216,6 +266,7 @@ export interface Relation {
   b: number;
   kind: RelationKind;
   since: number;
+  war?: War;
 }
 
 export interface Building {
@@ -237,6 +288,8 @@ export interface Building {
   growth?: number;
   /** Goods made here waiting to be carried to the store (a farm's harvest). */
   output?: number;
+  /** Steps left while it burns (set alight by an enemy army; Caleb: destruction). */
+  fire?: number;
 }
 
 /** Automatic behaviors the player can turn off (SPEC 10). More are added as their systems are built. */
@@ -257,9 +310,11 @@ export interface Toggles {
   uniques: boolean;
   /** Cultures researching, and nations taking technology from their cultures (SPEC 10: culture research and nation tech derivation). */
   research: boolean;
+  /** Nations raising armies, and declaring war by themselves (SPEC 10). */
+  war: boolean;
 }
 
-export const DEFAULT_TOGGLES: Toggles = { lifeCycle: true, founding: true, cultures: true, nations: true, diplomacy: true, policyChanges: true, uniques: true, research: true };
+export const DEFAULT_TOGGLES: Toggles = { lifeCycle: true, founding: true, cultures: true, nations: true, diplomacy: true, policyChanges: true, uniques: true, research: true, war: true };
 
 /** Life stages, for drawing and the inspect panel. */
 export const ADULT_AGE = 14;
@@ -292,6 +347,8 @@ export interface SimState {
   nations?: Nation[];
   nextNationId?: number;
   relations?: Relation[];
+  armies?: Army[];
+  nextArmyId?: number;
 }
 
 /** What stands on a tile as a settlement's fence. Built fences cannot be walked through; gates can. */
@@ -322,6 +379,9 @@ export interface SettlementDetails {
   /** Tiles paved and still to pave. */
   paved: number;
   toPave: number;
+  /** Soldiers mustering here, and whether enemies are on its land. */
+  garrison: number;
+  underAttack: boolean;
   /** Jobs filled and offered, adults with no job, and children in light jobs. */
   jobsFilled: number;
   jobsOffered: number;
@@ -354,6 +414,7 @@ export interface BuildingView {
   look: number;
   /** A hall's banner: its nation's color. */
   banner?: string;
+  burning?: boolean;
 }
 
 /** A settlement, as listed for the app. */
@@ -388,6 +449,9 @@ export interface NationView {
   /** How much its main culture supports each of its policies now (0 to 100). */
   support: Record<PolicyKey, number>;
   relations: { other: number; kind: RelationKind }[];
+  soldiers: number;
+  armies: { id: number; name: string; leader?: { id: number; name: string }; soldiers: number; order: string }[];
+  wars: { other: number; years: number; lost: number; enemyLost: number; taken: number; enemyTaken: number; declaredBy: number }[];
   /** Its settlements in unrest. */
   unrest: number;
   destroyedYear?: number;
@@ -478,6 +542,10 @@ export interface PersonDetails {
   office?: string;
   influence: number;
   nation?: number;
+  /** A soldier's kind, arms, army and deeds. */
+  soldier?: { kind: SoldierKind; weapon?: Weapon; armor?: Armor; horse: boolean; engine: boolean; army?: string; leads: boolean; kills: number };
+  /** Enemies are near (SPEC 6: safety). */
+  danger: boolean;
 }
 
 /** Changes the player can make to a person by hand (SPEC 1: everything can be modified). */
@@ -518,6 +586,8 @@ export type ToSim =
   /** Places a nation (SPEC 7: some are placed in setup): the settlement becomes its capital. */
   | { type: 'placeNation'; settlement: number }
   | { type: 'nationOrder'; id: number; order: NationOrder }
+  /** Places soldiers, armed (SPEC 4: placing units), of the nation whose land it is. */
+  | { type: 'placeSoldiers'; tiles: number[]; kind: SoldierKind }
   | { type: 'unpair'; id: number }
   | { type: 'save'; req: number }
   /** Development only: adds n people on land near (x, y), for speed tests. */
@@ -553,6 +623,8 @@ export interface Snapshot {
   look: Uint16Array;
   /** Bit 0: walking. Bit 1: facing left. Bit 2: male. Bits 3-4: pose (see Pose). Bits 5-6: age (see AgeLook). Bit 7: indoors (not drawn). Bit 8: carrying something. Bit 9: a ruler (drawn with a crown). */
   flags: Uint16Array;
+  /** Soldiers' arms, per person (see GEAR in render/people.ts): bits 0-2 weapon, 3-4 armor, 5 horse, 6 catapult, 7 leader, 8-12 nation color + 1. */
+  gear: Uint16Array;
   /** Tiles whose drawing changed since the last snapshot, as triples: tile, what (TileField), new value. */
   tileChanges: Int32Array;
   /** The buildings, when they changed since the last snapshot. */

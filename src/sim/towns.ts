@@ -1389,6 +1389,11 @@ export class Towns {
     }
   }
 
+  /** A building is gone (burned down by an enemy army, Stage 5). */
+  destroy(b: Building) {
+    this.removeBuilding(b);
+  }
+
   private removeBuilding(b: Building) {
     const i = this.buildings.indexOf(b);
     if (i >= 0) this.buildings.splice(i, 1);
@@ -1673,6 +1678,8 @@ export class Towns {
       from: s.from !== undefined ? this.settlementName(s.from) : undefined,
       nation: s.nation,
       unrest: s.unrest ?? 0,
+      garrison: this.w.state.people.filter((p) => p.soldier && p.army !== undefined && this.w.military.byId.get(p.army)?.home === s.id).length,
+      underAttack: this.w.military.underAttack.has(s.id),
     };
   }
 
@@ -1680,8 +1687,8 @@ export class Towns {
     return this.buildings.map((b) => {
       const { w, d } = footprint(b.kind, b.rot);
       const look = b.kind === BuildingKind.Farm ? this.economy.cropLook(b) : 0;
-      const banner = b.kind === BuildingKind.Hall ? this.w.nations?.bannerOf(b.settlement) : undefined;
-      return { id: b.id, kind: b.kind, tile: b.tile, w, d, rot: b.rot ?? 0, settlement: b.settlement ?? 0, progress: b.progress, look, banner };
+      const banner = b.kind === BuildingKind.Hall || b.kind === BuildingKind.Barracks ? this.w.nations?.bannerOf(b.settlement) : undefined;
+      return { id: b.id, kind: b.kind, tile: b.tile, w, d, rot: b.rot ?? 0, settlement: b.settlement ?? 0, progress: b.progress, look, banner, burning: b.fire !== undefined || undefined };
     });
   }
 

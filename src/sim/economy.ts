@@ -1,5 +1,6 @@
 import { Deposit, isWater } from '../map/terrain';
 import { BASE_PRICE, BUILDINGS, BuildingKind, GOODS, footprint, type Good, type JobKind } from './buildings';
+import { RECIPES } from './military';
 import { ADULT_AGE, MONTHS_PER_YEAR, TICKS_PER_MONTH, TICKS_PER_YEAR, type Building, type Person, type Settlement } from './types';
 import type { Towns } from './towns';
 import type { World } from './world';
@@ -34,7 +35,7 @@ const FISH_STEPS = 60;
 const DIG_STEPS = 50;
 const CRAFT_STEPS = 100;
 /** How much a worker carries before taking it to the store. */
-const LOAD_TARGET: Record<Good, number> = { food: 4, wood: 6, stone: 4, iron: 4, gold: 4, tools: 2, pottery: 4, clay: 4 };
+const LOAD_TARGET: Record<Good, number> = { food: 4, wood: 6, stone: 4, iron: 4, gold: 4, tools: 2, pottery: 4, clay: 4, spear: 1, sword: 1, bow: 1, crossbow: 1, mail: 1, plate: 1, horse: 1, engine: 1 };
 const ORE_PER_TRIP = 2;
 /** How far from their workplace gatherers go for trees, stone, ore, fish and clay. */
 const JOB_RANGE: Partial<Record<JobKind, number>> = { woodcutter: 20, quarryman: 28, miner: 28, fisher: 14, potter: 25 };
@@ -43,7 +44,7 @@ const STORE_RANGE = 40;
 /** Builders carry at most this much from the store at once. */
 const FETCH_LOAD = 4;
 /** When the store holds this much of what a worker makes, they stop making it for now (food: per person, plus a reserve). */
-const STOCK_CAP: Record<Good, number> = { food: 3, wood: 80, stone: 60, iron: 40, gold: 40, tools: 20, pottery: 30, clay: 0 };
+const STOCK_CAP: Record<Good, number> = { food: 3, wood: 80, stone: 60, iron: 40, gold: 40, tools: 20, pottery: 30, clay: 0, spear: 20, sword: 20, bow: 20, crossbow: 20, mail: 20, plate: 20, horse: 15, engine: 6 };
 const FOOD_RESERVE = 30;
 const JOB_GOOD: Partial<Record<JobKind, Good>> = { farmer: 'food', fisher: 'food', woodcutter: 'wood', quarryman: 'stone', miner: 'iron', smith: 'tools', potter: 'pottery' };
 /** Workers are paid this share of what they bring is worth at the settlement's price; builders a coin per spell of work. */
@@ -74,6 +75,12 @@ const TAX_RANGE = 100;
 const OFFICIAL_SHARE = 0.1;
 /** What a scholar is paid for a spell of study. */
 const SCHOLAR_WAGE = 2;
+/** Ages at which people serve as soldiers, and what a nation's treasury needs for volunteers to enlist. */
+const SOLDIER_AGE = [16, 45];
+const VOLUNTEER_TREASURY = 12;
+const SOLDIER_SHARE = 0.15;
+/** Workplaces that call workers from ordinary work when they have open places. */
+const CALLING: BuildingKind[] = [BuildingKind.Hall, BuildingKind.Scriptorium, BuildingKind.University];
 const RULER_SHARE = 0.1;
 
 export class Economy {
@@ -294,19 +301,29 @@ export class Economy {
     }
     // Camps have no formal jobs (Caleb: jobs begin at the village stage).
     if (s.stage === 'camp' || !places.length) return;
+    // Soldiers (Stage 5): a levy fills the barracks before other work; volunteers enlist only while
+    // the nation's treasury can pay them (the conscription policy, 4b).
+    const n = s.nation !== undefined ? w.nations.byId.get(s.nation) : undefined;
+    const levy = n?.policies.conscription === 'levy';
+    const enlist = !!n && (levy || n.coins + (s.coins ?? 0) >= VOLUNTEER_TREASURY);
+    // No more than a share of its people serve, so its work goes on.
+    let room = Math.floor(members.length * SOLDIER_SHARE) - members.filter((p) => p.soldier || this.jobOf(p) === 'soldier').length;
     for (const p of members) {
-      if (p.job !== undefined || p.settleAt !== undefined) continue;
+      if (p.job !== undefined || p.settleAt !== undefined || p.soldier) continue;
       const age = this.ageOf(p);
       const child = age < ADULT_AGE;
       if (child && age < LIGHT_JOB_AGE) continue;
       const near = p.home !== undefined ? (this.t.byBuildingId(p.home)?.tile ?? w.tileOf(p)) : w.tileOf(p);
+      const fit = age >= SOLDIER_AGE[0] && age <= SOLDIER_AGE[1] && enlist;
       let best: Building | null = null;
       let bestD = Infinity;
       for (const b of places) {
         const def = BUILDINGS[b.kind];
+        const barracks = b.kind === BuildingKind.Barracks;
+        if (barracks && (!fit || room <= 0)) continue;
         const open = child ? def.lightJobs - (kids.get(b.id) ?? 0) : def.jobs - (adults.get(b.id) ?? 0);
         if (open <= 0) continue;
-        const d = this.t.dist2(b.tile, near);
+        const d = barracks && levy ? -1 : this.t.dist2(b.tile, near);
         if (d < bestD) {
           bestD = d;
           best = b;
@@ -314,8 +331,60 @@ export class Economy {
       }
       if (!best) continue;
       p.job = best.id;
+      if (best.kind === BuildingKind.Barracks) room--;
       const m = child ? kids : adults;
       m.set(best.id, (m.get(best.id) ?? 0) + 1);
+    }
+    // A hall, scriptorium or university with open places draws one worker a month from ordinary
+    // work (otherwise they stay empty once everyone has a job): first from work whose goods the
+    // store has plenty of, food last.
+    for (const b of places) {
+      if (!CALLING.includes(b.kind) || BUILDINGS[b.kind].jobs - (adults.get(b.id) ?? 0) <= 0) continue;
+      let donor: Person | null = null;
+      let score = -Infinity;
+      for (const p of members) {
+        if (p.job === undefined || p.tradeTo !== undefined || p.soldier || this.ageOf(p) < ADULT_AGE) continue;
+        const at = this.t.byBuildingId(p.job);
+        if (!at || CALLING.includes(at.kind) || at.kind === BuildingKind.Barracks || at.kind === BuildingKind.Market) continue;
+        const job = BUILDINGS[at.kind].job;
+        const g = job ? JOB_GOOD[job] : undefined;
+        const sc = (this.full(s, g) ? 2 : 0) - (g === 'food' ? 1 : 0) + w.rand.next() * 0.5;
+        if (sc > score) {
+          score = sc;
+          donor = p;
+        }
+      }
+      if (!donor) continue;
+      const old = donor.job!;
+      this.quit(donor);
+      adults.set(old, (adults.get(old) ?? 1) - 1);
+      donor.job = b.id;
+      adults.set(b.id, (adults.get(b.id) ?? 0) + 1);
+    }
+    // Barracks still short: a levy calls up fit adults from other work; volunteers now and then
+    // leave other work to enlist. Officials, scholars and traders on a run stay.
+    if (!enlist) return;
+    for (const b of places) {
+      if (b.kind !== BuildingKind.Barracks) continue;
+      let open = Math.min(room, BUILDINGS[b.kind].jobs - (adults.get(b.id) ?? 0));
+      if (open <= 0) continue;
+      for (const p of members) {
+        if (open <= 0) break;
+        const age = this.ageOf(p);
+        if (p.soldier || p.job === b.id || p.tradeTo !== undefined || p.settleAt !== undefined || age < SOLDIER_AGE[0] || age > SOLDIER_AGE[1]) continue;
+        const job = this.jobOf(p);
+        if (job === 'official' || job === 'scholar' || job === 'soldier' || w.nations.rulers.has(p.id)) continue;
+        if (!levy && w.rand.next() > 0.3) continue;
+        if (p.job !== undefined) {
+          const old = p.job;
+          this.quit(p);
+          adults.set(old, (adults.get(old) ?? 1) - 1);
+        }
+        p.job = b.id;
+        adults.set(b.id, (adults.get(b.id) ?? 0) + 1);
+        open--;
+        room--;
+      }
     }
   }
 
@@ -323,6 +392,7 @@ export class Economy {
     delete p.job;
     delete p.jobStep;
     delete p.tradeTo;
+    delete p.making;
   }
 
   jobOf(p: Person): JobKind | undefined {
@@ -402,6 +472,9 @@ export class Economy {
       return true;
     }
     if (job === 'smith' || job === 'minter' || job === 'potter') return this.make(p, b, s, job);
+    if (job === 'armorer' || job === 'groom') return this.makeArms(p, b, s);
+    // Soldiers' days are the military's (see Military.soldierWork).
+    if (job === 'soldier') return false;
     // Carrying what they made: take it to the store.
     if (p.load && p.site === undefined) {
       if (p.load.n >= LOAD_TARGET[p.load.kind] || !this.canGather(b)) {
@@ -487,6 +560,31 @@ export class Economy {
     if (job === 'potter') return this.digClay(p, b);
     const need = job === 'smith' ? SMITH_IRON : 1;
     if (this.stockOf(s)[input] < need) return false;
+    p.jobStep = 'fetch-input';
+    w.goTo(p, this.storeTile(s, w.tileOf(p)), 'fetch');
+    return true;
+  }
+
+  /**
+   * Armorers and grooms (Stage 5: arms made as goods, Caleb): take the makings of whatever their
+   * nation's soldiers here lack most from the store, make it at the armory or stable, and carry
+   * it back to the store, where soldiers fetch it.
+   */
+  private makeArms(p: Person, b: Building, s: Settlement): boolean {
+    const w = this.w;
+    if (this.ageOf(p) < ADULT_AGE) return false;
+    if (p.load && p.making) {
+      p.jobStep = 'craft';
+      w.goTo(p, this.doorTile(b), 'job');
+      return true;
+    }
+    if (p.load) {
+      w.goTo(p, this.storeTile(s, w.tileOf(p)), 'deliver');
+      return true;
+    }
+    const g = w.military.nextArms(s, b.kind);
+    if (!g) return false;
+    p.making = g;
     p.jobStep = 'fetch-input';
     w.goTo(p, this.storeTile(s, w.tileOf(p)), 'fetch');
     return true;
@@ -654,6 +752,26 @@ export class Economy {
       const s = p.settlement !== undefined ? this.t.byId(p.settlement) : undefined;
       const step = p.jobStep;
       delete p.jobStep;
+      if (step === 'fetch-gear') {
+        // A soldier at the store, taking the arms their part in the army calls for.
+        if (s) this.w.military.takeGear(p, s);
+        return this.done(p);
+      }
+      if (step === 'fetch-input' && p.making) {
+        // An armorer or groom at the store, taking the makings of arms (or a horse).
+        const recipe = RECIPES[p.making] ?? {};
+        const st = s ? this.stockOf(s) : undefined;
+        if (st && Object.entries(recipe).every(([g, n]) => st[g as Good] >= (n ?? 0))) {
+          let total = 0;
+          for (const [g, n] of Object.entries(recipe)) {
+            st[g as Good] -= n ?? 0;
+            total += n ?? 0;
+          }
+          p.load = { kind: recipe.iron ? 'iron' : recipe.wood ? 'wood' : 'food', n: total };
+          this.t.settlementsChanged = true;
+        } else delete p.making;
+        return this.done(p);
+      }
       if (step === 'fetch-input') {
         // A blacksmith or minter at the store, taking ore for the workshop.
         const job = this.jobOf(p);
@@ -877,7 +995,10 @@ export class Economy {
       if (--p.wait > 0) return true;
       const job = this.jobOf(p);
       const s = p.settlement !== undefined ? this.t.byId(p.settlement) : undefined;
-      if (p.load && job === 'smith' && p.load.kind === 'iron') p.load = { kind: 'tools', n: 1 };
+      if (p.load && p.making && (job === 'armorer' || job === 'groom')) {
+        p.load = { kind: p.making, n: 1 };
+        delete p.making;
+      } else if (p.load && job === 'smith' && p.load.kind === 'iron') p.load = { kind: 'tools', n: 1 };
       else if (p.load && job === 'potter' && p.load.kind === 'clay') p.load = { kind: 'pottery', n: p.load.n };
       else if (p.load && job === 'minter' && p.load.kind === 'gold') {
         // The mint is the settlement's: the coins go straight into its treasury.
@@ -891,7 +1012,7 @@ export class Economy {
       this.wear(p);
       return this.done(p);
     }
-    if (p.task === 'trade') {
+    if (p.task === 'trade' || p.task === 'drill') {
       if (--p.wait > 0) return true;
       return this.done(p);
     }
@@ -1007,6 +1128,14 @@ export class Economy {
       const hall = { kind: BuildingKind.Hall, test: any };
       if (food >= people) options.unshift(hall);
       else options.push(hall);
+    }
+    // A nation's capital and its towns keep barracks for a standing army (Caleb), two in a city; an
+    // armory and a stable beside them once its technology allows (SPEC 10: a rule).
+    const barracks = count(BuildingKind.Barracks);
+    if (hasStore && this.w.toggles.war && this.w.nations?.wantsHall(s) && people >= 30) {
+      if (barracks < (s.stage === 'city' ? 2 : 1) && food >= people) options.push({ kind: BuildingKind.Barracks, test: any });
+      if (barracks && !count(BuildingKind.Armory)) options.push({ kind: BuildingKind.Armory, test: any });
+      if (barracks && !count(BuildingKind.Stable)) options.push({ kind: BuildingKind.Stable, test: any });
     }
     // Only what the settlement's technology allows (Caleb: some buildings are locked behind technology).
     return options.filter((o) => this.w.tech.canBuild(s, o.kind));

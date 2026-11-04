@@ -10,6 +10,7 @@ import {
   type NationEdit,
   type NationView,
   type Person,
+  type War,
   type Policies,
   type PolicyKey,
   type Relation,
@@ -69,10 +70,10 @@ export const POLICY_DEFS: { key: PolicyKey; label: string; choices: [string, str
   { key: 'taxation', label: 'Taxation', choices: ['light', 'heavy'], names: ['Light', 'Heavy'], axis: 'order', fits: ['communal', 'hierarchical'], note: 'Officials take a tenth of each settlement’s treasury a year, or a quarter.' },
   { key: 'trade', label: 'Trade', choices: ['open', 'closed'], names: ['Open', 'Closed'], axis: 'livelihood', fits: ['mercantile', 'agrarian'], note: 'Closed: its traders deal only within the nation and with allies.' },
   { key: 'expansion', label: 'Expansion', choices: ['expansionist', 'settled'], names: ['Expansionist', 'Settled'], axis: 'outlook', fits: ['progressive', 'traditional'], note: 'Expansionist nations send settlers out to take land.' },
-  { key: 'conscription', label: 'Conscription', choices: ['levy', 'volunteers'], names: ['Levy', 'Volunteers'], axis: 'temper', fits: ['martial', 'peaceful'], note: 'How armies are raised (armies come in Stage 5).' },
+  { key: 'conscription', label: 'Conscription', choices: ['levy', 'volunteers'], names: ['Levy', 'Volunteers'], axis: 'temper', fits: ['martial', 'peaceful'], note: 'Levy: the barracks fill first, soldiers are paid little and fight a little worse. Volunteers: paid more, they enlist only while the treasury can pay.' },
 ];
 
-export const RELATION_NAME: Record<RelationKind, string> = { alliance: 'Alliance', trade: 'Trade', peace: 'Peace', rivalry: 'Rivalry' };
+export const RELATION_NAME: Record<RelationKind, string> = { alliance: 'Alliance', trade: 'Trade', peace: 'Peace', rivalry: 'Rivalry', war: 'War' };
 
 /** Influence a person needs to claim rule, and to become unique by themselves. */
 const CLAIM_INFLUENCE = 24;
@@ -205,8 +206,24 @@ export class Nations {
       if (r.kind === kind) return;
       r.kind = kind;
       r.since = this.w.state.tick;
+      if (kind !== 'war') delete r.war;
     } else if (kind !== 'peace') this.relations.push({ a: lo, b: hi, kind, since: this.w.state.tick });
     this.changed = true;
+  }
+
+  /** Two nations go to war (Stage 5; see Military.declare). */
+  setWar(a: number, b: number, war: War) {
+    this.setRelation(a, b, 'war');
+    const r = this.relations.find((x) => x.a === Math.min(a, b) && x.b === Math.max(a, b));
+    if (r) r.war = war;
+  }
+
+  /** A war ends: the two stand as rivals, or at peace if the war went on long (Caleb: peace when worn out). */
+  endWar(a: number, b: number) {
+    const r = this.relations.find((x) => x.a === Math.min(a, b) && x.b === Math.max(a, b));
+    if (!r || r.kind !== 'war') return;
+    const years = (this.w.state.tick - (r.war?.start ?? r.since)) / TICKS_PER_YEAR;
+    this.setRelation(a, b, years >= 5 ? 'peace' : 'rivalry');
   }
 
   /** Whether traders of two settlements may deal with each other (relations and trade policies). */
@@ -215,7 +232,7 @@ export class Nations {
     const nb = b.nation !== undefined ? this.byId.get(b.nation) : undefined;
     if (na && nb && na === nb) return true;
     const rel = na && nb ? this.relation(na.id, nb.id) : 'peace';
-    if (rel === 'rivalry') return false;
+    if (rel === 'rivalry' || rel === 'war') return false;
     const closed = na?.policies.trade === 'closed' || nb?.policies.trade === 'closed';
     if (closed) return rel === 'alliance';
     return true;
@@ -324,7 +341,9 @@ export class Nations {
           const gap = this.nearest(a, b);
           if (gap > CONTACT_TILES) continue;
           const want = this.wantedRelation(a, b, gap);
-          if (want !== this.relation(a.id, b.id) && w.rand.next() < 0.5) this.setRelation(a.id, b.id, want);
+          // War is made and ended by the military (Stage 5), not by drifting opinion.
+          const now = this.relation(a.id, b.id);
+          if (now !== 'war' && want !== now && w.rand.next() < 0.5) this.setRelation(a.id, b.id, want);
         }
       }
     }
@@ -614,6 +633,11 @@ export class Nations {
     this.markChanged();
   }
 
+  /** Wars beginning and ending are major events too (SPEC 7). */
+  majorEvents(nations: Nation[]) {
+    this.majorEvent(nations);
+  }
+
   /** During a major event a nation's policies may change toward what its main culture supports (SPEC 7). */
   private majorEvent(nations: Nation[]) {
     const w = this.w;
@@ -697,7 +721,15 @@ export class Nations {
     }
     if (e.relation) {
       const o = this.byId.get(e.relation.other);
-      if (o && o !== n && o.destroyed === undefined) this.setRelation(n.id, o.id, e.relation.kind);
+      if (o && o !== n && o.destroyed === undefined) {
+        // The player declares war or makes peace (Stage 5).
+        const now = this.relation(n.id, o.id);
+        if (e.relation.kind === 'war') this.w.military.declare(n, o);
+        else {
+          if (now === 'war') this.w.military.makePeace(n.id, o.id);
+          this.setRelation(n.id, o.id, e.relation.kind);
+        }
+      }
     }
     this.towns.buildingsChanged = true; // halls fly the nation's color
     this.markChanged();
@@ -715,20 +747,30 @@ export class Nations {
 
   views(): NationView[] {
     const w = this.w;
+    // One pass over everyone: people and officials by nation, soldiers by nation and army.
+    const soldiers = new Map<number, number>();
+    const inArmy = new Map<number, number>();
+    const peopleOf = new Map<number, number>();
+    const officialsOf = new Map<number, number>();
+    for (const p of w.state.people) {
+      if (p.soldier) {
+        const id = w.military.nationOf(p);
+        if (id !== undefined) soldiers.set(id, (soldiers.get(id) ?? 0) + 1);
+        if (p.army !== undefined) inArmy.set(p.army, (inArmy.get(p.army) ?? 0) + 1);
+      }
+      const nid = p.settlement !== undefined ? this.towns.byId(p.settlement)?.nation : undefined;
+      if (nid === undefined) continue;
+      peopleOf.set(nid, (peopleOf.get(nid) ?? 0) + 1);
+      if (w.towns.economy.jobOf(p) === 'official') officialsOf.set(nid, (officialsOf.get(nid) ?? 0) + 1);
+    }
     return this.list.map((n) => {
       const mine = this.settlementsOf(n);
-      const ids = new Set(mine.map((s) => s.id));
       const tally = this.cultureTally(n);
       const main = this.mainCulture(n);
       const sup = main ? this.supportOf(main) : undefined;
       const ruler = n.ruler !== undefined ? w.byId.get(n.ruler) : undefined;
-      let people = 0;
-      let officials = 0;
-      for (const p of w.state.people) {
-        if (p.settlement === undefined || !ids.has(p.settlement)) continue;
-        people++;
-        if (w.towns.economy.jobOf(p) === 'official') officials++;
-      }
+      const people = peopleOf.get(n.id) ?? 0;
+      const officials = officialsOf.get(n.id) ?? 0;
       return {
         id: n.id,
         name: n.name,
@@ -750,6 +792,23 @@ export class Nations {
         unrest: mine.filter((s) => (s.unrest ?? 0) >= UNREST_MONTHS).length,
         destroyedYear: n.destroyed !== undefined ? Math.floor(n.destroyed / TICKS_PER_YEAR) + 1 : undefined,
         techs: [...(n.techs ?? [])],
+        soldiers: soldiers.get(n.id) ?? 0,
+        armies: w.military.armyViews(n, inArmy),
+        wars: this.relations
+          .filter((r) => r.kind === 'war' && (r.a === n.id || r.b === n.id))
+          .map((r) => {
+            const other = r.a === n.id ? r.b : r.a;
+            const war = r.war;
+            return {
+              other,
+              years: Math.floor((w.state.tick - (war?.start ?? r.since)) / TICKS_PER_YEAR),
+              lost: war?.lost[n.id] ?? 0,
+              enemyLost: war?.lost[other] ?? 0,
+              taken: war?.taken[n.id] ?? 0,
+              enemyTaken: war?.taken[other] ?? 0,
+              declaredBy: war?.by ?? other,
+            };
+          }),
       };
     });
   }

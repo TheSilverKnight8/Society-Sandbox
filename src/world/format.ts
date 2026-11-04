@@ -24,8 +24,10 @@ import type { WorldDoc } from './types';
 //  11  Stage 4c: cultures' technologies and research, nations' technologies, scholars; the
 //      research rule. (Older cultures start knowing nothing; buildings already standing stay.)
 //  12  Pavement on each tile, and each settlement's planned paths. (New fields only.)
+//  13  Stage 5: armies, wars on relations, soldiers and their arms, arms in stores, buildings
+//      burning, armorers' work; the war rule. (Runs from before have no armies; the rule starts on.)
 
-export const WORLD_FORMAT_VERSION = 12;
+export const WORLD_FORMAT_VERSION = 13;
 
 export function upgradeWorld(version: number, doc: WorldDoc): WorldDoc {
   if (version > WORLD_FORMAT_VERSION) throw new Error('This was saved by a newer version of the app. Reload the app to update it, then try again.');
@@ -76,6 +78,10 @@ export function upgradeWorld(version: number, doc: WorldDoc): WorldDoc {
   if (version < 11) {
     // The new rule (culture research) starts on; cultures and nations know nothing yet.
     doc = { ...doc, state: { ...doc.state, toggles: { ...DEFAULT_TOGGLES, ...doc.state.toggles } } };
+  }
+  if (version < 13) {
+    // No armies yet; the new rule (war) starts on. Stores without arms get none (the simulation fills missing goods with 0).
+    doc = { ...doc, state: { ...doc.state, toggles: { ...DEFAULT_TOGGLES, ...doc.state.toggles }, armies: doc.state.armies ?? [], nextArmyId: doc.state.nextArmyId ?? 1 } };
   }
   return doc;
 }

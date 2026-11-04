@@ -6,6 +6,7 @@ import { drawBuilding } from './buildings';
 import { STEP, isoX, isoY } from './iso';
 import type { IsoView } from './IsoView';
 import { NAVY } from './style';
+import { NATION_COLORS } from '../sim/nations';
 
 // Draws people as small stick figures in Stickman Arena's style: a round head, a tunic
 // (a long dress for women), arms and legs, in skin and clothing colors inside a navy
@@ -17,6 +18,13 @@ const HEIGHT = 0.42;
 /** Below this height on screen (device pixels), people are dots. */
 const MIN_FIGURE_PX = 10;
 const LEGS = '#5a4232';
+/** Wood, iron, mail, steel and a horse's coat, for soldiers' arms. */
+const WOOD = '#8a5a34';
+const IRON = '#6f747b';
+const MAIL = '#9aa3ad';
+const STEEL = '#d3d9e0';
+const HORSE = '#9a6440';
+const HORSE_DARK = '#5e3a24';
 /** Elders' hair. */
 const GREY = '#cfcbc4';
 /** How tall children are drawn, against an adult. */
@@ -31,12 +39,12 @@ interface Sprite {
 
 const sprites = new Map<string, Sprite>();
 
-function sprite(look: number, male: boolean, pose: number, frame: number, px: number, elder: boolean, carrying = false, crown = false): Sprite {
-  const key = `${look}|${male ? 1 : 0}|${pose}|${frame}|${px}|${elder ? 1 : 0}|${carrying ? 1 : 0}|${crown ? 1 : 0}`;
+function sprite(look: number, male: boolean, pose: number, frame: number, px: number, elder: boolean, carrying = false, crown = false, gear = 0): Sprite {
+  const key = `${look}|${male ? 1 : 0}|${pose}|${frame}|${px}|${elder ? 1 : 0}|${carrying ? 1 : 0}|${crown ? 1 : 0}|${gear}`;
   const hit = sprites.get(key);
   if (hit) return hit;
   if (sprites.size > 4000) sprites.clear();
-  const s = pose === Pose.Sleep ? drawSleeping(look, male, px, elder) : drawStanding(look, male, pose, frame, px, elder, carrying, crown);
+  const s = pose === Pose.Sleep ? drawSleeping(look, male, px, elder) : drawStanding(look, male, pose, frame, px, elder, carrying, crown, gear);
   sprites.set(key, s);
   return s;
 }
@@ -126,11 +134,20 @@ function drawSleeping(look: number, male: boolean, px: number, elder: boolean): 
   return { canvas, ax, ay };
 }
 
-function drawStanding(look: number, male: boolean, pose: number, frame: number, px: number, elder: boolean, carrying: boolean, crown: boolean): Sprite {
+function drawStanding(look: number, male: boolean, pose: number, frame: number, px: number, elder: boolean, carrying: boolean, crown: boolean, gear = 0): Sprite {
   const H = px;
   const lw = Math.max(1.2, H * 0.08);
-  const w = Math.ceil(H * 0.7 + lw * 2);
-  const h = Math.ceil(H * (crown ? 1.22 : 1.06) + lw * 2);
+  // A soldier's arms (see Snapshot.gear): weapon, armor, horse, catapult, leader's banner, nation color.
+  const weapon = gear & 7;
+  const armor = (gear >> 3) & 3;
+  const horse = (gear & 32) !== 0;
+  const engine = (gear & 64) !== 0;
+  const leader = (gear & 128) !== 0;
+  const soldier = gear !== 0;
+  const nationC = gear >> 8 ? NATION_COLORS[(gear >> 8) - 1] : null;
+  const lift = horse ? 0.34 : 0;
+  const w = Math.ceil(H * (engine ? 1.3 : horse ? 1.25 : soldier ? 0.9 : 0.7) + lw * 2);
+  const h = Math.ceil(H * ((crown ? 1.22 : 1.06) + lift + (leader ? 0.36 : weapon === 1 ? 0.2 : 0)) + lw * 2);
   const canvas = document.createElement('canvas');
   canvas.width = w;
   canvas.height = h;
@@ -148,6 +165,126 @@ function drawStanding(look: number, male: boolean, pose: number, frame: number, 
   const swing = work ? 0 : frame === 1 ? 1 : frame === 3 ? -1 : 0;
   const limb = limbOf(ctx, H, lw);
   const limbW = Math.max(1.3, H * 0.08);
+  const outline = (fill: string, width = lw) => {
+    ctx.fillStyle = fill;
+    ctx.fill();
+    ctx.strokeStyle = NAVY;
+    ctx.lineWidth = width;
+    ctx.stroke();
+  };
+
+  // A catapult beside an artillery soldier.
+  if (engine) {
+    limb(
+      [
+        [0.22, -0.08],
+        [0.58, -0.08],
+      ],
+      WOOD,
+      limbW * 1.4,
+    );
+    limb(
+      [
+        [0.3, -0.1],
+        [0.52, -0.46],
+      ],
+      WOOD,
+      limbW,
+    );
+    ctx.beginPath();
+    ctx.arc(0.53 * H, -0.48 * H, 0.05 * H, 0, Math.PI * 2);
+    outline('#8c8c8c', lw * 0.8);
+    for (const x of [0.27, 0.53]) {
+      ctx.beginPath();
+      ctx.arc(x * H, -0.05 * H, 0.06 * H, 0, Math.PI * 2);
+      outline(WOOD, lw * 0.8);
+    }
+  }
+  // A horse under a rider (drawn facing right), then the rider sits higher.
+  if (horse) {
+    // Tail, then legs in pairs (back and front), body, neck and head.
+    limb(
+      [
+        [-0.3, -0.4],
+        [-0.38, -0.2],
+      ],
+      HORSE_DARK,
+      limbW * 0.9,
+    );
+    for (const x of [-0.24, -0.17, 0.17, 0.24]) {
+      const step = frame % 2 === 1 ? (x > 0 ? 0.04 : -0.04) * (Math.abs(x) > 0.2 ? 1 : -1) : 0;
+      limb(
+        [
+          [x, -0.32],
+          [x + step, 0],
+        ],
+        x === -0.17 || x === 0.17 ? HORSE_DARK : HORSE,
+        limbW * 0.85,
+      );
+    }
+    ctx.beginPath();
+    ctx.ellipse(0, -0.38 * H, 0.3 * H, 0.11 * H, 0, 0, Math.PI * 2);
+    outline(HORSE);
+    ctx.beginPath();
+    ctx.moveTo(0.18 * H, -0.44 * H);
+    ctx.lineTo(0.3 * H, -0.66 * H);
+    ctx.lineTo(0.39 * H, -0.62 * H);
+    ctx.lineTo(0.3 * H, -0.36 * H);
+    ctx.closePath();
+    outline(HORSE);
+    ctx.beginPath();
+    ctx.ellipse(0.41 * H, -0.59 * H, 0.11 * H, 0.05 * H, 0.55, 0, Math.PI * 2);
+    outline(HORSE);
+    limb(
+      [
+        [0.21, -0.47],
+        [0.31, -0.66],
+      ],
+      HORSE_DARK,
+      limbW * 0.7,
+    );
+    if (nationC) {
+      // A saddlecloth in the nation's color.
+      ctx.beginPath();
+      ctx.rect(-0.13 * H, -0.47 * H, 0.2 * H, 0.15 * H);
+      outline(nationC, lw * 0.8);
+    }
+    ctx.translate(0, -lift * H);
+  }
+  // A leader carries their nation's banner.
+  if (leader) {
+    limb(
+      [
+        [-0.2, -0.3],
+        [-0.2, -1.36],
+      ],
+      WOOD,
+      limbW * 0.8,
+    );
+    ctx.beginPath();
+    ctx.moveTo(-0.2 * H, -1.36 * H);
+    ctx.lineTo(0.12 * H, -1.3 * H);
+    ctx.lineTo(-0.2 * H, -1.14 * H);
+    ctx.closePath();
+    outline(nationC ?? '#fc3f3f', lw * 0.8);
+  }
+  // A bow or crossbow is held out in front; a spear stands beside them.
+  if (weapon === 1) {
+    limb(
+      [
+        [0.2, 0.02],
+        [0.2, -1.2],
+      ],
+      WOOD,
+      limbW * 0.75,
+    );
+    ctx.beginPath();
+    ctx.moveTo(0.16 * H, -1.18 * H);
+    ctx.lineTo(0.2 * H, -1.32 * H);
+    ctx.lineTo(0.24 * H, -1.18 * H);
+    ctx.closePath();
+    outline(STEEL, lw * 0.7);
+  }
 
   // Long hair falls behind the head and shoulders.
   if (!male) {
@@ -159,24 +296,35 @@ function drawStanding(look: number, male: boolean, pose: number, frame: number, 
     ctx.lineWidth = lw;
     ctx.stroke();
   }
-  // Legs.
-  const hem = male ? -0.3 : -0.07;
-  limb(
-    [
-      [-0.05, hem],
-      [-0.06 + swing * 0.07, 0],
-    ],
-    LEGS,
-    limbW,
-  );
-  limb(
-    [
-      [0.05, hem],
-      [0.06 - swing * 0.07, 0],
-    ],
-    LEGS,
-    limbW,
-  );
+  // Legs (a rider's hang at the horse's side).
+  const hem = male || soldier ? -0.3 : -0.07;
+  if (horse) {
+    limb(
+      [
+        [0.02, hem],
+        [0.06, -0.08],
+      ],
+      LEGS,
+      limbW,
+    );
+  } else {
+    limb(
+      [
+        [-0.05, hem],
+        [-0.06 + swing * 0.07, 0],
+      ],
+      LEGS,
+      limbW,
+    );
+    limb(
+      [
+        [0.05, hem],
+        [0.06 - swing * 0.07, 0],
+      ],
+      LEGS,
+      limbW,
+    );
+  }
   // Arms: swinging when walking; reaching down and forward in turn when gathering or eating.
   const reach = work ? (frame % 2 === 0 ? 1 : -1) : 0;
   limb(
@@ -205,18 +353,33 @@ function drawStanding(look: number, male: boolean, pose: number, frame: number, 
     ctx.lineWidth = lw;
     ctx.stroke();
   }
-  // Tunic, or a long dress.
+  // Tunic, or a long dress; soldiers wear their nation's color.
+  const short = male || soldier;
   ctx.beginPath();
   ctx.moveTo(-0.1 * H, -0.68 * H);
   ctx.lineTo(0.1 * H, -0.68 * H);
-  ctx.lineTo((male ? 0.14 : 0.16) * H, hem * H);
-  ctx.lineTo(-(male ? 0.14 : 0.16) * H, hem * H);
+  ctx.lineTo((short ? 0.14 : 0.16) * H, hem * H);
+  ctx.lineTo(-(short ? 0.14 : 0.16) * H, hem * H);
   ctx.closePath();
-  ctx.fillStyle = clothC;
-  ctx.fill();
-  ctx.strokeStyle = NAVY;
-  ctx.lineWidth = lw;
-  ctx.stroke();
+  outline(nationC ?? clothC);
+  // Armor over the tunic: mail (grey, to the waist) or plate (bright steel, with a breastplate line).
+  if (armor) {
+    ctx.beginPath();
+    ctx.moveTo(-0.11 * H, -0.69 * H);
+    ctx.lineTo(0.11 * H, -0.69 * H);
+    ctx.lineTo(0.125 * H, -0.44 * H);
+    ctx.lineTo(-0.125 * H, -0.44 * H);
+    ctx.closePath();
+    outline(armor === 2 ? STEEL : MAIL);
+    if (armor === 2) {
+      ctx.beginPath();
+      ctx.moveTo(0, -0.66 * H);
+      ctx.lineTo(0, -0.47 * H);
+      ctx.strokeStyle = NAVY;
+      ctx.lineWidth = lw * 0.6;
+      ctx.stroke();
+    }
+  }
   // Head, then hair on top.
   ctx.beginPath();
   ctx.arc(0, -0.84 * H, 0.13 * H, 0, Math.PI * 2);
@@ -232,6 +395,51 @@ function drawStanding(look: number, male: boolean, pose: number, frame: number, 
   ctx.strokeStyle = NAVY;
   ctx.lineWidth = lw;
   ctx.stroke();
+  // Soldiers wear a helmet: an iron cap, or a steel helm with plate.
+  if (soldier && !crown) {
+    ctx.beginPath();
+    ctx.arc(0, -0.86 * H, 0.14 * H, Math.PI, 0);
+    ctx.closePath();
+    outline(armor === 2 ? STEEL : IRON);
+  }
+  // Swords are held up in the right hand; bows and crossbows out in front.
+  if (weapon === 2) {
+    limb(
+      [
+        [0.15, -0.42],
+        [0.3, -0.78],
+      ],
+      STEEL,
+      limbW * 0.8,
+    );
+    limb(
+      [
+        [0.1, -0.47],
+        [0.21, -0.41],
+      ],
+      WOOD,
+      limbW * 0.7,
+    );
+  } else if (weapon === 3 || weapon === 4) {
+    ctx.beginPath();
+    ctx.arc(0.08 * H, -0.5 * H, 0.2 * H, -1.1, 1.1);
+    ctx.strokeStyle = NAVY;
+    ctx.lineWidth = limbW * 0.8 + lw * 1.6;
+    ctx.stroke();
+    ctx.strokeStyle = WOOD;
+    ctx.lineWidth = limbW * 0.8;
+    ctx.stroke();
+    if (weapon === 4) {
+      limb(
+        [
+          [0.0, -0.5],
+          [0.3, -0.5],
+        ],
+        WOOD,
+        limbW,
+      );
+    }
+  }
   // A ruler wears a gold crown.
   if (crown) {
     ctx.beginPath();
@@ -271,8 +479,8 @@ export function drawPeople(
 ) {
   const n = client.population + buildings.length;
   if (!n) return;
-  if (buf.length < n * 6) {
-    buf = new Float32Array(n * 6 + 600);
+  if (buf.length < n * 7) {
+    buf = new Float32Array(n * 7 + 600);
     order = new Int32Array(n + 100);
   }
   const { size, elevation } = view.src;
@@ -280,7 +488,7 @@ export function drawPeople(
   const W = view.width;
   const Hs = view.height;
   let count = 0;
-  client.forEach(now, (_k, id, x, y, look, flags) => {
+  client.forEach(now, (_k, id, x, y, look, flags, gear) => {
     if (flags & 128) return; // asleep indoors
     const tx = Math.min(size - 1, Math.max(0, Math.floor(x)));
     const ty = Math.min(size - 1, Math.max(0, Math.floor(y)));
@@ -290,13 +498,14 @@ export function drawPeople(
     const Y = isoY(x, y, h);
     const [sx, sy] = view.toScreen(X, Y);
     if (sx < -40 || sy < -60 || sx > W + 40 || sy > Hs + 40) return;
-    const o = count * 6;
+    const o = count * 7;
     buf[o] = sx;
     buf[o + 1] = sy;
     buf[o + 2] = x + y;
     buf[o + 3] = look;
     buf[o + 4] = flags;
     buf[o + 5] = id;
+    buf[o + 6] = gear;
     order[count] = count;
     count++;
   });
@@ -322,22 +531,23 @@ export function drawPeople(
     const [sx, sy] = view.toScreen(isoX(cx, cy), isoY(cx, cy, hi));
     const reach = z * (b.w + b.d) * 0.6;
     if (sx < -reach || sy < -reach || sx > W + reach || sy > Hs + reach) continue;
-    const o = count * 6;
+    const o = count * 7;
     buf[o] = sx;
     buf[o + 1] = sy;
     buf[o + 2] = cx + cy;
     buf[o + 3] = -1;
     buf[o + 4] = Math.min(3, Math.max(0, hi - (lo === Infinity ? hi : lo)));
     buf[o + 5] = k;
+    buf[o + 6] = 0;
     order[count] = count;
     count++;
   }
-  const idx = Array.from(order.subarray(0, count)).sort((a, b) => buf[a * 6 + 2] - buf[b * 6 + 2]);
+  const idx = Array.from(order.subarray(0, count)).sort((a, b) => buf[a * 7 + 2] - buf[b * 7 + 2]);
 
   const dpr = view.dpr;
   // Flat buildings (fields) lie on the ground: drawn first, under everyone.
   for (const k of idx) {
-    const o = k * 6;
+    const o = k * 7;
     if (buf[o + 3] >= 0) continue;
     const b = buildings[buf[o + 5]];
     if (BUILDINGS[b.kind].flat) drawBuilding(ctx, b, buf[o], buf[o + 1], z, dpr, now, 0, STEP);
@@ -345,12 +555,13 @@ export function drawPeople(
   const figurePx = Math.round(HEIGHT * z * dpr);
   const t = Math.floor(now / 140);
   for (const k of idx) {
-    const o = k * 6;
+    const o = k * 7;
     const sx = buf[o];
     const sy = buf[o + 1];
     const look = buf[o + 3];
     const flags = buf[o + 4];
     const id = buf[o + 5];
+    const gear = buf[o + 6];
     if (look < 0) {
       const b = buildings[id];
       if (BUILDINGS[b.kind].flat) continue;
@@ -365,7 +576,7 @@ export function drawPeople(
       const r = Math.max(ageLook === AgeLook.Young || ageLook === AgeLook.Child ? 1.1 : 1.6, 0.06 * z * AGE_SCALE[ageLook]);
       ctx.beginPath();
       ctx.arc(sx, sy - r, r, 0, Math.PI * 2);
-      ctx.fillStyle = CLOTHES[unpackLook(look).clothes];
+      ctx.fillStyle = gear >> 8 ? NATION_COLORS[(gear >> 8) - 1] : CLOTHES[unpackLook(look).clothes];
       ctx.fill();
       ctx.lineWidth = Math.max(0.8, r * 0.45);
       ctx.strokeStyle = NAVY;
@@ -374,7 +585,7 @@ export function drawPeople(
     }
     const pose = (flags >> 3) & 3;
     const frame = flags & 1 ? (t + id) % 4 : pose === Pose.Work ? Math.floor((t + id) / 2) % 2 : 0;
-    const sp = sprite(look, (flags & 4) !== 0, pose, frame, Math.max(6, Math.min(px, 90)), ageLook === AgeLook.Elder, (flags & 256) !== 0, (flags & 512) !== 0);
+    const sp = sprite(look, (flags & 4) !== 0, pose, frame, Math.max(6, Math.min(px, 90)), ageLook === AgeLook.Elder, (flags & 256) !== 0, (flags & 512) !== 0, gear);
     const scale = px > 90 ? px / 90 : 1;
     ctx.drawImage(sp.canvas, sx - (sp.ax * scale) / dpr, sy - (sp.ay * scale) / dpr, (sp.canvas.width * scale) / dpr, (sp.canvas.height * scale) / dpr);
   }

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router';
-import { Amphora, Anvil, Apple, Axe, Blocks, BookOpen, Building, Coins, Crown, Eraser, GraduationCap, ScrollText, Landmark, MapPinPlus, Fish, Flag, Flame, Footprints, Hammer, Hand, House, ListChecks, LogOut, Maximize, Minus, Moon, Pause, Pencil, Pickaxe, Play, Plus, RotateCcw, Save, Split, Store, Tent, User, Users, Warehouse, Wheat, X } from 'lucide-react';
+import { Amphora, Anvil, Apple, Axe, Blocks, BookOpen, Building, Coins, Crosshair, Crown, Fence, Shield, Sword, Swords, Eraser, GraduationCap, ScrollText, Landmark, MapPinPlus, Fish, Flag, Flame, Footprints, Hammer, Hand, House, ListChecks, LogOut, Maximize, Minus, Moon, Pause, Pencil, Pickaxe, Play, Plus, RotateCcw, Save, Split, Store, Tent, User, Users, Warehouse, Wheat, X } from 'lucide-react';
 import { ButtonLink, Button, IconButton, Input, Segmented, Spinner, cx } from '../components/ui';
 import { alertDialog, confirmDialog, notify, promptDialog } from '../components/dialogs';
 import { useApp } from '../lib/store';
@@ -10,9 +10,9 @@ import { SimClient } from '../sim/client';
 import { CLOTHES, SKINS, unpackLook } from '../sim/look';
 import { ADULT_AGE, DEFAULT_TOGGLES, ELDER_AGE, MONTHS_PER_YEAR, TICKS_PER_MONTH, TICKS_PER_YEAR, type PersonDetails, type PersonEdit, type Speed, type Toggles } from '../sim/types';
 import { Deposit, Terrain } from '../map/terrain';
-import { BUILDINGS, BuildingKind, GOODS, GOOD_NAME, JOB_NAME, LIGHT_JOB_NAME, STAGE_NAME, anchorFor, footprint, kindAllowsTerrain, needsShore } from '../sim/buildings';
+import { ARMS, BUILDINGS, BuildingKind, GOODS, GOOD_NAME, JOB_NAME, LIGHT_JOB_NAME, STAGE_NAME, anchorFor, footprint, kindAllowsTerrain, needsShore } from '../sim/buildings';
 import { maxTrees } from '../sim/towns';
-import { TileField, type BuildingView, type CultureEdit, type CultureView, type Focus, type NationEdit, type NationView, type RelationKind, type SettlementDetails, type SettlementView } from '../sim/types';
+import { TileField, type BuildingView, type CultureEdit, type CultureView, type Focus, type NationEdit, type NationView, type RelationKind, type SettlementDetails, type SettlementView, type SoldierKind } from '../sim/types';
 import { NATION_COLORS, POLICY_DEFS, RELATION_NAME } from '../sim/nations';
 import { BUILDING_TECH, POLICY_TECH, TECHS, TECH_BY_ID } from '../sim/tech';
 import { CULTURE_COLORS, TRAIT_AXES } from '../sim/cultures';
@@ -28,7 +28,7 @@ import type { WorldDoc } from '../world/types';
 // in place of god powers.
 
 type Tab = 'main' | 'units' | 'disasters' | 'imperatives';
-type UnitTool = 'person' | 'remove' | 'nation' | BuildingKind;
+type UnitTool = 'person' | 'remove' | 'nation' | 'soldier' | BuildingKind;
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
@@ -123,13 +123,22 @@ const BUILDING_ICON: Record<number, typeof House> = {
   [BuildingKind.Hall]: Landmark,
   [BuildingKind.Scriptorium]: ScrollText,
   [BuildingKind.University]: GraduationCap,
+  [BuildingKind.Barracks]: Shield,
+  [BuildingKind.Armory]: Swords,
+  [BuildingKind.Stable]: Fence,
 };
 
-type OrderKind = 'move' | 'gather' | 'rest' | 'stop';
+type OrderKind = 'move' | 'gather' | 'rest' | 'attack' | 'stop';
 /** An imperative being given: waiting for who it is for, or for where (SPEC 4: either order works). */
 type Pending = { kind: OrderKind; stage: 'who' | 'where' } | null;
 
-const ORDER_LABEL: Record<OrderKind, string> = { move: 'Move', gather: 'Gather food', rest: 'Rest', stop: 'Stop' };
+const ORDER_LABEL: Record<OrderKind, string> = { move: 'Move', gather: 'Gather food', rest: 'Rest', attack: 'Attack', stop: 'Stop' };
+const SOLDIER_KINDS: { kind: SoldierKind; label: string; note: string }[] = [
+  { kind: 'infantry', label: 'Infantry', note: 'a sword and mail' },
+  { kind: 'archer', label: 'Archer', note: 'a bow' },
+  { kind: 'cavalry', label: 'Cavalry', note: 'a sword, mail and a horse' },
+  { kind: 'artillery', label: 'Artillery', note: 'a catapult and a spear' },
+];
 
 function WorldScreen({ doc }: { doc: WorldDoc }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -139,6 +148,7 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
   const unsaved = useApp((s) => s.worldUnsaved);
   const [tab, setTab] = useState<Tab>('main');
   const [tool, setTool] = useState<UnitTool>('person');
+  const [soldierKind, setSoldierKind] = useState<SoldierKind>('infantry');
   /** Which way round a building being placed or ordered goes (R turns it). */
   const [rot, setRot] = useState<0 | 1>(0);
   const [radius, setRadius] = useState(2);
@@ -229,8 +239,8 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
   useEffect(() => applyLandRef.current(), [mapView]);
 
   const selectedSet = useRef<Set<number>>(new Set());
-  const live = useRef({ tab, tool, radius, pending, selection, pendingS, chosenSettlement, rot });
-  live.current = { tab, tool, radius, pending, selection, pendingS, chosenSettlement, rot };
+  const live = useRef({ tab, tool, radius, pending, selection, pendingS, chosenSettlement, rot, soldierKind });
+  live.current = { tab, tool, radius, pending, selection, pendingS, chosenSettlement, rot, soldierKind };
   /** The box being dragged out to choose people, in screen pixels. */
   const box = useRef<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const atStart = tick === savedTick;
@@ -483,6 +493,14 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
         if (placed.has(i)) return;
         placed.add(i);
         client.place([i]);
+      } else if (tool === 'soldier') {
+        if (placed.has(i)) return;
+        placed.add(i);
+        const b = buildingAt.current.get(i);
+        const owner = (b && b.settlement) || territory.current[i];
+        const sv = settlementsRef.current.find((x) => x.id === owner);
+        if (!sv || sv.abandoned || sv.nation === undefined) return notify('Soldiers are placed on a nation’s land (a settlement that belongs to a nation).', 'warn');
+        client.placeSoldiers([i], live.current.soldierKind);
       } else if (tool === 'nation') {
         if (placed.has(i)) return;
         placed.add(i);
@@ -530,7 +548,7 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
       }
       chooseRef.current(ids);
       if (pending?.stage === 'who' && ids.length) {
-        if (pending.kind === 'move' || pending.kind === 'gather') setPending({ kind: pending.kind, stage: 'where' });
+        if (pending.kind === 'move' || pending.kind === 'gather' || pending.kind === 'attack') setPending({ kind: pending.kind, stage: 'where' });
         else {
           giveRef.current(pending.kind, ids);
           setPending(null);
@@ -734,7 +752,7 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
       setPending({ kind, stage: 'who' });
       return;
     }
-    if (kind === 'move' || kind === 'gather') setPending({ kind, stage: 'where' });
+    if (kind === 'move' || kind === 'gather' || kind === 'attack') setPending({ kind, stage: 'where' });
     else {
       giveOrder(kind, selection);
       setPending(null);
@@ -1055,6 +1073,9 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
                 <ToolButton active={tool === 'nation'} label="Nation" onClick={() => setTool('nation')}>
                   <Crown className="size-5" />
                 </ToolButton>
+                <ToolButton active={tool === 'soldier'} label="Soldier" onClick={() => setTool('soldier')}>
+                  <Sword className="size-5" />
+                </ToolButton>
                 {PLACE_KINDS.map((k) => {
                   const Icon = BUILDING_ICON[k];
                   return (
@@ -1067,6 +1088,12 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
                   <Eraser className="size-5" />
                 </ToolButton>
               </div>
+              {tool === 'soldier' ? (
+                <div className="flex shrink-0 flex-col justify-center gap-1 border-l border-line pl-3">
+                  <span className="text-xs text-muted">Kind</span>
+                  <Segmented size="xs" value={soldierKind} onChange={(v) => setSoldierKind(v as SoldierKind)} options={SOLDIER_KINDS.map((k) => ({ value: k.kind, label: k.label }))} />
+                </div>
+              ) : null}
               {tool === 'remove' ? (
                 <div className="flex w-44 shrink-0 flex-col justify-center gap-1 border-l border-line pl-3">
                   <span className="flex justify-between text-xs text-muted">
@@ -1088,6 +1115,8 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
               <p className="w-56 shrink-0 self-center text-xs text-muted">
                 {tool === 'person'
                   ? 'Click or drag on land to place adults, one per tile.'
+                  : tool === 'soldier'
+                    ? `Click or drag on a nation’s land to place soldiers of that nation, armed with ${SOLDIER_KINDS.find((k) => k.kind === soldierKind)!.note}. They serve in its army raised for placed soldiers.`
                   : tool === 'nation'
                     ? 'Click a settlement outside any nation: it becomes the capital of a new nation, and its most influential adult its ruler.'
                     : tool === 'remove'
@@ -1106,9 +1135,9 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
                 <span className="text-[0.6875rem] text-muted">Click or box people</span>
               </div>
               <div className="flex gap-1">
-                {(['move', 'gather', 'rest', 'stop'] as const).map((k) => (
+                {(['move', 'gather', 'rest', 'attack', 'stop'] as const).map((k) => (
                   <ToolButton key={k} active={pending?.kind === k} label={ORDER_LABEL[k]} onClick={() => onOrderButton(k)}>
-                    {k === 'move' ? <Footprints className="size-5" /> : k === 'gather' ? <Apple className="size-5" /> : k === 'rest' ? <Moon className="size-5" /> : <Hand className="size-5" />}
+                    {k === 'move' ? <Footprints className="size-5" /> : k === 'gather' ? <Apple className="size-5" /> : k === 'rest' ? <Moon className="size-5" /> : k === 'attack' ? <Crosshair className="size-5" /> : <Hand className="size-5" />}
                   </ToolButton>
                 ))}
               </div>
@@ -1167,7 +1196,7 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
                     : pending?.stage === 'who'
                   ? `${ORDER_LABEL[pending.kind]}: now click a person or drag a box around people. Esc cancels.`
                   : pending?.stage === 'where'
-                    ? `${ORDER_LABEL[pending.kind]}: now click ${pending.kind === 'move' ? 'where to go' : 'where to look for food'}. Esc cancels.`
+                    ? `${ORDER_LABEL[pending.kind]}: now click ${pending.kind === 'move' ? 'where to go' : pending.kind === 'attack' ? 'where to go; on the way they fight any enemy of their nation at war' : 'where to look for food'}. Esc cancels.`
                     : selection.length
                       ? `${selection.length === 1 ? '1 person' : `${selection.length} people`} chosen. Pick an order.`
                       : 'Choose people first (click one, or drag a box), or pick an order first and then choose.'}
@@ -1229,6 +1258,8 @@ const TASK_TEXT: Record<string, string> = {
   trade: 'Trading',
   quarry: 'Breaking stone',
   build: 'Building',
+  fight: 'Fighting',
+  drill: 'Drilling by the barracks',
 };
 
 const WALK_TEXT: Record<string, string> = {
@@ -1246,6 +1277,11 @@ const WALK_TEXT: Record<string, string> = {
   deliver: 'Taking goods to the store',
   fetch: 'Fetching materials from the store',
   store: 'Going to the store for food',
+  muster: 'Marching with their army',
+  chase: 'Going after an enemy',
+  tax: 'Going to collect taxes',
+  taxHome: 'Bringing taxes to the hall',
+  pave: 'Going to pave',
 };
 
 function doingText(d: PersonDetails) {
@@ -1309,6 +1345,7 @@ function InspectPanel({
     if (d.rest < 25) needs.push('Tired');
     if (!d.hasHome) needs.push('Shelter');
     if (d.jobNeed === 'unmet') needs.push('Job');
+    if (d.danger) needs.push('Safety');
   }
   return (
     <div className="absolute right-3 top-16 max-h-[calc(100%-14.5rem)] w-72 overflow-y-auto rounded-xl border border-line bg-surface/97 p-3.5 text-sm shadow-pop scrollbar-thin">
@@ -1358,6 +1395,22 @@ function InspectPanel({
               <>
                 <dt className="text-muted">Office</dt>
                 <dd>{d.office}</dd>
+              </>
+            )}
+            {d.soldier && (
+              <>
+                <dt className="text-muted">Soldier</dt>
+                <dd>
+                  {SOLDIER_NAME[d.soldier.kind]}
+                  {d.soldier.leads ? ', leader' : ''} of the {d.soldier.army ?? 'army'}
+                </dd>
+                <dt className="text-muted">Arms</dt>
+                <dd>
+                  {[d.soldier.weapon ? GOOD_NAME[d.soldier.weapon].replace(/s$/, '') : 'No weapon', d.soldier.armor ? GOOD_NAME[d.soldier.armor] : null, d.soldier.horse ? 'horse' : null, d.soldier.engine ? 'catapult' : null]
+                    .filter(Boolean)
+                    .join(', ')}
+                  {d.soldier.kills > 0 && <span className="text-muted"> · {d.soldier.kills} foe{d.soldier.kills === 1 ? '' : 's'} struck down</span>}
+                </dd>
               </>
             )}
             <dt className="text-muted">Culture</dt>
@@ -1410,7 +1463,7 @@ function InspectPanel({
             <dt className="text-muted">Shelter</dt>
             <dd className="text-xs">{d.hasHome ? 'Has a home' : <span className="text-warn">No home</span>}</dd>
             <dt className="text-muted">Safety</dt>
-            <dd className="text-xs">Safe (no threats exist yet)</dd>
+            <dd className="text-xs">{d.danger ? <span className="text-warn">In danger (enemy soldiers near)</span> : 'Safe'}</dd>
           </dl>
           <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
             <dt className="text-muted">Doing</dt>
@@ -1446,7 +1499,7 @@ function InspectPanel({
           {editing && <EditPerson details={d} cultures={cultures} onEdit={onEdit} onUnpair={onUnpair} onMakeRuler={d.nation !== undefined && !d.office && d.ageYears >= ADULT_AGE ? () => onMakeRuler(d.nation!) : undefined} />}
         </>
       ) : (
-        <p className="mt-3 text-muted">{died ? `This person died of ${died}.` : 'This person is no longer in the world.'}</p>
+        <p className="mt-3 text-muted">{died === 'battle' ? 'This person fell in battle.' : died ? `This person died of ${died}.` : 'This person is no longer in the world.'}</p>
       )}
     </div>
   );
@@ -1595,6 +1648,7 @@ function RulesPanel({ toggles, onChange, onClose }: { toggles: Toggles; onChange
     { key: 'diplomacy', label: 'Diplomatic relation changes', note: 'Off: nations stay as they stand with each other. You can still change relations in a nation’s panel.' },
     { key: 'uniques', label: 'Emergence of unique individuals', note: 'Off: people no longer become unique by their influence. Rulers are still unique, and you can still name anyone.' },
     { key: 'research', label: 'Culture research and nation tech derivation', note: 'Off: cultures stop researching and nations stop taking up technology from their cultures. What they know stays, and you can still set it in a culture’s panel.' },
+    { key: 'war', label: 'Nations raising armies; units declaring war', note: 'Off: nations build no new barracks and declare no wars by themselves. Armies already raised stay, wars already begun go on until peace, and you can still declare war and make peace in a nation’s panel.' },
     { key: 'cultures', label: 'Culture formation', note: 'Off: no new cultures form, and none break away by themselves. Cultures that exist stay; newcomers still take up the culture they live among, and you can still order a settlement to break away.' },
   ];
   return (
@@ -1920,7 +1974,8 @@ function ResearchSection({ culture: c, onEdit }: { culture: CultureView; onEdit:
 
 const TRAIT_NOTE = 'Mercantile cultures build markets sooner; agrarian ones keep more fields. Progressive cultures break away more readily when far from home than traditional ones. Traits also shape what a culture researches, and nations’ policies; temper matters more once wars exist.';
 
-const UNIQUE_WHY: Record<string, string> = { ruler: 'a ruler', founder: 'a founder', chosen: 'named by you', influence: 'by their influence', revolt: 'led a revolt' };
+const UNIQUE_WHY: Record<string, string> = { ruler: 'a ruler', founder: 'a founder', chosen: 'named by you', influence: 'by their influence', revolt: 'led a revolt', leader: 'leads an army' };
+const SOLDIER_NAME: Record<SoldierKind, string> = { infantry: 'Infantry', archer: 'Archer', cavalry: 'Cavalry', artillery: 'Artillery' };
 
 /** A nation's name with its color, opening its panel. */
 function NationLink({ nation, onOpen }: { nation?: NationView; onOpen: (id: number) => void }) {
@@ -2033,6 +2088,10 @@ function NationPanel({
                 <dd>
                   {n.coins} coins <span className="text-muted">({n.officials} official{n.officials === 1 ? '' : 's'})</span>
                 </dd>
+                <dt className="text-muted">Soldiers</dt>
+                <dd>
+                  {n.soldiers} <span className="text-muted">({n.armies.length} arm{n.armies.length === 1 ? 'y' : 'ies'})</span>
+                </dd>
                 {n.unrest > 0 && (
                   <>
                     <dt className="text-muted">Unrest</dt>
@@ -2082,6 +2141,59 @@ function NationPanel({
                 </span>
               </p>
               <p className="mt-1 text-xs leading-relaxed">{n.techs.length ? n.techs.map((t) => TECH_BY_ID.get(t)?.name).join(' · ') : <span className="text-muted">None yet. A nation has all of its main culture’s technology, and some of its other cultures’.</span>}</p>
+              {n.wars.length > 0 && (
+                <>
+                  <p className="label-caps mt-3 text-warn">At war</p>
+                  <ul className="mt-1 space-y-1.5">
+                    {n.wars.map((wr) => {
+                      const o = nations.find((x) => x.id === wr.other);
+                      if (!o) return null;
+                      return (
+                        <li key={wr.other}>
+                          <span className="flex items-center justify-between gap-2">
+                            <NationLink nation={o} onOpen={onNation} />
+                            <span className="shrink-0 text-xs text-muted">
+                              {wr.years ? `${wr.years} year${wr.years === 1 ? '' : 's'}` : 'this year'}, declared by {wr.declaredBy === n.id ? 'it' : 'them'}
+                            </span>
+                          </span>
+                          <span className="block text-xs text-muted">
+                            Fallen: {wr.lost} of theirs, {wr.enemyLost} of the enemy’s. Settlements taken: {wr.taken}, lost: {wr.enemyTaken}.
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </>
+              )}
+              {n.armies.length > 0 && (
+                <>
+                  <p className="label-caps mt-3 text-muted">Armies</p>
+                  <ul className="mt-1 space-y-1.5">
+                    {n.armies.map((a) => (
+                      <li key={a.id}>
+                        <span className="flex items-center justify-between gap-2">
+                          <span>{a.name}</span>
+                          <span className="shrink-0 text-xs text-muted">{a.soldiers} soldiers</span>
+                        </span>
+                        <span className="block text-xs text-muted">
+                          {a.leader ? (
+                            <>
+                              Led by{' '}
+                              <button className="text-ink underline decoration-accent decoration-2 underline-offset-2 hover:text-accent" onClick={() => onPerson(a.leader!.id)}>
+                                {a.leader.name}
+                              </button>
+                              .{' '}
+                            </>
+                          ) : (
+                            'No leader yet. '
+                          )}
+                          {a.order}.
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
               {n.relations.length > 0 && (
                 <>
                   <p className="label-caps mt-3 text-muted">Relations</p>
@@ -2098,14 +2210,14 @@ function NationPanel({
                               value={r.kind}
                               onChange={(e) => onEdit({ relation: { other: r.other, kind: e.target.value as RelationKind } })}
                             >
-                              {(['alliance', 'trade', 'peace', 'rivalry'] as const).map((k) => (
+                              {(['alliance', 'trade', 'peace', 'rivalry', 'war'] as const).map((k) => (
                                 <option key={k} value={k}>
                                   {RELATION_NAME[k]}
                                 </option>
                               ))}
                             </select>
                           ) : (
-                            <span className={cx('shrink-0 text-xs', r.kind === 'rivalry' ? 'text-warn' : 'text-muted')}>{RELATION_NAME[r.kind]}</span>
+                            <span className={cx('shrink-0 text-xs', r.kind === 'rivalry' || r.kind === 'war' ? 'text-warn' : 'text-muted')}>{RELATION_NAME[r.kind]}</span>
                           )}
                         </li>
                       );
@@ -2241,6 +2353,18 @@ function SettlementPanel({
                   <span className="text-muted">None (independent)</span>
                 )}
               </dd>
+              {d.underAttack && (
+                <>
+                  <dt className="text-muted">War</dt>
+                  <dd className="text-warn">Under attack (enemy soldiers on its land)</dd>
+                </>
+              )}
+              {d.garrison > 0 && (
+                <>
+                  <dt className="text-muted">Garrison</dt>
+                  <dd>{d.garrison} soldiers</dd>
+                </>
+              )}
               {d.unrest > 0 && (
                 <>
                   <dt className="text-muted">Unrest</dt>
@@ -2301,11 +2425,12 @@ function SettlementPanel({
               <span>price</span>
             </p>
             <ul className="mt-1 space-y-0.5">
-              {GOODS.map((g) => (
+              {/* Arms are listed when the store holds some (they are made for soldiers, not sold). */}
+              {GOODS.filter((g) => !ARMS.includes(g) || d.stock[g] > 0).map((g) => (
                 <li key={g} className="flex justify-between">
                   <span>{GOOD_NAME[g]}</span>
                   <span className={d.stock[g] ? '' : 'text-muted'}>
-                    {d.stock[g]} <span className="text-[0.6875rem] text-muted">· {d.prices[g]}</span>
+                    {d.stock[g]} {!ARMS.includes(g) && <span className="text-[0.6875rem] text-muted">· {d.prices[g]}</span>}
                   </span>
                 </li>
               ))}

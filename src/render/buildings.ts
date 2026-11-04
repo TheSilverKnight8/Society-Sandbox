@@ -87,6 +87,9 @@ const SHAPES: Partial<Record<BuildingKind, Shape>> = {
   [BuildingKind.Hall]: { wall: 0.86, roof: 0.74, inset: 0.14, roofKind: 'gable', wallColor: C.stone, roofColor: C.slate, roofShade: C.slateDark, roofLine: C.slateDark },
   [BuildingKind.Scriptorium]: { wall: 0.66, roof: 0.6, inset: 0.18, roofKind: 'gable', wallColor: C.stone, roofColor: C.tile, roofShade: C.tileDark, roofLine: C.tileDark },
   [BuildingKind.University]: { wall: 1.0, roof: 0.72, inset: 0.16, roofKind: 'gable', wallColor: C.limestone, roofColor: C.tile, roofShade: C.tileDark, roofLine: C.tileDark },
+  [BuildingKind.Barracks]: { wall: 0.62, roof: 0.5, inset: 0.16, roofKind: 'gable', wallColor: C.stone, roofColor: C.slate, roofShade: C.slateDark, roofLine: C.slateDark },
+  [BuildingKind.Armory]: { wall: 0.52, roof: 0.42, inset: 0.22, roofKind: 'gable', wallColor: C.stone, roofColor: C.shingle, roofShade: C.shingleDark, roofLine: C.shingleDark },
+  [BuildingKind.Stable]: { wall: 0.46, roof: 0.5, inset: 0.18, roofKind: 'gable', wallColor: C.plank, roofColor: C.thatch, roofShade: C.thatchDark, roofLine: C.thatchLine },
 };
 
 type P = [number, number];
@@ -212,7 +215,7 @@ function drawHouseLike(ctx: CanvasRenderingContext2D, kind: BuildingKind, sh: Sh
         }
         for (const t of [0.33, 0.66]) line(ctx, on(0.02, lower * t), on(0.98, lower * t), C.stoneDark, 0.8);
       }
-    } else if (kind === BuildingKind.Smithy || kind === BuildingKind.Mint || kind === BuildingKind.Hall || kind === BuildingKind.Scriptorium || kind === BuildingKind.University) {
+    } else if (kind === BuildingKind.Smithy || kind === BuildingKind.Mint || kind === BuildingKind.Hall || kind === BuildingKind.Scriptorium || kind === BuildingKind.University || kind === BuildingKind.Barracks || kind === BuildingKind.Armory) {
       for (let k = 1; k < 4; k++) {
         const h = (wall * k) / 4;
         line(ctx, left(0.02, h), left(0.98, h), C.stoneDark, 0.8);
@@ -397,10 +400,45 @@ function drawProps(ctx: CanvasRenderingContext2D, kind: BuildingKind, w: number,
     poly(ctx, [[bx, by + 0.025], [bx + 0.08, by], [bx + 0.08, by + 0.06], [bx, by + 0.085]], C.page);
     return;
   }
-  if (kind === BuildingKind.Hall) {
+  if (kind === BuildingKind.Armory) {
+    // Spears leaning on a rack by the left wall, and a round shield.
+    const base = pt(a - 0.1, b + 0.04);
+    for (let k = 0; k < 3; k++) {
+      const x = base[0] - 0.28 + k * 0.08;
+      beam(ctx, [x, base[1] - 0.12 + k * 0.04], [x + 0.08, base[1] - 0.62 + k * 0.04], C.timber, 1);
+      poly(ctx, [[x + 0.06, base[1] - 0.6 + k * 0.04], [x + 0.09, base[1] - 0.7 + k * 0.04], [x + 0.11, base[1] - 0.6 + k * 0.04]], '#d3d9e0');
+    }
+    ctx.beginPath();
+    ctx.arc(base[0] - 0.02, base[1] - 0.2, 0.09, 0, Math.PI * 2);
+    ctx.fillStyle = C.banner;
+    ctx.fill();
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(base[0] - 0.02, base[1] - 0.2, 0.03, 0, Math.PI * 2);
+    ctx.fillStyle = '#d3d9e0';
+    ctx.fill();
+    ctx.stroke();
+    return;
+  }
+  if (kind === BuildingKind.Stable) {
+    // A paddock fence in front and a hay bale.
+    const p0 = pt(a + 0.02, b - 0.1);
+    const p1 = pt(a + 0.02, -b + 0.1);
+    for (const t of [0, 0.33, 0.66, 1]) {
+      const x = p0[0] + (p1[0] - p0[0]) * t;
+      const y = p0[1] + (p1[1] - p0[1]) * t;
+      beam(ctx, [x, y], [x, y - 0.16], C.fence, 1.2);
+    }
+    beam(ctx, [p0[0], p0[1] - 0.13], [p1[0], p1[1] - 0.13], C.fence, 1.1);
+    beam(ctx, [p0[0], p0[1] - 0.06], [p1[0], p1[1] - 0.06], C.fence, 1.1);
+    const hay = pt(-a + 0.25, b + 0.05);
+    poly(ctx, [[hay[0] - 0.1, hay[1]], [hay[0] + 0.1, hay[1]], [hay[0] + 0.1, hay[1] - 0.1], [hay[0] - 0.1, hay[1] - 0.1]], C.wheat);
+    return;
+  }
+  if (kind === BuildingKind.Hall || kind === BuildingKind.Barracks) {
     // A tall pole by the front corner flying the nation's banner.
     const base = pt(a + 0.05, b - 0.1);
-    const top: P = [base[0], base[1] - 1.75];
+    const top: P = [base[0], base[1] - (kind === BuildingKind.Barracks ? 1.3 : 1.75)];
     beam(ctx, base, top, C.timber, 1.1);
     poly(
       ctx,
@@ -798,7 +836,7 @@ function sprite(b: BuildingView, step: number, frame: number, px: number, plinth
   }
   const { w, d } = b;
   const sh = SHAPES[b.kind];
-  const tall = (sh ? sh.wall + sh.roof : b.kind === BuildingKind.Mine ? 0.7 : b.kind === BuildingKind.Market ? 0.6 : 0.4) + (b.kind === BuildingKind.Hall ? 0.4 : 0);
+  const tall = (sh ? sh.wall + sh.roof : b.kind === BuildingKind.Mine ? 0.7 : b.kind === BuildingKind.Market ? 0.6 : 0.4) + (b.kind === BuildingKind.Hall || b.kind === BuildingKind.Barracks ? 0.4 : 0);
   const halfW = (w + d) / 4 + 0.3;
   const up = (w + d) / 8 + tall + 0.3;
   const down = (w + d) / 8 + plinth + 0.25;
@@ -867,6 +905,42 @@ export function drawBuilding(ctx: CanvasRenderingContext2D, b: BuildingView, sx:
   const sp = sprite(b, prog, frame, px, plinthLevels * step);
   const scale = want / px;
   ctx.drawImage(sp.canvas, sx - (sp.ax * scale) / dpr, sy - (sp.ay * scale) / dpr, (sp.canvas.width * scale) / dpr, (sp.canvas.height * scale) / dpr);
+  if (b.burning) drawFlames(ctx, b, sx, sy, z, now);
+}
+
+/** Flames over a building set alight by an enemy army (Stage 5), flickering. */
+function drawFlames(ctx: CanvasRenderingContext2D, b: BuildingView, sx: number, sy: number, z: number, now: number) {
+  const sh = SHAPES[b.kind];
+  const top = (sh ? sh.wall + sh.roof * 0.6 : 0.4) * z;
+  const spots = Math.max(2, Math.min(5, b.w + b.d - 1));
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = NAVY;
+  ctx.lineWidth = Math.max(1, z * 0.025);
+  for (let k = 0; k < spots; k++) {
+    const u = (k / (spots - 1) - 0.5) * (b.w + b.d) * 0.32 * z;
+    const flick = Math.sin(now / 120 + k * 1.7 + b.id) * 0.5 + 0.5;
+    const hgt = z * (0.32 + 0.18 * flick);
+    const wid = z * 0.13;
+    const x = sx + u;
+    const y = sy - top + Math.abs(u) * 0.35;
+    ctx.beginPath();
+    ctx.moveTo(x - wid, y);
+    ctx.quadraticCurveTo(x - wid * 1.2, y - hgt * 0.5, x + (flick - 0.5) * wid * 0.6, y - hgt);
+    ctx.quadraticCurveTo(x + wid * 1.2, y - hgt * 0.5, x + wid, y);
+    ctx.closePath();
+    ctx.fillStyle = C.flame;
+    ctx.fill();
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x - wid * 0.5, y);
+    ctx.quadraticCurveTo(x - wid * 0.6, y - hgt * 0.35, x, y - hgt * 0.6);
+    ctx.quadraticCurveTo(x + wid * 0.6, y - hgt * 0.35, x + wid * 0.5, y);
+    ctx.closePath();
+    ctx.fillStyle = C.flameHot;
+    ctx.fill();
+  }
+  ctx.restore();
 }
 
 export function buildingName(kind: BuildingKind) {

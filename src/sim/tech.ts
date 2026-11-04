@@ -54,6 +54,12 @@ export const TECHS: TechDef[] = [
   { id: 'guilds', name: 'Guilds', age: 'High Medieval', cost: 150, needs: ['commerce', 'ironWorking'], lean: ['mercantile', 'communal'], opens: 'Workshops work a fifth faster' },
   { id: 'scholasticism', name: 'Scholasticism', age: 'High Medieval', cost: 180, needs: ['mathematics', 'architecture'], lean: ['peaceful', 'progressive'], opens: 'University (scholars research twice as fast)' },
   { id: 'banking', name: 'Banking', age: 'Late Medieval', cost: 200, needs: ['coinage', 'guilds'], resource: { good: 'gold', n: 6 }, lean: ['mercantile'], opens: 'Traders carry half again as much' },
+  { id: 'archery', name: 'Archery', age: 'Classical', cost: 70, needs: [], lean: ['martial'], opens: 'Bows (archers)' },
+  { id: 'horsemanship', name: 'Horsemanship', age: 'Classical', cost: 90, needs: [], lean: ['martial', 'agrarian'], opens: 'Stable (horses for cavalry)' },
+  { id: 'mail', name: 'Mail armor', age: 'Early Medieval', cost: 120, needs: ['ironWorking'], resource: { good: 'iron', n: 6 }, lean: ['martial', 'hierarchical'], opens: 'Mail armor' },
+  { id: 'engineering', name: 'Engineering', age: 'High Medieval', cost: 160, needs: ['mathematics', 'masonry'], lean: ['progressive', 'martial'], opens: 'Catapults (artillery)' },
+  { id: 'crossbows', name: 'Crossbows', age: 'High Medieval', cost: 150, needs: ['archery', 'engineering'], lean: ['martial'], opens: 'Crossbows' },
+  { id: 'plate', name: 'Plate armor', age: 'Late Medieval', cost: 220, needs: ['mail', 'guilds'], resource: { good: 'iron', n: 10 }, lean: ['martial', 'hierarchical'], opens: 'Plate armor' },
   { id: 'printing', name: 'Printing press', age: 'Late Medieval', cost: 240, needs: ['scholasticism', 'guilds'], resource: { good: 'iron', n: 6 }, lean: ['progressive', 'communal'], opens: 'Research half again as fast' },
 ];
 export const TECH_BY_ID = new Map(TECHS.map((t) => [t.id, t]));
@@ -67,7 +73,11 @@ export const BUILDING_TECH: Partial<Record<BuildingKind, string>> = {
   [BuildingKind.Hall]: 'administration',
   [BuildingKind.Scriptorium]: 'writing',
   [BuildingKind.University]: 'scholasticism',
+  [BuildingKind.Armory]: 'ironWorking',
+  [BuildingKind.Stable]: 'horsemanship',
 };
+/** Arms that need a technology to make (Caleb: technology opens better kinds). Spears need only the armory (Iron working). */
+export const GOOD_TECH: Partial<Record<Good, string>> = { spear: 'ironWorking', sword: 'ironWorking', bow: 'archery', crossbow: 'crossbows', mail: 'mail', plate: 'plate', horse: 'horsemanship', engine: 'engineering' };
 /** Town fences and gates need this. */
 export const FENCE_TECH = 'fortification';
 /** Policy choices that need a technology first (SPEC 7: technology affects what policies a nation has). */
