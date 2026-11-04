@@ -1,6 +1,7 @@
 import { MAX_ELEV } from '../map/terrain';
 import { STEP, isoX, isoY, type TileSource } from './iso';
 import { LEVELS, TerrainChunks } from './terrainChunks';
+import { BACKDROP } from './style';
 
 // The isometric view: a canvas, a camera, and a drawing loop. It handles moving the
 // camera itself (wheel to zoom, right or middle drag to pan, WASD or arrow keys) and
@@ -32,7 +33,6 @@ export interface ViewHooks {
 }
 
 const MAX_ZOOM = 96;
-const BACKGROUND = '#e9dcc2';
 /** Time per frame spent drawing chunk pictures that are missing or out of date. */
 const RENDER_BUDGET_MS = 10;
 
@@ -212,7 +212,7 @@ export class IsoView {
     const ctx = this.ctx;
     const { zoom } = this.cam;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-    ctx.fillStyle = BACKGROUND;
+    ctx.fillStyle = BACKDROP;
     ctx.fillRect(0, 0, this.width, this.height);
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'medium';
@@ -222,6 +222,7 @@ export class IsoView {
     const level = LEVELS.find((l) => l * 1.2 >= want) ?? LEVELS[LEVELS.length - 1];
     const [vx0, vy0] = this.toIso(0, 0);
     const [vx1, vy1] = this.toIso(this.width, this.height);
+    this.chunks.beginFrame();
     const visible = this.chunks.ordered().filter((b) => !(b.x1 < vx0 || b.x0 > vx1 || b.y1 < vy0 || b.y0 > vy1));
 
     // Draw missing or out-of-date chunk pictures, nearest the middle of the screen first, within the time budget.

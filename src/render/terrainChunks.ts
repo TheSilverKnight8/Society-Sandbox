@@ -1,6 +1,8 @@
 import { hash2 } from '../lib/rng';
-import { DEPOSITS, Deposit, MAX_ELEV, TERRAINS, Terrain } from '../map/terrain';
+import { Deposit, isWater } from '../map/terrain';
 import { CHUNK, STEP, isoX, isoY, type TileSource } from './iso';
+import { DEEP, LAND, LAND_FACE_L, LAND_FACE_R, NAVY, SHALLOW, WATER_FACE_L, WATER_FACE_R } from './style';
+import { biomeDetail, biomeSparse, deposit as drawDepositMark } from './symbols';
 
 // Draws the terrain in chunks of CHUNK x CHUNK tiles and keeps each drawn chunk as a
 // picture (an offscreen canvas). A frame then only copies pictures to the screen.
@@ -8,53 +10,26 @@ import { CHUNK, STEP, isoX, isoY, type TileSource } from './iso';
 // Each chunk is kept at a few detail levels (pixels per tile width: 4 to 128); the
 // view picks the level nearest above the current zoom and scales it down slightly.
 // Pictures are dropped least recently used first when they pass a memory budget.
+//
+// The look follows Stickman Arena: cream land, navy water, navy outlines with round
+// ends, and line drawings on the tiles that say what each one is. Zoomed far out, one
+// larger drawing stands for a patch of tiles, so biomes still read.
 
 export const LEVELS = [4, 8, 16, 32, 64, 128] as const;
 
 /** Most pixels kept in chunk pictures at once (about 4 bytes each). */
 const PIXEL_BUDGET = 40_000_000;
-/** Room above a chunk's highest tile for trees, in tile widths. */
-const TOP_MARGIN = 0.7;
 /** How far the map's outer edge shows below sea level, in elevation steps. */
 const SKIRT = 2;
 
-// ---------------------------------------------------------------- colors
-
-function hexToRgb(hex: string): [number, number, number] {
-  const v = parseInt(hex.slice(1), 16);
-  return [(v >> 16) & 255, (v >> 8) & 255, v & 255];
+/** At each detail level: one drawing every `grid` tiles, `scale` times the size; room kept around a chunk for drawings that stick out. */
+function levelStyle(level: number) {
+  if (level <= 4) return { grid: 8, scale: 6.5, top: 3.4, side: 2, lineV: 1.1 };
+  if (level <= 8) return { grid: 4, scale: 3.4, top: 1.9, side: 1.1, lineV: 1.2 };
+  if (level <= 16) return { grid: 2, scale: 1.7, top: 1, side: 0.6, lineV: 1.4 };
+  return { grid: 1, scale: 1, top: 0.7, side: 0.35, lineV: level >= 128 ? 4.4 : level >= 64 ? 3 : 2 };
 }
-function rgb([r, g, b]: [number, number, number], k: number, lift = 0) {
-  const f = (c: number) => Math.round(Math.max(0, Math.min(255, c * k + (255 - c) * lift)));
-  return `rgb(${f(r)},${f(g)},${f(b)})`;
-}
-
-const VARIANTS = 4;
-/** Shading by slope: the tile behind is much higher (in shadow) ... much lower (lit). */
-const SLOPES = 5;
-/**
- * Colors per terrain and elevation: SLOPES x VARIANTS top colors (index slope * VARIANTS + variant),
- * then the left face and the right face. Higher ground is a little lighter, so relief
- * still reads when zoomed far out.
- */
-const PALETTE: string[][][] = TERRAINS.map((t) => {
-  const base = hexToRgb(t.top);
-  const perElev: string[][] = [];
-  for (let h = 0; h <= MAX_ELEV; h++) {
-    const lift = t.water ? 0 : h * 0.018;
-    const tops: string[] = [];
-    for (let sl = 0; sl < SLOPES; sl++) {
-      const k = t.water ? 1 : 1 + (sl - 2) * 0.045;
-      for (let v = 0; v < VARIANTS; v++) tops.push(rgb(base, k + (v - 1.5) * 0.016, lift));
-    }
-    perElev.push([...tops, rgb(base, t.water ? 0.82 : 0.8, lift * 0.5), rgb(base, t.water ? 0.7 : 0.64, lift * 0.5)]);
-  }
-  return perElev;
-});
-const FACE_L = SLOPES * VARIANTS;
-const FACE_R = FACE_L + 1;
-
-const TREE = { leaf: '#3f7d38', leafLight: '#52914a', pine: '#2f6a3c', pineLight: '#3d7d48', trunk: '#6b4a2f' };
+const MAX_STYLE = levelStyle(4);
 
 // ---------------------------------------------------------------- chunks
 
@@ -84,6 +59,8 @@ export class TerrainChunks {
   private entries = new Map<number, Entry>();
   private pixels = 0;
   private clock = 0;
+  /** Pictures used since this clock value are on screen now and must not be dropped. */
+  private frameStart = 0;
   /** Highest elevation in each chunk, for its bounds. */
   private maxH: Uint8Array;
   private bounds: ChunkBounds[] = [];
@@ -94,6 +71,11 @@ export class TerrainChunks {
     this.maxH = new Uint8Array(this.n * this.n);
     for (let cy = 0; cy < this.n; cy++) for (let cx = 0; cx < this.n; cx++) this.measure(cx, cy);
     this.rebuildBounds();
+  }
+
+  /** Call at the start of each frame, so pictures on screen are kept even past the memory budget. */
+  beginFrame() {
+    this.frameStart = this.clock + 1;
   }
 
   /** Chunk bounds in iso units, in the order they must be drawn (back to front). */
@@ -117,7 +99,7 @@ export class TerrainChunks {
     }
   }
 
-  private chunkBounds(cx: number, cy: number): ChunkBounds {
+  private chunkBounds(cx: number, cy: number, top = MAX_STYLE.top, side = MAX_STYLE.side): ChunkBounds {
     const size = this.src.size;
     const tx0 = cx * CHUNK;
     const ty0 = cy * CHUNK;
@@ -127,9 +109,9 @@ export class TerrainChunks {
     return {
       cx,
       cy,
-      x0: isoX(tx0, ty1 - 1) - 0.5,
-      x1: isoX(tx1 - 1, ty0) + 0.5,
-      y0: isoY(tx0, ty0, h) - TOP_MARGIN,
+      x0: isoX(tx0, ty1 - 1) - 0.5 - side,
+      x1: isoX(tx1 - 1, ty0) + 0.5 + side,
+      y0: isoY(tx0, ty0, h) - top,
       y1: isoY(tx1 - 1, ty1 - 1, 0) + 0.5 + SKIRT * STEP + 0.02,
     };
   }
@@ -157,7 +139,9 @@ export class TerrainChunks {
   }
 
   /** Draws the chunk at this level and keeps the picture. */
-  render(b: ChunkBounds, level: number): Entry {
+  render(cb: ChunkBounds, level: number): Entry {
+    const st = levelStyle(level);
+    const b = this.chunkBounds(cb.cx, cb.cy, st.top, st.side);
     const key = this.key(b.cx, b.cy, level);
     const old = this.entries.get(key);
     const w = Math.max(1, Math.ceil((b.x1 - b.x0) * level));
@@ -188,7 +172,7 @@ export class TerrainChunks {
     if (this.pixels <= PIXEL_BUDGET) return;
     const list = [...this.entries.entries()].sort((a, b) => a[1].used - b[1].used);
     for (const [k, e] of list) {
-      if (this.pixels <= PIXEL_BUDGET * 0.8) break;
+      if (this.pixels <= PIXEL_BUDGET * 0.8 || e.used >= this.frameStart) break;
       this.entries.delete(k);
       this.pixels -= e.pixels;
     }
@@ -249,9 +233,14 @@ function drawChunkTiles(ctx: CanvasRenderingContext2D, src: TileSource, cx: numb
   const ty0 = cy * CHUNK;
   const tx1 = Math.min(size, tx0 + CHUNK);
   const ty1 = Math.min(size, ty0 + CHUNK);
+  const st = levelStyle(level);
   // Shapes overlap by about half a pixel so no seams show between tiles.
   const e = 0.55 / level;
-  const detail = level >= 16 ? 2 : level >= 8 ? 1 : 0;
+  const lw = st.lineV / level;
+  const outlines = level >= 16;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.lineWidth = lw;
 
   for (let s = tx0 + ty0; s <= tx1 - 1 + ty1 - 1; s++) {
     const xs = Math.max(tx0, s - (ty1 - 1));
@@ -261,38 +250,37 @@ function drawChunkTiles(ctx: CanvasRenderingContext2D, src: TileSource, cx: numb
       const i = y * size + x;
       const t = terrain[i];
       const h = elevation[i];
+      const water = isWater(t);
       const X = isoX(x, y);
       const Y = isoY(x, y, h);
-      const pal = PALETTE[t][h];
 
       // Side faces down to the lower neighbor in front (left: tile y+1, right: tile x+1).
+      // The map's outer edge is a solid navy slab, like Stickman Arena's stages.
       const hl = y + 1 < size ? elevation[i + size] : -SKIRT;
       const hr = x + 1 < size ? elevation[i + 1] : -SKIRT;
-      if (hl < h) {
-        const d = (h - hl) * STEP;
-        ctx.fillStyle = pal[FACE_L];
+      const dl = hl < h ? (h - hl) * STEP : 0;
+      const dr = hr < h ? (h - hr) * STEP : 0;
+      if (dl > 0) {
+        ctx.fillStyle = y + 1 >= size ? NAVY : water ? WATER_FACE_L : LAND_FACE_L;
         ctx.beginPath();
         ctx.moveTo(X - 0.5 - e, Y + 0.25);
         ctx.lineTo(X + e, Y + 0.5);
-        ctx.lineTo(X + e, Y + 0.5 + d + e);
-        ctx.lineTo(X - 0.5 - e, Y + 0.25 + d + e);
+        ctx.lineTo(X + e, Y + 0.5 + dl + e);
+        ctx.lineTo(X - 0.5 - e, Y + 0.25 + dl + e);
         ctx.fill();
       }
-      if (hr < h) {
-        const d = (h - hr) * STEP;
-        ctx.fillStyle = pal[FACE_R];
+      if (dr > 0) {
+        ctx.fillStyle = x + 1 >= size ? NAVY : water ? WATER_FACE_R : LAND_FACE_R;
         ctx.beginPath();
         ctx.moveTo(X - e, Y + 0.5);
         ctx.lineTo(X + 0.5 + e, Y + 0.25);
-        ctx.lineTo(X + 0.5 + e, Y + 0.25 + d + e);
-        ctx.lineTo(X - e, Y + 0.5 + d + e);
+        ctx.lineTo(X + 0.5 + e, Y + 0.25 + dr + e);
+        ctx.lineTo(X - e, Y + 0.5 + dr + e);
         ctx.fill();
       }
 
-      // Top face, lit from the back: darker where the ground behind is higher, lighter where it is lower.
-      const hb = x > 0 && y > 0 ? elevation[i - size - 1] : h;
-      const slope = Math.max(0, Math.min(SLOPES - 1, 2 + h - hb));
-      ctx.fillStyle = pal[slope * VARIANTS + Math.floor(hash2(x, y) * VARIANTS)];
+      // Top face: cream land, navy water.
+      ctx.fillStyle = water ? (t === 1 ? SHALLOW : DEEP) : LAND;
       ctx.beginPath();
       ctx.moveTo(X, Y - e);
       ctx.lineTo(X + 0.5 + 2 * e, Y + 0.25);
@@ -300,174 +288,60 @@ function drawChunkTiles(ctx: CanvasRenderingContext2D, src: TileSource, cx: numb
       ctx.lineTo(X - 0.5 - 2 * e, Y + 0.25);
       ctx.fill();
 
-      if (detail > 0) {
-        if (t === Terrain.Forest) drawTrees(ctx, x, y, X, Y, h, detail);
-        else if (t === Terrain.Swamp) drawSwamp(ctx, x, y, X, Y, detail);
-        const d = deposit[i];
-        if (d !== Deposit.None) drawDeposit(ctx, d, x, y, X, Y, detail);
+      // Outlines along every step down in the land, front and back, so terraces read as line art.
+      if (outlines && !water) {
+        const hb1 = x > 0 ? elevation[i - 1] : h;
+        const hb2 = y > 0 ? elevation[i - size] : h;
+        ctx.strokeStyle = NAVY;
+        ctx.lineWidth = lw * 0.6;
+        ctx.beginPath();
+        if (hb1 < h) {
+          ctx.moveTo(X - 0.5, Y + 0.25);
+          ctx.lineTo(X, Y);
+        }
+        if (hb2 < h) {
+          ctx.moveTo(X, Y);
+          ctx.lineTo(X + 0.5, Y + 0.25);
+        }
+        if (dl > 0) {
+          ctx.moveTo(X - 0.5, Y + 0.25);
+          ctx.lineTo(X, Y + 0.5);
+          ctx.moveTo(X - 0.5, Y + 0.25 + dl);
+          ctx.lineTo(X, Y + 0.5 + dl);
+        }
+        if (dr > 0) {
+          ctx.moveTo(X, Y + 0.5);
+          ctx.lineTo(X + 0.5, Y + 0.25);
+          ctx.moveTo(X, Y + 0.5 + dr);
+          ctx.lineTo(X + 0.5, Y + 0.25 + dr);
+        }
+        if (dl > 0 || dr > 0) {
+          ctx.moveTo(X, Y + 0.5);
+          ctx.lineTo(X, Y + 0.5 + Math.max(dl, dr));
+        }
+        ctx.stroke();
+        ctx.lineWidth = lw;
       }
-    }
-  }
-}
 
-function drawTrees(ctx: CanvasRenderingContext2D, x: number, y: number, X: number, Y: number, h: number, detail: number) {
-  const count = 2 + (hash2(x, y, 7) < 0.4 ? 1 : 0);
-  // Back to front inside the tile, so nearer trees cover farther ones.
-  const spots: [number, number][] = [];
-  for (let k = 0; k < count; k++) {
-    const u = 0.18 + hash2(x, y, 11 + k) * 0.64;
-    const v = 0.18 + hash2(x, y, 23 + k) * 0.64;
-    spots.push([u, v]);
-  }
-  spots.sort((a, b) => a[0] + a[1] - (b[0] + b[1]));
-  const pine = h >= 5 || hash2(x, y, 31) < 0.25;
-  for (const [u, v] of spots) {
-    const px = X + (u - v) * 0.5;
-    const py = Y + (u + v) * 0.25;
-    if (detail === 1) {
-      ctx.fillStyle = pine ? TREE.pine : TREE.leaf;
-      ctx.beginPath();
-      ctx.arc(px, py - 0.08, 0.1, 0, Math.PI * 2);
-      ctx.fill();
-      continue;
-    }
-    ctx.fillStyle = TREE.trunk;
-    ctx.fillRect(px - 0.018, py - 0.09, 0.036, 0.1);
-    if (pine) {
-      ctx.fillStyle = TREE.pine;
-      ctx.beginPath();
-      ctx.moveTo(px, py - 0.42);
-      ctx.lineTo(px + 0.11, py - 0.06);
-      ctx.lineTo(px - 0.11, py - 0.06);
-      ctx.fill();
-      ctx.fillStyle = TREE.pineLight;
-      ctx.beginPath();
-      ctx.moveTo(px, py - 0.42);
-      ctx.lineTo(px, py - 0.06);
-      ctx.lineTo(px - 0.11, py - 0.06);
-      ctx.fill();
-    } else {
-      ctx.fillStyle = TREE.leaf;
-      ctx.beginPath();
-      ctx.arc(px, py - 0.2, 0.12, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = TREE.leafLight;
-      ctx.beginPath();
-      ctx.arc(px - 0.035, py - 0.235, 0.065, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  }
-}
-
-function drawSwamp(ctx: CanvasRenderingContext2D, x: number, y: number, X: number, Y: number, detail: number) {
-  const u = 0.3 + hash2(x, y, 41) * 0.4;
-  const v = 0.3 + hash2(x, y, 43) * 0.4;
-  const px = X + (u - v) * 0.5;
-  const py = Y + (u + v) * 0.25;
-  ctx.fillStyle = '#5f8578';
-  ctx.beginPath();
-  ctx.ellipse(px, py, 0.16, 0.07, 0, 0, Math.PI * 2);
-  ctx.fill();
-  if (detail < 2) return;
-  ctx.strokeStyle = '#4f6b3a';
-  ctx.lineWidth = 0.02;
-  ctx.beginPath();
-  for (let k = 0; k < 3; k++) {
-    const rx = px + 0.12 + k * 0.035;
-    ctx.moveTo(rx, py + 0.02);
-    ctx.lineTo(rx + (k - 1) * 0.015, py - 0.1);
-  }
-  ctx.stroke();
-}
-
-function drawDeposit(ctx: CanvasRenderingContext2D, d: number, x: number, y: number, X: number, Y: number, detail: number) {
-  const def = DEPOSITS[d];
-  const px = X + (hash2(x, y, 51) - 0.5) * 0.12;
-  const py = Y + 0.27 + (hash2(x, y, 53) - 0.5) * 0.06;
-  if (detail === 1) {
-    ctx.fillStyle = def.color;
-    ctx.beginPath();
-    ctx.arc(px, py - 0.03, 0.07, 0, Math.PI * 2);
-    ctx.fill();
-    return;
-  }
-  switch (d) {
-    case Deposit.Stone:
-    case Deposit.Iron:
-    case Deposit.Gold: {
-      const body = d === Deposit.Stone ? '#b7b2a8' : '#8c8780';
-      const shade = d === Deposit.Stone ? '#8e897f' : '#6a655e';
-      rock(ctx, px - 0.07, py, 0.1, body, shade);
-      rock(ctx, px + 0.07, py + 0.03, 0.075, body, shade);
-      if (d !== Deposit.Stone) {
-        ctx.fillStyle = def.color;
-        for (const [ox, oy] of [
-          [-0.09, -0.04],
-          [-0.04, -0.01],
-          [0.08, 0.0],
-        ]) {
-          ctx.beginPath();
-          ctx.arc(px + ox, py + oy, 0.02, 0, Math.PI * 2);
-          ctx.fill();
+      // What the tile is: a line drawing on it.
+      const cxp = X;
+      const cyp = Y + 0.27;
+      if (st.grid === 1) {
+        biomeDetail(ctx, t, x, y, h, cxp, cyp, lw);
+        const d = deposit[i];
+        if (d !== Deposit.None) {
+          const ox = (hash2(x, y, 51) - 0.5) * 0.1;
+          drawDepositMark(ctx, d, cxp + ox, cyp + 0.02, 1, lw);
+        }
+      } else {
+        // Zoomed out: one larger drawing on one tile of each grid x grid patch, at a fixed random spot in the patch.
+        const g = st.grid;
+        const gx = Math.floor(x / g);
+        const gy = Math.floor(y / g);
+        if (x - gx * g === Math.floor(hash2(gx, gy, 61) * g) && y - gy * g === Math.floor(hash2(gx, gy, 62) * g)) {
+          biomeSparse(ctx, t, x, y, h, cxp, cyp, st.scale, lw);
         }
       }
-      break;
     }
-    case Deposit.Clay:
-      ctx.fillStyle = def.color;
-      ctx.beginPath();
-      ctx.ellipse(px, py, 0.17, 0.075, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = '#a8633d';
-      ctx.beginPath();
-      ctx.ellipse(px + 0.03, py + 0.012, 0.08, 0.032, 0, 0, Math.PI * 2);
-      ctx.fill();
-      break;
-    case Deposit.Fish:
-      // Dark fish shapes under the surface.
-      ctx.fillStyle = '#2f6a96';
-      for (const [ox, oy, dir] of [
-        [-0.08, -0.02, 1],
-        [0.07, 0.035, -1],
-      ]) {
-        const fx = px + ox;
-        const fy = py + oy;
-        ctx.beginPath();
-        ctx.ellipse(fx, fy, 0.055, 0.022, 0, 0, Math.PI * 2);
-        ctx.moveTo(fx - dir * 0.045, fy);
-        ctx.lineTo(fx - dir * 0.09, fy - 0.025);
-        ctx.lineTo(fx - dir * 0.09, fy + 0.025);
-        ctx.closePath();
-        ctx.fill();
-      }
-      break;
-    case Deposit.Berries:
-      ctx.fillStyle = '#4c8a43';
-      ctx.beginPath();
-      ctx.ellipse(px, py - 0.04, 0.11, 0.07, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = def.color;
-      for (const [ox, oy] of [
-        [-0.05, -0.05],
-        [0.02, -0.07],
-        [0.05, -0.02],
-        [-0.01, -0.02],
-      ]) {
-        ctx.beginPath();
-        ctx.arc(px + ox, py + oy, 0.018, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      break;
   }
-}
-
-function rock(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, body: string, shade: string) {
-  ctx.fillStyle = shade;
-  ctx.beginPath();
-  ctx.ellipse(x, y, r, r * 0.6, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = body;
-  ctx.beginPath();
-  ctx.ellipse(x - r * 0.12, y - r * 0.14, r * 0.82, r * 0.48, 0, 0, Math.PI * 2);
-  ctx.fill();
 }

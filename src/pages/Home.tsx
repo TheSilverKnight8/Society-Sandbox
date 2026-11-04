@@ -87,7 +87,7 @@ function MapCard({ meta, onOpen }: { meta: MapMeta; onOpen: () => void }) {
   const sizeLabel = MAP_SIZES.find((s) => s.size === meta.size)?.label ?? `${meta.size}`;
   return (
     <Card className="group overflow-hidden">
-      <button className="block w-full bg-[#e9dcc2] p-3" onClick={onOpen} aria-label={`Open ${meta.name} in Map mode`}>
+      <button className="block w-full bg-[#f6e7cf] p-3" onClick={onOpen} aria-label={`Open ${meta.name} in Map mode`}>
         {meta.thumbnail ? <img src={meta.thumbnail} alt="" className="aspect-[2/1] w-full object-contain transition group-hover:scale-[1.02]" /> : <div className="aspect-[2/1] w-full" />}
       </button>
       <div className="flex items-start gap-2 border-t border-line px-4 py-3">

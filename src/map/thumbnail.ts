@@ -1,14 +1,16 @@
 import { TERRAINS } from './terrain';
 import type { Tiles } from './generate';
 
+// Cream blended toward navy, as in the map view (src/render/style.ts).
 const TOPS = TERRAINS.map((t) => {
-  const v = parseInt(t.top.slice(1), 16);
-  return [(v >> 16) & 255, (v >> 8) & 255, v & 255] as const;
+  const k = t.thumbTint;
+  return [250 + (0 - 250) * k, 238 + (38 - 238) * k, 218 + (87 - 218) * k] as const;
 });
 
 /**
- * A small picture of a map for Home: each tile's color, lit from the top left so
- * elevation shows, turned into the same diamond the map view uses.
+ * A small picture of a map for Home: cream land and navy water, with light navy shading
+ * for forests, hills and mountains and for slopes facing away, turned into the same
+ * diamond the map view uses.
  */
 export function makeThumbnail(tiles: Tiles, size: number, width = 480): string {
   const flat = document.createElement('canvas');
@@ -22,11 +24,12 @@ export function makeThumbnail(tiles: Tiles, size: number, width = 480): string {
       const i = y * size + x;
       const c = TOPS[terrain[i]] ?? TOPS[0];
       const back = x > 0 && y > 0 ? elevation[i - size - 1] : elevation[i];
-      const k = 1 + Math.max(-0.25, Math.min(0.25, (elevation[i] - back) * 0.08));
+      // Slopes facing away from the light are shaded toward navy.
+      const k = Math.max(0, Math.min(0.2, (back - elevation[i]) * 0.07));
       const o = i * 4;
-      img.data[o] = Math.min(255, c[0] * k);
-      img.data[o + 1] = Math.min(255, c[1] * k);
-      img.data[o + 2] = Math.min(255, c[2] * k);
+      img.data[o] = c[0] + (0 - c[0]) * k;
+      img.data[o + 1] = c[1] + (38 - c[1]) * k;
+      img.data[o + 2] = c[2] + (87 - c[2]) * k;
       img.data[o + 3] = 255;
     }
   }

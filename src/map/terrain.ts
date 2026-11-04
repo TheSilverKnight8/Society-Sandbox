@@ -21,8 +21,8 @@ export type Terrain = (typeof Terrain)[keyof typeof Terrain];
 export interface TerrainDef {
   id: Terrain;
   name: string;
-  /** Flat color of the tile's top face. */
-  top: string;
+  /** How far toward navy the tile is shaded in the small map pictures on Home (0 = cream). The map view itself tells biomes apart by drawings. */
+  thumbTint: number;
   /** Lowest and highest elevation a tile of this type can have. Painting clamps into this range. */
   minElev: number;
   maxElev: number;
@@ -33,16 +33,16 @@ export interface TerrainDef {
 export const MAX_ELEV = 15;
 
 export const TERRAINS: TerrainDef[] = [
-  { id: Terrain.DeepWater, name: 'Deep water', top: '#3b7bb0', minElev: 0, maxElev: 0, water: true },
-  { id: Terrain.ShallowWater, name: 'Shallow water', top: '#5fa6cf', minElev: 0, maxElev: 11, water: true },
-  { id: Terrain.Sand, name: 'Sand', top: '#ead69c', minElev: 1, maxElev: 4 },
-  { id: Terrain.Grassland, name: 'Grassland', top: '#93c15c', minElev: 1, maxElev: 11 },
-  { id: Terrain.Forest, name: 'Forest', top: '#76a84d', minElev: 1, maxElev: 11 },
-  { id: Terrain.Hills, name: 'Hills', top: '#a7b26a', minElev: 3, maxElev: 11 },
-  { id: Terrain.Mountain, name: 'Mountain', top: '#9b9284', minElev: 6, maxElev: 14 },
-  { id: Terrain.Snow, name: 'Snow', top: '#eef1f2', minElev: 9, maxElev: 15 },
-  { id: Terrain.Desert, name: 'Desert', top: '#e2bf78', minElev: 1, maxElev: 9 },
-  { id: Terrain.Swamp, name: 'Swamp', top: '#7d9460', minElev: 1, maxElev: 4 },
+  { id: Terrain.DeepWater, name: 'Deep water', thumbTint: 1, minElev: 0, maxElev: 0, water: true },
+  { id: Terrain.ShallowWater, name: 'Shallow water', thumbTint: 0.72, minElev: 0, maxElev: 11, water: true },
+  { id: Terrain.Sand, name: 'Sand', thumbTint: 0.03, minElev: 1, maxElev: 4 },
+  { id: Terrain.Grassland, name: 'Grassland', thumbTint: 0, minElev: 1, maxElev: 11 },
+  { id: Terrain.Forest, name: 'Forest', thumbTint: 0.13, minElev: 1, maxElev: 11 },
+  { id: Terrain.Hills, name: 'Hills', thumbTint: 0.08, minElev: 3, maxElev: 11 },
+  { id: Terrain.Mountain, name: 'Mountain', thumbTint: 0.24, minElev: 6, maxElev: 14 },
+  { id: Terrain.Snow, name: 'Snow', thumbTint: 0, minElev: 9, maxElev: 15 },
+  { id: Terrain.Desert, name: 'Desert', thumbTint: 0.05, minElev: 1, maxElev: 9 },
+  { id: Terrain.Swamp, name: 'Swamp', thumbTint: 0.16, minElev: 1, maxElev: 4 },
 ];
 
 export const terrainDef = (t: number): TerrainDef => TERRAINS[t] ?? TERRAINS[0];
@@ -62,19 +62,18 @@ export type Deposit = (typeof Deposit)[keyof typeof Deposit];
 export interface DepositDef {
   id: Deposit;
   name: string;
-  color: string;
   /** Where it can be placed: on water tiles, on land tiles, or both. */
   on: 'land' | 'water';
 }
 
 export const DEPOSITS: DepositDef[] = [
-  { id: Deposit.None, name: 'None', color: 'transparent', on: 'land' },
-  { id: Deposit.Stone, name: 'Stone', color: '#b9b4ab', on: 'land' },
-  { id: Deposit.Iron, name: 'Iron ore', color: '#a5583c', on: 'land' },
-  { id: Deposit.Gold, name: 'Gold ore', color: '#f0c43c', on: 'land' },
-  { id: Deposit.Clay, name: 'Clay', color: '#c77b4f', on: 'land' },
-  { id: Deposit.Fish, name: 'Fish', color: '#2f6a96', on: 'water' },
-  { id: Deposit.Berries, name: 'Berries', color: '#c2304f', on: 'land' },
+  { id: Deposit.None, name: 'None', on: 'land' },
+  { id: Deposit.Stone, name: 'Stone', on: 'land' },
+  { id: Deposit.Iron, name: 'Iron ore', on: 'land' },
+  { id: Deposit.Gold, name: 'Gold ore', on: 'land' },
+  { id: Deposit.Clay, name: 'Clay', on: 'land' },
+  { id: Deposit.Fish, name: 'Fish', on: 'water' },
+  { id: Deposit.Berries, name: 'Berries', on: 'land' },
 ];
 
 export const depositDef = (d: number): DepositDef => DEPOSITS[d] ?? DEPOSITS[0];

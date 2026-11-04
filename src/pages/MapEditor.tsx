@@ -10,6 +10,8 @@ import { Stroke, brushTiles, restore, type Tool, type Undo } from '../map/paint'
 import { DEPOSITS, Deposit, TERRAINS, Terrain, depositDef, terrainDef } from '../map/terrain';
 import { DEFAULT_GEN, MAP_SIZES, type GenSettings, type MapData } from '../map/types';
 import { IsoView } from '../render/IsoView';
+import { tileIcon } from '../render/icons';
+import { BACKDROP } from '../render/style';
 
 type Tab = 'terrain' | 'height' | 'resources' | 'generate';
 
@@ -140,10 +142,11 @@ function MapEditor({ map }: { map: MapData }) {
         if (!h || live.current.tab === 'generate') return;
         ctx.beginPath();
         for (const [x, y] of brushTiles(h.x, h.y, live.current.radius - 0.5, map.size)) v.traceTile(ctx, x, y);
-        ctx.fillStyle = 'rgba(255, 248, 238, 0.35)';
+        ctx.fillStyle = 'rgba(252, 63, 63, 0.18)';
         ctx.fill();
-        ctx.lineWidth = 1;
-        ctx.strokeStyle = 'rgba(0, 38, 87, 0.55)';
+        ctx.lineWidth = 1.5;
+        ctx.lineJoin = 'round';
+        ctx.strokeStyle = 'rgba(252, 63, 63, 0.85)';
         ctx.stroke();
       },
     };
@@ -195,7 +198,7 @@ function MapEditor({ map }: { map: MapData }) {
   const sizeLabel = MAP_SIZES.find((s) => s.size === map.size)?.label;
 
   return (
-    <div className="relative h-full w-full overflow-hidden bg-[#e9dcc2]">
+    <div className="relative h-full w-full overflow-hidden" style={{ background: BACKDROP }}>
       <canvas ref={canvasRef} tabIndex={0} className="absolute inset-0 h-full w-full outline-none" />
 
       {/* Top left: what is under the pointer. */}
@@ -280,7 +283,7 @@ function MapEditor({ map }: { map: MapData }) {
                 {tab === 'terrain' &&
                   TERRAINS.map((t) => (
                     <ToolButton key={t.id} active={tool.kind === 'terrain' && tool.terrain === t.id} label={t.name} onClick={() => setTool({ kind: 'terrain', terrain: t.id })}>
-                      <span className="block size-7 rounded-md border border-navy/20" style={{ background: t.top }} />
+                      <img src={tileIcon(t.id)} alt="" className="size-10" draggable={false} />
                     </ToolButton>
                   ))}
                 {tab === 'height' &&
@@ -293,20 +296,18 @@ function MapEditor({ map }: { map: MapData }) {
                     ] as const
                   ).map(([mode, label, icon]) => (
                     <ToolButton key={mode} active={tool.kind === 'height' && tool.mode === mode} label={label} onClick={() => setTool({ kind: 'height', mode })}>
-                      <span className="flex size-7 items-center justify-center">{icon}</span>
+                      <span className="flex size-10 items-center justify-center">{icon}</span>
                     </ToolButton>
                   ))}
                 {tab === 'resources' &&
                   DEPOSITS.map((d) => (
                     <ToolButton key={d.id} active={tool.kind === 'deposit' && tool.deposit === d.id} label={d.id === Deposit.None ? 'Erase' : d.name} onClick={() => setTool({ kind: 'deposit', deposit: d.id })}>
                       {d.id === Deposit.None ? (
-                        <span className="flex size-7 items-center justify-center">
+                        <span className="flex size-10 items-center justify-center">
                           <Eraser className="size-5" />
                         </span>
                       ) : (
-                        <span className="flex size-7 items-center justify-center">
-                          <span className="block size-4 rounded-full border border-navy/30" style={{ background: d.color }} />
-                        </span>
+                        <img src={tileIcon(d.on === 'water' ? Terrain.ShallowWater : Terrain.Grassland, d.id)} alt="" className="size-10" draggable={false} />
                       )}
                     </ToolButton>
                   ))}
