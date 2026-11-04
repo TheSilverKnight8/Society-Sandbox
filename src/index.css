@@ -1,0 +1,237 @@
+@import 'tailwindcss';
+
+/* Colors are tokens so the whole app draws from one place. The palette is the
+   Shop Manual's: cream, navy, and red, navy on cream (light mode only). Red marks
+   emphasis, the selection, and anything that needs attention. */
+
+@font-face {
+  font-family: 'Norwester';
+  src: url('./assets/fonts/norwester.otf') format('opentype');
+  font-display: swap;
+}
+
+@theme {
+  --font-sans: 'Archivo Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, SFMono-Regular, monospace;
+  /* Norwester by Jamie Wilson, SIL Open Font License (src/assets/fonts). */
+  --font-display: 'Norwester', 'Archivo Variable', ui-sans-serif, sans-serif;
+
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-raised: var(--raised);
+  --color-line: var(--line);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-on-accent: var(--on-accent);
+  --color-navy: var(--navy);
+  --color-warn: var(--warn);
+  --color-danger: var(--danger);
+  --color-grid: var(--grid);
+  --color-grid-strong: var(--grid-strong);
+
+  --shadow-card: var(--shadow-card);
+  --shadow-pop: var(--shadow-pop);
+
+  /* Squarer corners than the Tailwind defaults, to match the Shop Manual's
+     flat, rectangular look. Pills stay round. */
+  --radius-lg: 0.25rem;
+  --radius-xl: 0.375rem;
+  --radius-2xl: 0.5rem;
+  --radius-3xl: 0.625rem;
+
+  --animate-rise: rise 0.35s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  --animate-fade: fade 0.25s ease both;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+:root {
+  color-scheme: light;
+  --brand-cream: #faeeda;
+  --brand-navy: #002657;
+  --brand-red: #fc3f3f;
+
+  --bg: var(--brand-cream);
+  --surface: #fff8ee;
+  --raised: #f4e4ca;
+  --line: color-mix(in srgb, var(--brand-navy) 17%, var(--brand-cream));
+  --ink: var(--brand-navy);
+  --muted: color-mix(in srgb, var(--brand-navy) 70%, var(--brand-cream));
+  --accent: var(--brand-red);
+  --on-accent: var(--brand-cream);
+  --navy: var(--brand-navy);
+  --warn: #d42f2f;
+  --danger: #c62828;
+  --stripe-a: var(--brand-navy);
+  --stripe-b: var(--brand-red);
+  /* Work surfaces: grid lines are navy at low strength on cream. */
+  --grid: color-mix(in srgb, var(--brand-navy) 8%, var(--surface));
+  --grid-strong: color-mix(in srgb, var(--brand-navy) 22%, var(--surface));
+  --shadow-card: 0 1px 2px rgb(0 38 87 / 0.06);
+  --shadow-pop: 0 14px 40px rgb(0 38 87 / 0.18);
+}
+
+@layer base {
+  html {
+    -webkit-tap-highlight-color: transparent;
+    text-size-adjust: 100%;
+    /* Norwester has one weight; never fake a bold or italic version of it. */
+    font-synthesis: none;
+  }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    overscroll-behavior: none;
+  }
+  /* Headings use Norwester in capitals, like the Shop Manual. It has one
+     weight, so the browser must not fake a bold version. */
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-synthesis: none;
+    text-transform: uppercase;
+    letter-spacing: 0.015em;
+    line-height: 1.05;
+    text-wrap: balance;
+  }
+  ::selection {
+    background: color-mix(in srgb, var(--accent) 30%, transparent);
+  }
+  :focus-visible {
+    outline: 2px solid var(--navy);
+    outline-offset: 2px;
+  }
+  button {
+    cursor: pointer;
+  }
+  button:disabled {
+    cursor: not-allowed;
+  }
+}
+
+@layer components {
+  /* The Shop Manual's stripes: navy, red, navy, flush to one edge, in
+     staggered lengths. stripes-tl hangs from the left edge (top of a page),
+     stripes-br comes in from the right (bottom of a page). */
+  .stripes {
+    --bar: 8px;
+    --gap: 5px;
+    height: calc(var(--bar) * 3 + var(--gap) * 2);
+    background:
+      linear-gradient(var(--stripe-a) 0 0) var(--x) 0 / var(--l1) var(--bar),
+      linear-gradient(var(--stripe-b) 0 0) var(--x) calc(var(--bar) + var(--gap)) / var(--l2) var(--bar),
+      linear-gradient(var(--stripe-a) 0 0) var(--x) calc(2 * (var(--bar) + var(--gap))) / var(--l3) var(--bar);
+    background-repeat: no-repeat;
+  }
+  .stripes-tl {
+    --x: 0%;
+    --l1: 91%;
+    --l2: 50%;
+    --l3: 72%;
+  }
+  .stripes-br {
+    --x: 100%;
+    --l1: 59%;
+    --l2: 38%;
+    --l3: 77%;
+  }
+  .stripes-sm {
+    --bar: 4px;
+    --gap: 3px;
+  }
+  .stripes-lg {
+    --bar: 20px;
+    --gap: 12px;
+  }
+
+  /* Small capitals label (eyebrows, section labels). */
+  .label-caps {
+    font-family: var(--font-display);
+    font-size: 0.8125rem;
+    font-weight: 400;
+    font-synthesis: none;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    line-height: 1.2;
+  }
+
+  /* Sliders: a navy track with a red handle. */
+  .slider {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 18px;
+    background: transparent;
+    cursor: pointer;
+  }
+  .slider::-webkit-slider-runnable-track {
+    height: 4px;
+    border-radius: 2px;
+    background: linear-gradient(var(--navy) 0 0) 0 0 / var(--fill, 0%) 100% no-repeat, var(--line);
+  }
+  .slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 14px;
+    height: 14px;
+    margin-top: -5px;
+    border-radius: 3px;
+    background: var(--accent);
+    border: 2px solid var(--surface);
+    box-shadow: 0 0 0 1px var(--accent);
+  }
+  .slider::-moz-range-track {
+    height: 4px;
+    border-radius: 2px;
+    background: var(--line);
+  }
+  .slider::-moz-range-progress {
+    height: 4px;
+    border-radius: 2px;
+    background: var(--navy);
+  }
+  .slider::-moz-range-thumb {
+    width: 12px;
+    height: 12px;
+    border-radius: 3px;
+    background: var(--accent);
+    border: 2px solid var(--surface);
+  }
+
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: var(--grid-strong) transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

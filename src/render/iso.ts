@@ -1,0 +1,24 @@
+// Isometric projection.
+//
+// "Iso units" are the drawing's own coordinates: a tile is 1 unit wide and 0.5 tall on
+// screen. Tile (x, y) at elevation h has the top corner of its diamond at
+//   X = (x - y) / 2,   Y = (x + y) / 4 - h * STEP
+// and the camera turns iso units into screen pixels with one zoom factor
+// (screen pixels per tile width).
+
+/** How far one level of elevation lifts a tile, in tile widths. */
+export const STEP = 0.11;
+
+/** Tiles per side of a terrain chunk (the unit the renderer caches as one picture). */
+export const CHUNK = 16;
+
+export const isoX = (x: number, y: number) => (x - y) * 0.5;
+export const isoY = (x: number, y: number, h: number) => (x + y) * 0.25 - h * STEP;
+
+/** The tile data the renderer needs. A map in Map mode, and later a running world, both provide it. */
+export interface TileSource {
+  size: number;
+  terrain: Uint8Array;
+  elevation: Uint8Array;
+  deposit: Uint8Array;
+}
