@@ -12,7 +12,7 @@ export const GOOD_NAME: Record<Good, string> = { food: 'Food', wood: 'Wood', sto
 export const BASE_PRICE: Record<Good, number> = { food: 2, wood: 1, stone: 1, iron: 3, gold: 6, tools: 10, pottery: 5, clay: 1 };
 
 /** The jobs a tradesman can hold (SPEC 6: "generic tradesman (works at various buildings)"). */
-export type JobKind = 'farmer' | 'woodcutter' | 'quarryman' | 'miner' | 'fisher' | 'trader' | 'smith' | 'potter' | 'minter';
+export type JobKind = 'farmer' | 'woodcutter' | 'quarryman' | 'miner' | 'fisher' | 'trader' | 'smith' | 'potter' | 'minter' | 'official';
 export const JOB_NAME: Record<JobKind, string> = {
   farmer: 'Farmer',
   woodcutter: 'Woodcutter',
@@ -23,6 +23,7 @@ export const JOB_NAME: Record<JobKind, string> = {
   smith: 'Blacksmith',
   potter: 'Potter',
   minter: 'Minter',
+  official: 'Official',
 };
 /** Children's light jobs (SPEC 6: "children ... can hold light jobs"). */
 export const LIGHT_JOB_NAME: Partial<Record<JobKind, string>> = { farmer: 'Farm helper', fisher: "Fisher's helper" };
@@ -42,6 +43,7 @@ export const BuildingKind = {
   Pottery: 11,
   Mint: 12,
   Townhouse: 13,
+  Hall: 14,
 } as const;
 export type BuildingKind = (typeof BuildingKind)[keyof typeof BuildingKind];
 
@@ -89,6 +91,7 @@ export const BUILDINGS: BuildingDef[] = [
   { kind: BuildingKind.Pottery, name: 'Pottery', wood: 8, stone: 4, work: 200, homes: 0, stage: 'village', buildable: true, w: 2, d: 2, jobs: 2, lightJobs: 0, job: 'potter' },
   { kind: BuildingKind.Mint, name: 'Mint', wood: 8, stone: 14, tools: 2, work: 320, homes: 0, stage: 'town', buildable: true, w: 2, d: 2, jobs: 1, lightJobs: 0, job: 'minter' },
   { kind: BuildingKind.Townhouse, name: 'Townhouse', wood: 12, stone: 14, tools: 2, work: 360, homes: 10, stage: 'town', buildable: true, w: 2, d: 3, jobs: 0, lightJobs: 0 },
+  { kind: BuildingKind.Hall, name: 'Hall', wood: 16, stone: 12, work: 320, homes: 0, stage: 'village', buildable: true, w: 3, d: 2, jobs: 3, lightJobs: 0, job: 'official' },
 ];
 
 /** Whether a building of this kind may stand on a tile of this terrain (fields need fertile ground). `cleared`: a forest tile with no trees left. */

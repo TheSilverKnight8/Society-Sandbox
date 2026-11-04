@@ -31,12 +31,12 @@ interface Sprite {
 
 const sprites = new Map<string, Sprite>();
 
-function sprite(look: number, male: boolean, pose: number, frame: number, px: number, elder: boolean, carrying = false): Sprite {
-  const key = `${look}|${male ? 1 : 0}|${pose}|${frame}|${px}|${elder ? 1 : 0}|${carrying ? 1 : 0}`;
+function sprite(look: number, male: boolean, pose: number, frame: number, px: number, elder: boolean, carrying = false, crown = false): Sprite {
+  const key = `${look}|${male ? 1 : 0}|${pose}|${frame}|${px}|${elder ? 1 : 0}|${carrying ? 1 : 0}|${crown ? 1 : 0}`;
   const hit = sprites.get(key);
   if (hit) return hit;
   if (sprites.size > 4000) sprites.clear();
-  const s = pose === Pose.Sleep ? drawSleeping(look, male, px, elder) : drawStanding(look, male, pose, frame, px, elder, carrying);
+  const s = pose === Pose.Sleep ? drawSleeping(look, male, px, elder) : drawStanding(look, male, pose, frame, px, elder, carrying, crown);
   sprites.set(key, s);
   return s;
 }
@@ -126,11 +126,11 @@ function drawSleeping(look: number, male: boolean, px: number, elder: boolean): 
   return { canvas, ax, ay };
 }
 
-function drawStanding(look: number, male: boolean, pose: number, frame: number, px: number, elder: boolean, carrying: boolean): Sprite {
+function drawStanding(look: number, male: boolean, pose: number, frame: number, px: number, elder: boolean, carrying: boolean, crown: boolean): Sprite {
   const H = px;
   const lw = Math.max(1.2, H * 0.08);
   const w = Math.ceil(H * 0.7 + lw * 2);
-  const h = Math.ceil(H * 1.06 + lw * 2);
+  const h = Math.ceil(H * (crown ? 1.22 : 1.06) + lw * 2);
   const canvas = document.createElement('canvas');
   canvas.width = w;
   canvas.height = h;
@@ -232,6 +232,23 @@ function drawStanding(look: number, male: boolean, pose: number, frame: number, 
   ctx.strokeStyle = NAVY;
   ctx.lineWidth = lw;
   ctx.stroke();
+  // A ruler wears a gold crown.
+  if (crown) {
+    ctx.beginPath();
+    ctx.moveTo(-0.11 * H, -0.94 * H);
+    ctx.lineTo(-0.12 * H, -1.1 * H);
+    ctx.lineTo(-0.055 * H, -1.02 * H);
+    ctx.lineTo(0, -1.12 * H);
+    ctx.lineTo(0.055 * H, -1.02 * H);
+    ctx.lineTo(0.12 * H, -1.1 * H);
+    ctx.lineTo(0.11 * H, -0.94 * H);
+    ctx.closePath();
+    ctx.fillStyle = '#f2c230';
+    ctx.fill();
+    ctx.strokeStyle = NAVY;
+    ctx.lineWidth = lw * 0.8;
+    ctx.stroke();
+  }
   return { canvas, ax, ay };
 }
 
@@ -357,7 +374,7 @@ export function drawPeople(
     }
     const pose = (flags >> 3) & 3;
     const frame = flags & 1 ? (t + id) % 4 : pose === Pose.Work ? Math.floor((t + id) / 2) % 2 : 0;
-    const sp = sprite(look, (flags & 4) !== 0, pose, frame, Math.max(6, Math.min(px, 90)), ageLook === AgeLook.Elder, (flags & 256) !== 0);
+    const sp = sprite(look, (flags & 4) !== 0, pose, frame, Math.max(6, Math.min(px, 90)), ageLook === AgeLook.Elder, (flags & 256) !== 0, (flags & 512) !== 0);
     const scale = px > 90 ? px / 90 : 1;
     ctx.drawImage(sp.canvas, sx - (sp.ax * scale) / dpr, sy - (sp.ay * scale) / dpr, (sp.canvas.width * scale) / dpr, (sp.canvas.height * scale) / dpr);
   }

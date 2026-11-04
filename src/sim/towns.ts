@@ -824,13 +824,20 @@ export class Towns {
       case 'settle': {
         const at = p.settleAt;
         const from = p.settleFrom;
+        const free = p.settleFree;
         delete p.settleAt;
         delete p.settleFrom;
+        delete p.settleFree;
         if (at === undefined) return false;
         // Join settlers who got here first, or found the new settlement.
         const close = this.settlements.find((s) => !s.abandoned && this.dist2(s.center, w.tileOf(p)) <= 64);
         if (close) this.join(p, close);
-        else this.found(w.tileOf(p), [p], from);
+        else {
+          const s = this.found(w.tileOf(p), [p], from);
+          // A settlement founded by a nation's settlers belongs to the nation (Caleb), unless they left in a revolt.
+          const parent = from !== undefined ? this.byId(from) : undefined;
+          if (s && parent?.nation !== undefined && !free) s.nation = parent.nation;
+        }
         p.task = 'idle';
         p.wait = 10;
         return true;
@@ -1316,20 +1323,30 @@ export class Towns {
     const over = c.people > MAX_PEOPLE[s.stage];
     const crowded = s.crowdedSince !== undefined && tick - s.crowdedSince >= CROWDED_YEARS * TICKS_PER_YEAR;
     if (over || crowded) {
-      const spot = this.spreadSpot(s);
-      if (spot >= 0 && this.sendSettlers(s, this.families(s, 'quarter'), spot)) delete s.crowdedSince;
+      if (this.sendOut(s, 'quarter')) delete s.crowdedSince;
       return;
     }
-    if (s.stage !== 'camp' && c.people >= STRIKE_OUT_MIN && w.rand.next() < 1 - Math.pow(1 - STRIKE_OUT_CHANCE, 1 / 12)) {
-      const spot = this.spreadSpot(s);
-      if (spot >= 0) this.sendSettlers(s, this.families(s, 'young'), spot);
-    }
+    if (s.stage !== 'camp' && c.people >= STRIKE_OUT_MIN && w.rand.next() < 1 - Math.pow(1 - STRIKE_OUT_CHANCE, 1 / 12)) this.sendOut(s, 'young');
+  }
+
+  /**
+   * Sends a group out to found a new settlement: about a quarter of the people, or one young
+   * family (from `pool` if given). `free`: their settlement belongs to no nation (a revolt).
+   */
+  sendOut(s: Settlement, which: 'quarter' | 'young', pool?: Set<Person>, free = false): boolean {
+    const spot = this.spreadSpot(s);
+    if (spot < 0) return false;
+    const leaving = this.families(s, which, pool);
+    if (!this.sendSettlers(s, leaving, spot)) return false;
+    if (free) for (const p of leaving) p.settleFree = true;
+    return true;
   }
 
   /** People who would leave together: about a quarter of the settlement, or one young pair; each with their children. */
-  private families(s: Settlement, which: 'quarter' | 'young'): Set<Person> {
+  private families(s: Settlement, which: 'quarter' | 'young', pool?: Set<Person>): Set<Person> {
     const w = this.w;
-    const members = w.state.people.filter((p) => p.settlement === s.id);
+    const all = w.state.people.filter((p) => p.settlement === s.id);
+    const members = pool ? all.filter((p) => pool.has(p)) : all;
     const leaving = new Set<Person>();
     const addFamily = (p: Person) => {
       leaving.add(p);
@@ -1504,6 +1521,8 @@ export class Towns {
         return { culture: c.culture, otherCultures: c.others };
       })(),
       from: s.from !== undefined ? this.settlementName(s.from) : undefined,
+      nation: s.nation,
+      unrest: s.unrest ?? 0,
     };
   }
 
@@ -1511,11 +1530,12 @@ export class Towns {
     return this.buildings.map((b) => {
       const { w, d } = footprint(b.kind, b.rot);
       const look = b.kind === BuildingKind.Farm ? this.economy.cropLook(b) : 0;
-      return { id: b.id, kind: b.kind, tile: b.tile, w, d, rot: b.rot ?? 0, settlement: b.settlement ?? 0, progress: b.progress, look };
+      const banner = b.kind === BuildingKind.Hall ? this.w.nations?.bannerOf(b.settlement) : undefined;
+      return { id: b.id, kind: b.kind, tile: b.tile, w, d, rot: b.rot ?? 0, settlement: b.settlement ?? 0, progress: b.progress, look, banner };
     });
   }
 
   settlementViews(): SettlementView[] {
-    return this.settlements.map((s) => ({ id: s.id, name: s.name, stage: s.stage, center: s.center, people: this.counts.get(s.id)?.people ?? 0, abandoned: !!s.abandoned, culture: this.w.cultures?.dominant.get(s.id) }));
+    return this.settlements.map((s) => ({ id: s.id, name: s.name, stage: s.stage, center: s.center, people: this.counts.get(s.id)?.people ?? 0, abandoned: !!s.abandoned, culture: this.w.cultures?.dominant.get(s.id), nation: s.nation }));
   }
 }

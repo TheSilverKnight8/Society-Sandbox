@@ -16,7 +16,7 @@ import type { BuildingKind, Good, JobKind, SettlementStage } from './buildings';
 export type Task = 'idle' | 'walk' | 'gather' | 'eat' | 'sleep' | 'chop' | 'quarry' | 'build' | 'farm' | 'harvest' | 'mine' | 'fish' | 'dig' | 'craft' | 'trade';
 
 /** Why a person is walking. */
-export type Purpose = 'stroll' | 'food' | 'order' | 'home' | 'wood' | 'stone' | 'site' | 'settle' | 'job' | 'deliver' | 'fetch' | 'store' | 'trade' | 'tradeHome' | 'fence';
+export type Purpose = 'stroll' | 'food' | 'order' | 'home' | 'wood' | 'stone' | 'site' | 'settle' | 'job' | 'deliver' | 'fetch' | 'store' | 'trade' | 'tradeHome' | 'fence' | 'tax' | 'taxHome';
 
 /** An imperative given to a unit by the player (SPEC 4). */
 export interface Order {
@@ -93,6 +93,14 @@ export interface Person {
   culture?: number;
   /** For someone with no settlement and no culture: since when (a culture forms among them after a while). */
   cultureless?: number;
+  /** A unique individual's identity (SPEC 6: rulers, player-chosen people, and ones who emerge): name, since when, and why. */
+  unique?: { name: string; since: number; why: UniqueWhy };
+  /** Coins an official is carrying from a settlement to their nation's treasury (taxes; SPEC 8: goods are carried). */
+  taxCoins?: number;
+  /** For an official on a round: the settlement they are going to tax. */
+  taxFrom?: number;
+  /** Settlers leaving in a revolt: the settlement they found belongs to no nation. */
+  settleFree?: boolean;
 }
 
 export type Focus = 'balanced' | 'food' | 'housing' | 'goods';
@@ -125,6 +133,12 @@ export interface Settlement {
   /** Since when many of its people have been homeless (it sends people out after a while), and when it last sent people out. */
   crowdedSince?: number;
   spreadAt?: number;
+  /** The nation it belongs to, if any. */
+  nation?: number;
+  /** Months its people have been unhappy with their nation's policies (unrest; revolts come after a while). */
+  unrest?: number;
+  /** When its taxes were last collected. */
+  taxedAt?: number;
 }
 
 /** A culture's traits: one side of each pair (SPEC 11: culture traits; the list is the builder's). */
@@ -148,6 +162,50 @@ export interface Culture {
   traits: CultureTraits;
   /** When its last member died or left it. */
   extinct?: number;
+  /** How much it supports each policy choice, 0 to 100, keyed 'policy:choice' (SPEC 7, a [Claude's call] item). */
+  support?: Record<string, number>;
+}
+
+/** Why someone is unique (SPEC 6). */
+export type UniqueWhy = 'ruler' | 'founder' | 'chosen' | 'influence' | 'revolt';
+
+/** A nation's policies (SPEC 7: like WorldBox's culture traits; SPEC 11: the list is the builder's). */
+export interface Policies {
+  succession: 'hereditary' | 'elective';
+  taxation: 'light' | 'heavy';
+  trade: 'open' | 'closed';
+  expansion: 'expansionist' | 'settled';
+  conscription: 'levy' | 'volunteers';
+}
+export type PolicyKey = keyof Policies;
+
+/** How two nations stand with each other (SPEC 7: basic relations). */
+export type RelationKind = 'alliance' | 'trade' | 'peace' | 'rivalry';
+
+/** A nation (SPEC 7: the political layer). */
+export interface Nation {
+  id: number;
+  name: string;
+  /** Its color on the nation map view (an index into NATION_COLORS). */
+  color: number;
+  founded: number;
+  /** Its capital settlement, and its ruler (a person). */
+  capital: number;
+  ruler?: number;
+  policies: Policies;
+  /** Its treasury: taxes collected by its officials. */
+  coins: number;
+  /** When it lost its last settlement. */
+  destroyed?: number;
+  /** Formed before its people had a culture: it takes up its first main culture's ways. */
+  unshaped?: boolean;
+}
+
+export interface Relation {
+  a: number;
+  b: number;
+  kind: RelationKind;
+  since: number;
 }
 
 export interface Building {
@@ -179,9 +237,17 @@ export interface Toggles {
   founding: boolean;
   /** Cultures forming and breaking away by themselves (SPEC 10: culture formation). */
   cultures: boolean;
+  /** Leaders claiming rule and founding nations (SPEC 10: nations emerging from settlements). */
+  nations: boolean;
+  /** Nations changing how they stand with each other by themselves (SPEC 10: diplomatic relation changes). */
+  diplomacy: boolean;
+  /** Nations changing policies during major events (SPEC 10). */
+  policyChanges: boolean;
+  /** People becoming unique by themselves (SPEC 10: emergence of unique individuals). */
+  uniques: boolean;
 }
 
-export const DEFAULT_TOGGLES: Toggles = { lifeCycle: true, founding: true, cultures: true };
+export const DEFAULT_TOGGLES: Toggles = { lifeCycle: true, founding: true, cultures: true, nations: true, diplomacy: true, policyChanges: true, uniques: true };
 
 /** Life stages, for drawing and the inspect panel. */
 export const ADULT_AGE = 14;
@@ -209,6 +275,9 @@ export interface SimState {
   walls?: Uint8Array;
   cultures?: Culture[];
   nextCultureId?: number;
+  nations?: Nation[];
+  nextNationId?: number;
+  relations?: Relation[];
 }
 
 /** What stands on a tile as a settlement's fence. Built fences cannot be walked through; gates can. */
@@ -248,6 +317,9 @@ export interface SettlementDetails {
   otherCultures: number;
   /** The settlement whose settlers founded it. */
   from?: string;
+  /** Its nation, and how unhappy its people are with that nation's policies (months of unrest). */
+  nation?: number;
+  unrest: number;
 }
 
 /** A building, as drawn. */
@@ -263,6 +335,8 @@ export interface BuildingView {
   progress: number;
   /** How it looks now: a farm's crop (0 bare, 1 shoots, 2 green, 3 ripe), plus 4 with sheaves waiting. */
   look: number;
+  /** A hall's banner: its nation's color. */
+  banner?: string;
 }
 
 /** A settlement, as listed for the app. */
@@ -275,6 +349,43 @@ export interface SettlementView {
   abandoned: boolean;
   /** The culture most of its people hold. */
   culture?: number;
+  nation?: number;
+}
+
+/** A nation, as listed for the app. */
+export interface NationView {
+  id: number;
+  name: string;
+  color: number;
+  foundedYear: number;
+  capital: number;
+  capitalName: string;
+  ruler?: { id: number; name: string; title: string };
+  settlements: number;
+  people: number;
+  coins: number;
+  officials: number;
+  policies: Policies;
+  /** Its main culture first, then the others, with their people. */
+  cultures: { id: number; members: number }[];
+  /** How much its main culture supports each of its policies now (0 to 100). */
+  support: Record<PolicyKey, number>;
+  relations: { other: number; kind: RelationKind }[];
+  /** Its settlements in unrest. */
+  unrest: number;
+  destroyedYear?: number;
+}
+
+/** Changes the player can make to a nation (SPEC 4 and 7: changing nation rules; everything can be modified). */
+export interface NationEdit {
+  name?: string;
+  color?: number;
+  policies?: Partial<Policies>;
+  /** A settlement of the nation to be its capital. */
+  capital?: number;
+  /** A person in the nation to be its ruler. */
+  ruler?: number;
+  relation?: { other: number; kind: RelationKind };
 }
 
 /** A culture, as listed for the app. */
@@ -331,6 +442,13 @@ export interface PersonDetails {
   /** Where a trader is taking goods, if on a run. */
   tradingWith?: string;
   culture?: number;
+  /** A unique individual's name, and why and since when they are unique. */
+  name?: string;
+  unique?: { why: UniqueWhy; sinceYear: number };
+  /** Their office, if any (ruler of a nation), and their influence (SPEC 6). */
+  office?: string;
+  influence: number;
+  nation?: number;
 }
 
 /** Changes the player can make to a person by hand (SPEC 1: everything can be modified). */
@@ -344,6 +462,8 @@ export interface PersonEdit {
   ageYears?: number;
   /** A culture's ID, or null for none. */
   culture?: number | null;
+  /** Makes them unique with this name, or (null) no longer unique. */
+  name?: string | null;
 }
 
 // ---------------------------------------------------------------- messages
@@ -365,6 +485,10 @@ export type ToSim =
   | { type: 'watchSettlement'; id: number | null }
   | { type: 'settlementOrder'; id: number; order: SettlementOrder }
   | { type: 'cultureEdit'; id: number; edit: CultureEdit }
+  | { type: 'nationEdit'; id: number; edit: NationEdit }
+  /** Places a nation (SPEC 7: some are placed in setup): the settlement becomes its capital. */
+  | { type: 'placeNation'; settlement: number }
+  | { type: 'nationOrder'; id: number; order: NationOrder }
   | { type: 'unpair'; id: number }
   | { type: 'save'; req: number }
   /** Development only: adds n people on land near (x, y), for speed tests. */
@@ -377,6 +501,11 @@ export type SettlementOrder =
   | { kind: 'abandon' }
   /** Its people of its culture break away and form a new culture (SPEC 7: the player can decide a break). */
   | { kind: 'breakCulture' };
+
+/** Orders to a nation (SPEC 4: imperatives). */
+export type NationOrder =
+  /** Settlers from its settlement nearest the spot go to found a settlement there for the nation. */
+  | { kind: 'expand'; tile: number };
 
 /** What a tile change is about. */
 export const TileField = { Empty: 0, Trees: 1, Territory: 2, Walls: 3 } as const;
@@ -393,7 +522,7 @@ export interface Snapshot {
   /** x, y per person, in tiles. */
   pos: Float32Array;
   look: Uint16Array;
-  /** Bit 0: walking. Bit 1: facing left. Bit 2: male. Bits 3-4: pose (see Pose). Bits 5-6: age (see AgeLook). Bit 7: indoors (not drawn). Bit 8: carrying something. */
+  /** Bit 0: walking. Bit 1: facing left. Bit 2: male. Bits 3-4: pose (see Pose). Bits 5-6: age (see AgeLook). Bit 7: indoors (not drawn). Bit 8: carrying something. Bit 9: a ruler (drawn with a crown). */
   flags: Uint16Array;
   /** Tiles whose drawing changed since the last snapshot, as triples: tile, what (TileField), new value. */
   tileChanges: Int32Array;
@@ -403,6 +532,8 @@ export interface Snapshot {
   settlements?: SettlementView[];
   /** The cultures, when they changed. */
   cultures?: CultureView[];
+  /** The nations, when they changed. */
+  nations?: NationView[];
   /** Average milliseconds per simulation step over the last second. */
   stepMs: number;
 }

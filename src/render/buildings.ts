@@ -54,6 +54,9 @@ const C = {
   awning: '#c8433a',
   canvas: '#efe3c8',
   coin: '#f2c230',
+  slate: '#5f6772',
+  slateDark: '#4a515b',
+  banner: '#c8433a',
 };
 
 /** Shapes, in tile widths. `wall` and `roof` are heights; the walls stand `inset` in from the footprint's edge. */
@@ -79,6 +82,7 @@ const SHAPES: Partial<Record<BuildingKind, Shape>> = {
   [BuildingKind.Pottery]: { wall: 0.38, roof: 0.46, inset: 0.3, roofKind: 'pyramid', wallColor: C.daub, roofColor: C.thatch, roofShade: C.thatchDark, roofLine: C.thatchLine },
   [BuildingKind.Mint]: { wall: 0.6, roof: 0.42, inset: 0.24, roofKind: 'gable', wallColor: C.stone, roofColor: C.tile, roofShade: C.tileDark, roofLine: C.tileDark },
   [BuildingKind.Townhouse]: { wall: 0.92, roof: 0.66, inset: 0.16, roofKind: 'gable', wallColor: C.plaster, roofColor: C.tile, roofShade: C.tileDark, roofLine: C.tileDark },
+  [BuildingKind.Hall]: { wall: 0.86, roof: 0.74, inset: 0.14, roofKind: 'gable', wallColor: C.stone, roofColor: C.slate, roofShade: C.slateDark, roofLine: C.slateDark },
 };
 
 type P = [number, number];
@@ -204,7 +208,7 @@ function drawHouseLike(ctx: CanvasRenderingContext2D, kind: BuildingKind, sh: Sh
         }
         for (const t of [0.33, 0.66]) line(ctx, on(0.02, lower * t), on(0.98, lower * t), C.stoneDark, 0.8);
       }
-    } else if (kind === BuildingKind.Smithy || kind === BuildingKind.Mint) {
+    } else if (kind === BuildingKind.Smithy || kind === BuildingKind.Mint || kind === BuildingKind.Hall) {
       for (let k = 1; k < 4; k++) {
         const h = (wall * k) / 4;
         line(ctx, left(0.02, h), left(0.98, h), C.stoneDark, 0.8);
@@ -254,8 +258,8 @@ function drawHouseLike(ctx: CanvasRenderingContext2D, kind: BuildingKind, sh: Sh
       // The forge's glow through an opening in the right wall.
       wallRect(ctx, right, 0.3, 0.7, wall * 0.15, wall * 0.55, C.glow);
     }
-    if (kind === BuildingKind.Townhouse || kind === BuildingKind.Mint) {
-      const rows = kind === BuildingKind.Townhouse ? [wall * 0.18, wall * 0.62] : [wall * 0.45];
+    if (kind === BuildingKind.Townhouse || kind === BuildingKind.Mint || kind === BuildingKind.Hall) {
+      const rows = kind === BuildingKind.Townhouse ? [wall * 0.18, wall * 0.62] : kind === BuildingKind.Hall ? [wall * 0.55] : [wall * 0.45];
       for (const h0 of rows) {
         for (const [on, len, ts] of [
           [left, lenL, lenL > 1.2 ? [0.2, 0.82] : [0.82]],
@@ -375,9 +379,27 @@ function chimney(ctx: CanvasRenderingContext2D, base: P, rh: number) {
 }
 
 /** Props beside a finished workplace that say what it is. Drawn in front of its walls. */
-function drawProps(ctx: CanvasRenderingContext2D, kind: BuildingKind, w: number, d: number) {
+function drawProps(ctx: CanvasRenderingContext2D, kind: BuildingKind, w: number, d: number, banner?: string) {
   const a = w / 2;
   const b = d / 2;
+  if (kind === BuildingKind.Hall) {
+    // A tall pole by the front corner flying the nation's banner.
+    const base = pt(a + 0.05, b - 0.1);
+    const top: P = [base[0], base[1] - 1.75];
+    beam(ctx, base, top, C.timber, 1.1);
+    poly(
+      ctx,
+      [
+        [top[0], top[1] + 0.02],
+        [top[0] + 0.36, top[1] + 0.1],
+        [top[0] + 0.26, top[1] + 0.17],
+        [top[0] + 0.36, top[1] + 0.25],
+        [top[0], top[1] + 0.3],
+      ],
+      banner ?? C.banner,
+    );
+    return;
+  }
   if (kind === BuildingKind.Woodcutter) {
     // A pile of logs (ends showing) by the right wall, and a chopping block with an axe.
     const base = pt(a - 0.1, b - 0.55);
@@ -752,7 +774,7 @@ let cachePixels = 0;
 const CACHE_PIXELS = 30_000_000;
 
 function sprite(b: BuildingView, step: number, frame: number, px: number, plinth: number): Sprite {
-  const key = `${b.kind}|${b.w}x${b.d}|${step}|${frame}|${px}|${plinth}|${b.look}`;
+  const key = `${b.kind}|${b.w}x${b.d}|${step}|${frame}|${px}|${plinth}|${b.look}|${b.banner ?? ''}`;
   const hit = cache.get(key);
   if (hit) return hit;
   if (cachePixels > CACHE_PIXELS) {
@@ -761,7 +783,7 @@ function sprite(b: BuildingView, step: number, frame: number, px: number, plinth
   }
   const { w, d } = b;
   const sh = SHAPES[b.kind];
-  const tall = sh ? sh.wall + sh.roof : b.kind === BuildingKind.Mine ? 0.7 : b.kind === BuildingKind.Market ? 0.6 : 0.4;
+  const tall = (sh ? sh.wall + sh.roof : b.kind === BuildingKind.Mine ? 0.7 : b.kind === BuildingKind.Market ? 0.6 : 0.4) + (b.kind === BuildingKind.Hall ? 0.4 : 0);
   const halfW = (w + d) / 4 + 0.3;
   const up = (w + d) / 8 + tall + 0.3;
   const down = (w + d) / 8 + plinth + 0.25;
@@ -791,7 +813,7 @@ function sprite(b: BuildingView, step: number, frame: number, px: number, plinth
     const progress = step / 10;
     if (progress >= 1) {
       drawHouseLike(ctx, b.kind, sh, w, d, 1, 1, plinth);
-      drawProps(ctx, b.kind, w, d);
+      drawProps(ctx, b.kind, w, d, b.banner);
     } else {
       // Being built: posts at the corners and along the walls, walls rising, then the roof.
       const rise = Math.min(1, progress / 0.7);

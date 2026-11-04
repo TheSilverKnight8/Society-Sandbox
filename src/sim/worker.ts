@@ -104,6 +104,18 @@ ctx.onmessage = (e: MessageEvent<ToSim>) => {
         world?.towns.order(m.id, m.order);
         sendSoon = true;
         break;
+      case 'nationEdit':
+        world?.nations.edit(m.id, m.edit);
+        sendSoon = true;
+        break;
+      case 'placeNation':
+        world?.nations.place(m.settlement);
+        sendSoon = true;
+        break;
+      case 'nationOrder':
+        if (m.order.kind === 'expand') world?.nations.orderExpand(m.id, m.order.tile);
+        sendSoon = true;
+        break;
       case 'cultureEdit':
         world?.cultures.edit(m.id, m.edit);
         sendSoon = true;

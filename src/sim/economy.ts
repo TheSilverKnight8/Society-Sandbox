@@ -1,6 +1,6 @@
 import { Deposit, isWater } from '../map/terrain';
 import { BASE_PRICE, BUILDINGS, BuildingKind, GOODS, footprint, type Good, type JobKind } from './buildings';
-import { ADULT_AGE, MONTHS_PER_YEAR, TICKS_PER_MONTH, type Building, type Person, type Settlement } from './types';
+import { ADULT_AGE, MONTHS_PER_YEAR, TICKS_PER_MONTH, TICKS_PER_YEAR, type Building, type Person, type Settlement } from './types';
 import type { Towns } from './towns';
 import type { World } from './world';
 
@@ -68,6 +68,11 @@ const TRADE_GOODS: Good[] = ['food', 'wood', 'stone', 'iron', 'gold', 'tools', '
 const MAX_GOODS = 6;
 /** Coins an adult with a home pays their settlement each month. */
 const RENT = 1;
+/** Officials tax settlements of their nation within this many tiles of their hall, at most twice a year each. */
+const TAX_RANGE = 100;
+/** Shares of taxes collected that go to the official who carried them and to the ruler (the rest to the nation's treasury). */
+const OFFICIAL_SHARE = 0.1;
+const RULER_SHARE = 0.1;
 
 export class Economy {
   private w: World;
@@ -382,6 +387,7 @@ export class Economy {
     if (!s) return false;
     const job = BUILDINGS[b.kind].job!;
     if (job === 'trader') return this.trade(p, b, s);
+    if (job === 'official') return this.official(p, b, s);
     if (job === 'smith' || job === 'minter' || job === 'potter') return this.make(p, b, s, job);
     // Carrying what they made: take it to the store.
     if (p.load && p.site === undefined) {
@@ -414,6 +420,37 @@ export class Economy {
     p.jobStep = 'gather';
     p.target = target;
     w.goTo(p, job === 'fisher' ? this.t.approach(target) : target, 'job');
+    return true;
+  }
+
+  /** Officials (Caleb: they collect taxes): go to the settlement of their nation most overdue, take its share, and carry it back to the hall. */
+  private official(p: Person, b: Building, home: Settlement): boolean {
+    const w = this.w;
+    if (this.ageOf(p) < ADULT_AGE) return false;
+    if (p.taxCoins) {
+      w.goTo(p, this.doorTile(b), 'taxHome', true);
+      return true;
+    }
+    const n = home.nation !== undefined ? w.nations.byId.get(home.nation) : undefined;
+    if (!n) return false;
+    const tick = w.state.tick;
+    const taken = new Set<number>();
+    for (const q of w.state.people) if (q !== p && q.taxFrom !== undefined) taken.add(q.taxFrom);
+    let best: Settlement | null = null;
+    let bestDue = 0;
+    for (const s of w.nations.settlementsOf(n)) {
+      if (taken.has(s.id) || (s.coins ?? 0) < 5) continue;
+      const since = tick - (s.taxedAt ?? s.founded);
+      if (since < TICKS_PER_YEAR / 2 || this.t.dist2(s.center, b.tile) > TAX_RANGE * TAX_RANGE) continue;
+      const due = (Math.min(since, TICKS_PER_YEAR) / TICKS_PER_YEAR) * (s.coins ?? 0);
+      if (due > bestDue) {
+        bestDue = due;
+        best = s;
+      }
+    }
+    if (!best) return false;
+    p.taxFrom = best.id;
+    w.goTo(p, this.storeTile(best, w.tileOf(p)), 'tax', true);
     return true;
   }
 
@@ -472,7 +509,7 @@ export class Economy {
     let best: { dest: Settlement; g: Good; n: number } | null = null;
     let bestScore = 0;
     for (const dest of this.t.settlements) {
-      if (dest === home || dest.abandoned || dest.stage === 'camp') continue;
+      if (dest === home || dest.abandoned || dest.stage === 'camp' || !this.w.nations.canTrade(home, dest)) continue;
       const dist = Math.sqrt(this.t.dist2(dest.center, home.center));
       if (dist > TRADE_RANGE) continue;
       for (const g of TRADE_GOODS) {
@@ -653,6 +690,44 @@ export class Economy {
       }
       p.task = p.carry > 0 ? 'eat' : 'idle';
       p.wait = p.carry > 0 ? 10 : 0;
+      return true;
+    }
+    if (purpose === 'tax') {
+      // An official at a settlement's store: its share for the nation (a tenth or a quarter of its treasury a year).
+      const s = p.taxFrom !== undefined ? this.t.byId(p.taxFrom) : undefined;
+      delete p.taxFrom;
+      if (s && !s.abandoned) {
+        const tick = this.w.state.tick;
+        const since = Math.min(TICKS_PER_YEAR, tick - (s.taxedAt ?? s.founded));
+        const amount = Math.floor((s.coins ?? 0) * this.w.nations.taxRate(s) * (since / TICKS_PER_YEAR));
+        if (amount > 0) {
+          s.coins = (s.coins ?? 0) - amount;
+          p.taxCoins = (p.taxCoins ?? 0) + amount;
+        }
+        s.taxedAt = tick;
+        this.t.settlementsChanged = true;
+      }
+      p.task = 'idle';
+      p.wait = 10;
+      return true;
+    }
+    if (purpose === 'taxHome') {
+      // Back at the hall: the taxes go into the nation's treasury; the official and the ruler take their shares.
+      const coins = p.taxCoins ?? 0;
+      delete p.taxCoins;
+      const home = p.settlement !== undefined ? this.t.byId(p.settlement) : undefined;
+      const n = home?.nation !== undefined ? this.w.nations.byId.get(home.nation) : undefined;
+      if (n && coins > 0) {
+        const wage = coins * OFFICIAL_SHARE;
+        const ruler = n.ruler !== undefined ? this.w.byId.get(n.ruler) : undefined;
+        const stipend = ruler ? coins * RULER_SHARE : 0;
+        p.coins = (p.coins ?? 0) + wage;
+        if (ruler) ruler.coins = (ruler.coins ?? 0) + stipend;
+        n.coins += coins - wage - stipend;
+        this.w.nations.changed = true;
+      } else if (home) home.coins = (home.coins ?? 0) + coins;
+      p.task = 'idle';
+      p.wait = 10;
       return true;
     }
     if (purpose === 'trade') {
@@ -885,6 +960,12 @@ export class Economy {
       tradeOption();
     }
     moreOption();
+    // A nation's capital, and its towns and cities, build a hall for officials (taxes), first unless food is short.
+    if (hasStore && this.w.nations?.wantsHall(s) && !count(BuildingKind.Hall)) {
+      const hall = { kind: BuildingKind.Hall, test: any };
+      if (food >= people) options.unshift(hall);
+      else options.push(hall);
+    }
     return options;
   }
 

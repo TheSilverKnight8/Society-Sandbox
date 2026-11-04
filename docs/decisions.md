@@ -16,8 +16,8 @@ Macro to micro, with a test checkpoint at the end of each stage. Each system's t
    - 3b. Jobs and production: farms, woodcutters, quarries, mines, fishing and the like; hauling to the storehouse; children's light jobs; the job need. **(done)**
    - 3c. Goods, coins and trade: workshops, traders between settlements, wages, wealth and inheritance; the town and city stages; fences and gates for towns and above. **(done)**
 4. **Cultures, nations and technology**, in three steps:
-   - 4a. Cultures: formation, membership, traits, breaks from a culture far from home, editing cultures, the culture map view, the culture formation rule. **(this step)**
-   - 4b. Nations: influence, leaders claiming rule, placed nations, rulers and succession, unique individuals, officials and taxes, policies and culture support, breaks over policies, diplomacy, the nation map view, their rules.
+   - 4a. Cultures: formation, membership, traits, breaks from a culture far from home, editing cultures, the culture map view, the culture formation rule. **(done; settlements spreading added after it)**
+   - 4b. Nations: influence, leaders claiming rule, placed nations, settlements joining, rulers and succession, unique individuals, officials and taxes, policies and culture support, unrest, revolts and breaks over policies, nations sending settlers, diplomacy, the nation map view, their rules. (Caleb kept this as one step.) **(this step)**
    - 4c. Technology and research: research by cultures at a research building with its own workers, the technologies and what they open up, nations' technology from their cultures, the research rule.
 5. **Military and war:** soldier types, weapons and equipment, armies and their leaders, battles with group orders and individual resolution, war declarations.
 6. **Disasters, effects, beasts and criminals;** scenario events (player- and sim-triggered) and the record of events.
@@ -64,6 +64,9 @@ Macro to micro, with a test checkpoint at the end of each stage. Each system's t
 | What officials do (SPEC 6) | They collect taxes for the nation. Research gets its own building and a new kind of worker, separate from officials ("which can come now or later"; it comes with research in step 4c). |
 | How cultures and nations show on the map | Switchable views, as WorldBox has: nations (each in its color), cultures (each in its color), or plain. Nations is the default (from 4b, when nations exist). |
 | When units decide a break from their culture (SPEC 7) | When a settlement has lived far from the rest of its culture for many years (step 4a), and when a culture's people live under a nation whose policies their culture does not support (step 4b). |
+| How settlements outside any nation come to belong to one, before war (Stage 5) | Settlements founded by a nation's own settlers belong to it. Besides that, only "same culture": an independent settlement near a nation joins it only if most of its people hold the nation's main culture; others stay independent. |
+| What a revolt does (people unhappy with their nation's policies) | By size: a small revolt sends a group of families away to found a settlement outside the nation; a large one (most of a settlement) makes the settlement break from the nation and stand on its own, possibly as a new nation. (Breaking away from the culture over policies is the other outcome, as answered before 4a.) |
+| Whether to split 4b | Keep it as one step. |
 | Whether grown settlements spread (asked at the 4a checkpoint) | "Grown villages should spread when some sort of expansion threshold is hit, whether it is a small family or group of people striking out, a village exceeds its max population, people are leaving due to a revolt, a nation want to expand more, etc." Families striking out and settlements past their most people (or crowded) came after 4a; revolts and nations wanting land come with nations (4b). |
 
 ## Questions settled by the builder in Stage 3c (Caleb can change them)
@@ -85,6 +88,31 @@ Macro to micro, with a test checkpoint at the end of each stage. Each system's t
 | SPEC 10 lists "Pairing, births, and aging (turning these off freezes the population)" as one item. One switch or three? | One switch, as the spec groups them. It can be split into three. |
 | Who pairs with whom? | One man and one woman, since pairs are what births come from (SPEC 6: "specific individuals pair up and have children"). Close relatives (parent and child, brothers and sisters, half-siblings) never pair. |
 | How do children get fed? | From what a parent nearby carries when there is any; otherwise they forage close by themselves. Households come with houses (Stage 3). |
+
+## Questions settled by the builder in Stage 4b (Caleb can change them)
+
+| Question | What 4b does |
+| --- | --- |
+| Influence (SPEC 6, a [Claude's call] item: office, wealth, family and pair ties) | Office: 50 for a ruler, 10 for an official. Wealth: half of a person's coins and household goods' value, at most 50. Ties: 30% of their pair's own influence, 25 for a ruler's child, 15 for a ruler's parent. Children have none. Shown in the inspect panel. |
+| When a leader claims rule (Caleb: high enough influence) | The most influential adult of a village or bigger outside any nation, with influence of 24 or more, claims rule with a 30% chance each year. In testing the first nations formed between years 8 and 15. |
+| Policies (SPEC 7: like WorldBox's culture traits; SPEC 11: the list is code's) | Succession (hereditary or elective), taxation (light or heavy), trade (open or closed), expansion (expansionist or settled) and conscription (levy or volunteers, used once armies exist in Stage 5). Each choice fits one culture trait: hereditary and heavy taxes fit hierarchical cultures, elective and light taxes communal ones; open trade fits mercantile, closed agrarian; expansionist fits progressive, settled traditional; levy fits martial, volunteers peaceful. A new nation takes the choices its main culture's traits fit. |
+| What policies do now | Succession picks the next ruler. Taxation sets what officials take: a tenth or a quarter of a settlement's treasury a year. Closed trade lets its traders deal only within the nation and with allies. Expansionist nations send a young family out to take land, with a 30% chance each year. |
+| Culture support (SPEC 7, a [Claude's call] item) | Each culture holds a support value (0 to 100) for every policy choice: 70 if the choice fits its traits, 25 if not; it rises 3 a year while the choice is in force where the culture lives, and drifts 2 a year back to where it started otherwise. During a major event, a policy whose other choice the main culture supports more changes with a chance of 60% × (1 − support for the current choice / 100), so well-supported policies rarely change. |
+| Major events (SPEC 7) | A change of ruler, a settlement breaking away, and a nation falling (for the nations that had relations with it). War and disasters come in Stages 5 and 6. |
+| Unrest and revolts (Caleb: by size; and breaks over policies) | A culture group of 4 or more in a settlement of a nation whose policies it supports less than 45 on average is unhappy; unrest grows a month at a time (and falls 2 a month once they are content). After a year of unrest, each month has a 1 in 8 chance of an outcome: the group breaks from its culture and founds one that takes up the policy it disliked most (a 50% chance for progressive cultures, 25% for traditional ones, if culture formation is on), or it revolts. A revolt by most of a settlement other than the capital makes the settlement break away; its leader becomes unique and, with influence of 12 or more and the nations rule on, claims rule of a new nation. Any other revolt sends about a quarter of the group's families away to found a settlement of no nation. |
+| Relations (SPEC 7: basic relations) | Alliance, trade, peace (the default) or rivalry, between nations whose settlements come within 120 tiles. Once a year each pair leans toward one by an opinion: +40 for the same main culture (+20 if one broke from the other), +8 per shared trait, +20 if both trade openly, −10 if both are martial (and of different cultures), −15 for close neighbours (under 40 tiles) of different cultures, −35 for two expansionist neighbours (under 70 tiles); then 60 or more is alliance, 30 trade, −15 or less rivalry. A relation changes to what it leans toward with a 50% chance each year. Trade moves under peace only when both trade openly; under trade or alliance always; never under rivalry. Alliances matter in war (Stage 5). |
+| Taxes (Caleb: officials collect them) | A nation's capital, and its towns and cities, build a hall (3 by 2; 16 wood, 12 stone; 3 officials). An official walks to the nation's settlement most overdue for taxes (within 100 tiles, at most twice a year each), takes its share from the treasury, carries the coins back (SPEC 8: goods are carried), and the nation's treasury takes 80%: the official keeps 10% and the ruler 10%. The treasury is kept for armies (Stage 5). |
+| Rulers and succession (SPEC 10: always happens) | Hereditary: the ruler's eldest grown child in the nation, then their pair, then the most influential grown-up in the capital. Elective: the most influential grown-up in the nation. It happens at once when a ruler dies, and within a month when they leave. Titles: King or Queen (hereditary), Lord or Lady Protector (elective). Nations are named "Kingdom of" or "Commonwealth of" their capital, the word following succession unless the player renames the nation. |
+| Unique individuals (SPEC 6) | Rulers, those who lead a revolt, people the player names, and anyone who reaches influence 40 (with the rule on) become unique: they get a medieval English name with their settlement ("Edith of Thornwell") shown in place of their number. |
+| A nation that forms before its people have a culture | Its policies are random until its first main culture forms; then it takes up that culture's ways. |
+| Falling and capitals | A nation with no settlements left falls (kept for the record). If its capital is lost, the biggest of its settlements becomes the capital. |
+
+## Builder's additions in Stage 4b (not named in the spec; easy to remove)
+
+- **A key** to the nation map view, like the cultures' key.
+- **Name** and **Make ruler** in the inspect panel's Edit (SPEC 1: everything can be modified; SPEC 6: player-chosen unique individuals).
+- **A crown** on rulers, and **a banner** in the nation's color on its halls, so they can be found on the map.
+- **Capital** and **relations** in the nation panel's Edit.
 
 ## Questions settled by the builder in Stage 4a (Caleb can change them)
 
@@ -322,6 +350,20 @@ A step has 33 ms at 3x, so there is plenty of room for now. People only walk in 
 | Saving | Cultures, people's cultures, and how long a settlement has been without a culture or far from home are saved (world format version 8). Older setups and runs open with no cultures, which form as the run goes on. |
 | In testing | From 360 people in six groups on a Titanic map, the first cultures formed in year 4. Before settlements spread, by year 30 there were 12 to 14 living cultures on two maps, most with one settlement each. With spreading (below), by year 40 the larger cultures held 5 to 9 settlements each, and one far-off settlement on each map had broken away. |
 
+## Nations (Stage 4b)
+
+| Item | Choice |
+| --- | --- |
+| Forming (SPEC 7; Caleb: a leader claims rule) | See above. The claimant becomes the first ruler and their settlement the capital. |
+| Placed nations (SPEC 7: some are placed in setup) | **Units, Nation**: click a settlement outside any nation; it becomes a new nation's capital and its most influential adult its ruler (if nobody lives there yet, the first grown-up to do so). |
+| Belonging (Caleb) | A settlement founded by a nation's settlers belongs to it (unless they left in a revolt). An independent settlement within 40 tiles of a nation's settlement, most of whose people hold the nation's main culture, joins it with a 30% chance each year. Nothing else joins a nation before war (Stage 5). |
+| Nations sending settlers (Caleb: a nation wanting to expand) | Expansionist nations, and the player's **Expand** order (Imperatives, Nations: click one of its settlements, then where), send settlers whose settlement belongs to the nation. |
+| What the app shows | A nation panel (ruler, capital, lands, treasury and officials, unrest, cultures, policies with the main culture's support, relations), opened from the key, from a settlement's or person's panel, or from the culture panel's links. Edit changes its name, color, capital, policies and relations. The settlement panel shows its nation (and whether it is the capital) and any unrest; the inspect panel shows a unique person's name, office, nation and influence. The world panel counts nations. |
+| Map views (Caleb) | **Map: Nations / Cultures / Plain**, Nations first and the default: each settlement's land in its nation's color (independent settlements faint grey). |
+| The rules (SPEC 10) | "Nations emerging from settlements", "Nation policy changes during major events", "Diplomatic relation changes" and "Emergence of unique individuals" in Rules. Succession always happens (SPEC 10). |
+| Saving | Nations, relations, settlements' nation, unrest and taxes, unique people, officials' taxes, cultures' support (world format version 10). Older setups and runs open with no nations and every new rule on. |
+| In testing | From 360 people in six groups, 40 years on three maps: 3, 4 and 10 nations; trade relations formed between neighbours with open trade and shared ways. Revolts were rare, since each nation's policies start as its main culture would have them; flipping every policy of every nation against its culture (as a player could) brought unrest within a year, then two settlements breaking away, a small revolt, two culture breaks, and policies changing back at those major events. |
+
 ## Spreading (after 4a; Caleb: grown villages spread when an expansion threshold is hit)
 
 | Item | Choice |
@@ -417,6 +459,10 @@ With cultures: 2,000 people placed in 40 groups grew to 2,390 by year 5. Simulat
 ## Performance (after spreading)
 
 2,000 people placed in 40 groups grew to 2,540 by year 5 with 95 settlements. Simulation step 2.7 to 4 ms on average, at most 23 ms in one busy step (Node). In headless Chrome at 3x with about 2,300 people: 39 to 44 frames a second for the whole map (two runs) and 54 at mid zoom.
+
+## Performance (Stage 4b)
+
+With nations: 2,000 people placed in 40 groups grew to 2,540 by year 5. Simulation step 3.2 to 3.6 ms on average, at most 11 ms (Node). In headless Chrome at 3x with about 2,200 people: 50 frames a second for the whole map and 58 at mid zoom.
 
 ## Fixes found while building 4a
 

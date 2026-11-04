@@ -4,6 +4,7 @@ import { PathFinder } from './path';
 import { packLook, unpackLook } from './look';
 import { Towns } from './towns';
 import { Cultures } from './cultures';
+import { Nations } from './nations';
 import { BUILDINGS } from './buildings';
 import {
   ADULT_AGE,
@@ -164,6 +165,7 @@ export class World {
   readonly toggles: Toggles;
   readonly towns: Towns;
   readonly cultures: Cultures;
+  readonly nations: Nations;
   /** Why people died recently (for the inspect panel); cleared as it is read. */
   readonly deaths = new Map<number, string>();
 
@@ -211,6 +213,7 @@ export class World {
     this.towns = new Towns(this);
     this.finder.walls = this.towns.walls;
     this.cultures = new Cultures(this);
+    this.nations = new Nations(this);
   }
 
   /** Records that a tile's drawing changed (deposit used up or back, trees, land). */
@@ -251,6 +254,7 @@ export class World {
     this.regrow();
     this.towns.step();
     if (st.tick % TICKS_PER_MONTH === 13) this.cultures.monthly();
+    if (st.tick % TICKS_PER_MONTH === 19) this.nations.monthly();
     if (this.toggles.lifeCycle) {
       if (st.tick % 25 === 0) this.buildGrid();
     } else {
@@ -863,6 +867,7 @@ export class World {
         this.latestReq.delete(p.id);
         this.towns.leave(p);
         this.cultures?.onGone(p);
+        this.nations?.onGone(p);
       } else keep.push(p);
     }
     this.state.people = keep;
@@ -893,6 +898,16 @@ export class World {
     if (e.rest !== undefined) p.rest = clamp(e.rest);
     if (e.sex !== undefined) p.sex = e.sex;
     if (e.culture !== undefined) this.cultures.setPersonCulture(p, e.culture);
+    if (e.name !== undefined) {
+      if (e.name === null) {
+        // Rulers stay unique (SPEC 6).
+        if (!this.nations.rulers.has(p.id)) delete p.unique;
+      } else if (e.name.trim()) {
+        if (p.unique) p.unique.name = e.name.trim().slice(0, 40);
+        else p.unique = { name: e.name.trim().slice(0, 40), since: this.state.tick, why: 'chosen' };
+      }
+      this.nations.changed = true;
+    }
     if (e.ageYears !== undefined) p.born = this.state.tick - Math.floor(Math.max(0, e.ageYears) * TICKS_PER_YEAR) - (this.state.tick - p.born) % TICKS_PER_YEAR;
   }
 
@@ -959,6 +974,11 @@ export class World {
       wealth: Math.floor(this.towns.economy.wealthOf(p)),
       tradingWith: p.tradeTo !== undefined ? this.towns.settlementName(p.tradeTo) : undefined,
       culture: p.culture,
+      name: p.unique?.name,
+      unique: p.unique ? { why: p.unique.why, sinceYear: Math.floor(p.unique.since / TICKS_PER_YEAR) + 1 } : undefined,
+      office: this.nations.officeOf(p),
+      influence: this.nations.influence(p),
+      nation: this.nations.nationOfPerson(p)?.id,
     };
   }
 
@@ -990,7 +1010,7 @@ export class World {
       const pose = p.task === 'sleep' ? Pose.Sleep : p.task === 'walk' || p.task === 'idle' ? Pose.Stand : Pose.Work;
       const age = (this.state.tick - p.born) / TICKS_PER_YEAR;
       const ageLook = age < 7 ? AgeLook.Young : age < ADULT_AGE ? AgeLook.Child : age >= ELDER_AGE ? AgeLook.Elder : AgeLook.Adult;
-      let f = (p.task === 'walk' ? 1 : 0) | (p.sex === 1 ? 4 : 0) | (pose << 3) | (ageLook << 5) | (p.indoors ? 128 : 0) | (p.load ? 256 : 0);
+      let f = (p.task === 'walk' ? 1 : 0) | (p.sex === 1 ? 4 : 0) | (pose << 3) | (ageLook << 5) | (p.indoors ? 128 : 0) | (p.load || p.taxCoins ? 256 : 0) | (this.nations.rulers.has(p.id) ? 512 : 0);
       const r = p.task === 'walk' ? this.routes.get(p.id) : undefined;
       if (r && r.step < r.tiles.length) {
         // Facing left on screen when heading toward smaller (x - y).
@@ -1007,10 +1027,12 @@ export class World {
     const buildings = t.buildingsChanged ? t.buildingViews() : undefined;
     const settlements = t.settlementsChanged ? t.settlementViews() : undefined;
     const cultures = this.cultures.changed ? this.cultures.views() : undefined;
+    const nations = this.nations.changed ? this.nations.views() : undefined;
     t.buildingsChanged = false;
     t.settlementsChanged = false;
     this.cultures.changed = false;
-    return { tick: this.state.tick, ids, pos, look, flags, tileChanges, buildings, settlements, cultures, stepMs };
+    this.nations.changed = false;
+    return { tick: this.state.tick, ids, pos, look, flags, tileChanges, buildings, settlements, cultures, nations, stepMs };
   }
 
   /** A copy of everything that is saved. */
@@ -1025,7 +1047,9 @@ export class World {
       walls: this.towns.walls.slice(),
       settlements: this.towns.settlements.map((s) => ({ ...s, queue: s.queue.map((q) => ({ ...q })) })),
       buildings: this.towns.buildings.map((b) => ({ ...b })),
-      cultures: this.cultures.list.map((c) => ({ ...c, traits: { ...c.traits } })),
+      cultures: this.cultures.list.map((c) => ({ ...c, traits: { ...c.traits }, support: c.support ? { ...c.support } : undefined })),
+      nations: this.nations.list.map((n) => ({ ...n, policies: { ...n.policies } })),
+      relations: this.nations.relations.map((r) => ({ ...r })),
       people: this.state.people.map((p) => {
         const q: Person = { ...p, wait: Number.isFinite(p.wait) ? Math.min(p.wait, 100) : 0 };
         // Routes and claims are not saved; anyone on the move starts again from standing.
@@ -1034,6 +1058,7 @@ export class World {
         delete q.target;
         if (q.load) q.load = { ...q.load };
         else delete q.site;
+        if (q.unique) q.unique = { ...q.unique };
         return q;
       }),
     };

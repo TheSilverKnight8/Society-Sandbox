@@ -218,12 +218,13 @@ export class Cultures {
     this.changed = true;
   }
 
-  private newCulture(origin: Settlement | undefined, parent?: Culture): Culture {
+  private newCulture(origin: Settlement | undefined, parent?: Culture, set?: Partial<CultureTraits>): Culture {
     const w = this.w;
     const traits: CultureTraits = parent
       ? { ...parent.traits }
       : (Object.fromEntries(TRAIT_AXES.map((a) => [a.key, a.poles[w.rand.int(2)]])) as unknown as CultureTraits);
-    if (parent) {
+    if (parent && set) Object.assign(traits, set);
+    else if (parent) {
       // A break keeps the old ways but one.
       const a = TRAIT_AXES[w.rand.int(TRAIT_AXES.length)];
       (traits as unknown as Record<string, string>)[a.key] = traits[a.key] === a.poles[0] ? a.poles[1] : a.poles[0];
@@ -268,6 +269,13 @@ export class Cultures {
     this.dominant.set(s.id, c.id);
     delete s.farSince;
     this.w.towns.settlementsChanged = true;
+  }
+
+  /** A group breaks from its culture over its nation's policies, taking up the ways given (Caleb; see nations.ts). */
+  splitOff(s: Settlement, parent: Culture, members: Person[], set: Partial<CultureTraits>) {
+    const c = this.newCulture(s, parent, set);
+    for (const p of members) if (p.culture === parent.id) this.setCulture(p, c.id);
+    this.recount();
   }
 
   /** The player's order: a settlement breaks from its culture (whether or not the rule is on). */
