@@ -1,16 +1,30 @@
 import { hash2 } from '../lib/rng';
 import { Deposit, Terrain } from '../map/terrain';
-import { CREAM, NAVY, RED, SHADE, tint } from './style';
+import { CREAM, NAVY, OBJ, SHADE } from './style';
 
-// Line drawings that say what a tile is, in the stick figures' style: navy outlines with
-// round ends, cream fills, red only for small accents. All sizes are in tile widths; `s`
-// scales a drawing up when it stands for several tiles at once (zoomed far out).
+// Drawings on the tiles, in the stick figures' style: navy outlines with round ends.
+// The environment's marks (grass, hills, peaks, dunes, reeds, waves) are navy line art on
+// cream; objects the simulation will act on (trees, deposits) have natural colors inside
+// their navy outline. All sizes are in tile widths; `s` scales a drawing up when it stands
+// for several tiles at once (zoomed far out).
 
 type Ctx = CanvasRenderingContext2D;
 
 function stroke(ctx: Ctx, color = NAVY) {
   ctx.strokeStyle = color;
   ctx.stroke();
+}
+
+/** A colored line with a navy outline around it, like a stick figure's limb. */
+function limb(ctx: Ctx, color: string) {
+  const w = ctx.lineWidth;
+  ctx.strokeStyle = NAVY;
+  ctx.lineWidth = w * 2.4;
+  ctx.stroke();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = w * 1.1;
+  ctx.stroke();
+  ctx.lineWidth = w;
 }
 
 function fillStroke(ctx: Ctx, fill = CREAM) {
@@ -34,44 +48,60 @@ export function tuft(ctx: Ctx, px: number, py: number, s: number) {
   stroke(ctx);
 }
 
-/** A leafy tree: a ring on a stick, like a stick figure's head. */
+/** A leafy tree: a brown trunk and a round green crown, like a stick figure's head on its body. */
 export function tree(ctx: Ctx, px: number, py: number, s: number) {
   ctx.beginPath();
   ctx.moveTo(px, py);
-  ctx.lineTo(px, py - 0.13 * s);
-  stroke(ctx);
+  ctx.lineTo(px, py - 0.14 * s);
+  limb(ctx, OBJ.trunk);
   ctx.beginPath();
-  ctx.arc(px, py - 0.21 * s, 0.085 * s, 0, Math.PI * 2);
-  fillStroke(ctx);
+  ctx.arc(px, py - 0.22 * s, 0.09 * s, 0, Math.PI * 2);
+  fillStroke(ctx, OBJ.leaf);
 }
 
-/** A pine: a tall triangle on a short trunk. */
+/** A pine: a tall dark green triangle on a short brown trunk. */
 export function pine(ctx: Ctx, px: number, py: number, s: number) {
   ctx.beginPath();
   ctx.moveTo(px, py);
-  ctx.lineTo(px, py - 0.07 * s);
-  stroke(ctx);
+  ctx.lineTo(px, py - 0.08 * s);
+  limb(ctx, OBJ.trunk);
   ctx.beginPath();
-  ctx.moveTo(px, py - 0.38 * s);
-  ctx.lineTo(px + 0.085 * s, py - 0.07 * s);
-  ctx.lineTo(px - 0.085 * s, py - 0.07 * s);
+  ctx.moveTo(px, py - 0.39 * s);
+  ctx.lineTo(px + 0.09 * s, py - 0.075 * s);
+  ctx.lineTo(px - 0.09 * s, py - 0.075 * s);
   ctx.closePath();
-  fillStroke(ctx);
+  fillStroke(ctx, OBJ.pine);
 }
 
-/** A rounded hill with its far side shaded. */
+/** A rounded hill with its right side shaded, like the peaks. */
 export function hill(ctx: Ctx, px: number, py: number, s: number) {
-  const w = 0.2 * s;
-  const h = 0.17 * s;
+  const w = 0.25 * s;
+  const h = 0.2 * s;
+  const dome = () => {
+    ctx.beginPath();
+    ctx.moveTo(px - w, py);
+    ctx.bezierCurveTo(px - w * 0.7, py - h * 1.3, px + w * 0.7, py - h * 1.3, px + w, py);
+    ctx.closePath();
+  };
+  dome();
+  ctx.fillStyle = CREAM;
+  ctx.fill();
+  // Shade the right part: clip to the dome and fill from a line just right of the top.
+  ctx.save();
+  dome();
+  ctx.clip();
   ctx.beginPath();
-  ctx.moveTo(px - w, py);
-  ctx.quadraticCurveTo(px - w * 0.15, py - h * 1.9, px + w, py);
+  ctx.moveTo(px + w * 0.12, py - h * 1.2);
+  ctx.lineTo(px + w * 1.1, py - h * 1.2);
+  ctx.lineTo(px + w * 1.1, py + 0.01);
+  ctx.lineTo(px + w * 0.3, py + 0.01);
   ctx.closePath();
-  fillStroke(ctx);
-  ctx.beginPath();
-  ctx.moveTo(px + w * 0.25, py - h * 0.62);
-  ctx.quadraticCurveTo(px + w * 0.7, py - h * 0.25, px + w * 0.62, py);
-  stroke(ctx);
+  ctx.fillStyle = SHADE;
+  ctx.fill();
+  ctx.restore();
+  dome();
+  ctx.strokeStyle = NAVY;
+  ctx.stroke();
 }
 
 /** A mountain peak, its right side shaded. Snowy peaks are taller, with a snow line and a cream cap. */
@@ -185,10 +215,11 @@ export function biomeDetail(ctx: Ctx, t: number, x: number, y: number, h: number
   const r = hash2(x, y, 3);
   switch (t) {
     case Terrain.Grassland:
-      if (r < 0.32) tuft(ctx, px + (hash2(x, y, 5) - 0.5) * 0.3, py + (hash2(x, y, 6) - 0.5) * 0.12, 1);
+      if (r < 0.12) tuft(ctx, px + (hash2(x, y, 5) - 0.5) * 0.3, py + (hash2(x, y, 6) - 0.5) * 0.12, 1);
       break;
     case Terrain.Forest: {
-      const count = 1 + (r < 0.6 ? 1 : 0);
+      // About one tree a tile: a forest should still look like one.
+      const count = r < 0.25 ? 2 : r < 0.82 ? 1 : 0;
       const spots: [number, number][] = [];
       for (let k = 0; k < count; k++) spots.push([0.2 + hash2(x, y, 11 + k) * 0.6, 0.2 + hash2(x, y, 23 + k) * 0.6]);
       spots.sort((a, b) => a[0] + a[1] - (b[0] + b[1]));
@@ -202,28 +233,28 @@ export function biomeDetail(ctx: Ctx, t: number, x: number, y: number, h: number
       break;
     }
     case Terrain.Hills:
-      if (r < 0.55) hill(ctx, px + (hash2(x, y, 5) - 0.5) * 0.15, py + 0.05, 0.9 + hash2(x, y, 7) * 0.3);
+      if (r < 0.22) hill(ctx, px + (hash2(x, y, 5) - 0.5) * 0.15, py + 0.05, 0.9 + hash2(x, y, 7) * 0.3);
       break;
     case Terrain.Mountain:
-      if (r < 0.78) peak(ctx, px + (hash2(x, y, 5) - 0.5) * 0.12, py + 0.08, 0.85 + hash2(x, y, 7) * 0.35, false);
+      if (r < 0.4) peak(ctx, px + (hash2(x, y, 5) - 0.5) * 0.12, py + 0.08, 0.85 + hash2(x, y, 7) * 0.35, false);
       break;
     case Terrain.Snow:
-      if (r < 0.82) peak(ctx, px + (hash2(x, y, 5) - 0.5) * 0.12, py + 0.08, 0.9 + hash2(x, y, 7) * 0.35, true);
+      if (r < 0.45) peak(ctx, px + (hash2(x, y, 5) - 0.5) * 0.12, py + 0.08, 0.9 + hash2(x, y, 7) * 0.35, true);
       break;
     case Terrain.Desert:
-      if (r < 0.35) dunes(ctx, px, py, 1);
+      if (r < 0.14) dunes(ctx, px, py, 1);
       break;
     case Terrain.Sand:
-      if (r < 0.5) sandDots(ctx, px, py, 1, lw);
+      if (r < 0.14) sandDots(ctx, px, py, 1, lw);
       break;
     case Terrain.Swamp:
-      if (r < 0.7) reeds(ctx, px, py, 1);
+      if (r < 0.32) reeds(ctx, px, py, 1);
       break;
     case Terrain.ShallowWater:
-      if (r < 0.18) wave(ctx, px, py, 1, 0.75);
+      if (r < 0.08) wave(ctx, px, py, 1, 0.75);
       break;
     case Terrain.DeepWater:
-      if (r < 0.07) wave(ctx, px, py, 1, 0.45);
+      if (r < 0.03) wave(ctx, px, py, 1, 0.45);
       break;
   }
 }
@@ -233,7 +264,7 @@ export function biomeSparse(ctx: Ctx, t: number, x: number, y: number, h: number
   const r = hash2(x, y, 9);
   switch (t) {
     case Terrain.Grassland:
-      if (r < 0.55) tuft(ctx, px, py, s * 0.8);
+      if (r < 0.25) tuft(ctx, px, py, s * 0.8);
       break;
     case Terrain.Forest: {
       const pines = h >= 5 || r < 0.3;
@@ -243,34 +274,34 @@ export function biomeSparse(ctx: Ctx, t: number, x: number, y: number, h: number
       break;
     }
     case Terrain.Hills:
-      hill(ctx, px, py, s * 0.8);
+      if (r < 0.5) hill(ctx, px, py, s * 0.8);
       break;
     case Terrain.Mountain:
-      peak(ctx, px, py, s * 0.75, false);
+      if (r < 0.7) peak(ctx, px, py, s * 0.75, false);
       break;
     case Terrain.Snow:
       peak(ctx, px, py, s * 0.8, true);
       break;
     case Terrain.Desert:
-      if (r < 0.8) dunes(ctx, px, py, s * 0.8);
+      if (r < 0.35) dunes(ctx, px, py, s * 0.8);
       break;
     case Terrain.Sand:
-      if (r < 0.6) sandDots(ctx, px, py, s * 0.6, lw);
+      if (r < 0.3) sandDots(ctx, px, py, s * 0.6, lw);
       break;
     case Terrain.Swamp:
-      reeds(ctx, px, py, s * 0.8);
+      if (r < 0.6) reeds(ctx, px, py, s * 0.8);
       break;
     case Terrain.ShallowWater:
-      if (r < 0.5) wave(ctx, px, py, s * 0.7, 0.7);
+      if (r < 0.25) wave(ctx, px, py, s * 0.7, 0.7);
       break;
     case Terrain.DeepWater:
-      if (r < 0.3) wave(ctx, px, py, s * 0.7, 0.4);
+      if (r < 0.12) wave(ctx, px, py, s * 0.7, 0.4);
       break;
   }
 }
 
 /** A rock outline. */
-function rock(ctx: Ctx, px: number, py: number, r: number) {
+function rock(ctx: Ctx, px: number, py: number, r: number, fill: string) {
   ctx.beginPath();
   ctx.moveTo(px - r, py);
   ctx.lineTo(px - r * 0.75, py - r * 0.6);
@@ -278,31 +309,39 @@ function rock(ctx: Ctx, px: number, py: number, r: number) {
   ctx.lineTo(px + r * 0.7, py - r * 0.55);
   ctx.lineTo(px + r, py);
   ctx.closePath();
-  fillStroke(ctx);
+  fillStroke(ctx, fill);
 }
 
-/** Draws a deposit's marker on a tile. */
-export function deposit(ctx: Ctx, d: number, px: number, py: number, s: number, lw: number) {
+/** Draws a deposit's marker on a tile. Small objects get a slightly thinner outline so their color still shows. */
+export function deposit(ctx: Ctx, d: number, px: number, py: number, s0: number, lw0: number) {
+  const s = s0 * 1.3;
+  const lw = lw0 * 0.75;
+  ctx.lineWidth = lw;
+  drawDeposit(ctx, d, px, py, s, lw);
+  ctx.lineWidth = lw0;
+}
+
+function drawDeposit(ctx: Ctx, d: number, px: number, py: number, s: number, lw: number) {
   switch (d) {
     case Deposit.Stone:
     case Deposit.Iron:
     case Deposit.Gold:
-      rock(ctx, px - 0.06 * s, py, 0.085 * s);
-      rock(ctx, px + 0.07 * s, py + 0.035 * s, 0.065 * s);
+      rock(ctx, px - 0.06 * s, py, 0.085 * s, d === Deposit.Stone ? OBJ.stone : OBJ.oreRock);
+      rock(ctx, px + 0.07 * s, py + 0.035 * s, 0.065 * s, d === Deposit.Stone ? OBJ.stone : OBJ.oreRock);
       if (d === Deposit.Iron) {
-        // Dark ore flecks.
-        ctx.fillStyle = NAVY;
+        // Rust-colored ore flecks.
+        ctx.fillStyle = OBJ.iron;
         for (const [dx, dy] of [
           [-0.09, -0.03],
           [-0.04, -0.045],
           [0.07, 0.015],
         ]) {
           ctx.beginPath();
-          ctx.arc(px + dx * s, py + dy * s, lw * 0.9, 0, Math.PI * 2);
+          ctx.arc(px + dx * s, py + dy * s, Math.max(lw * 0.9, 0.014 * s), 0, Math.PI * 2);
           ctx.fill();
         }
       } else if (d === Deposit.Gold) {
-        // A red glint.
+        // A gold glint.
         const gx = px - 0.06 * s;
         const gy = py - 0.06 * s;
         const g = 0.045 * s;
@@ -316,14 +355,18 @@ export function deposit(ctx: Ctx, d: number, px: number, py: number, s: number, 
         ctx.lineTo(gx - g, gy);
         ctx.lineTo(gx - g * 0.3, gy - g * 0.3);
         ctx.closePath();
-        ctx.fillStyle = RED;
+        ctx.fillStyle = OBJ.gold;
         ctx.fill();
+        ctx.lineWidth = lw * 0.6;
+        ctx.strokeStyle = NAVY;
+        ctx.stroke();
+        ctx.lineWidth = lw;
       }
       break;
     case Deposit.Clay:
       ctx.beginPath();
       ctx.ellipse(px, py, 0.15 * s, 0.065 * s, 0, 0, Math.PI * 2);
-      fillStroke(ctx, tint(0.16));
+      fillStroke(ctx, OBJ.clay);
       ctx.beginPath();
       ctx.moveTo(px - 0.07 * s, py - 0.015 * s);
       ctx.lineTo(px + 0.02 * s, py - 0.015 * s);
@@ -332,7 +375,7 @@ export function deposit(ctx: Ctx, d: number, px: number, py: number, s: number, 
       stroke(ctx);
       break;
     case Deposit.Fish:
-      // Fish outlines in cream, on the water.
+      // Silver fish, outlined in navy.
       for (const [dx, dy, dir] of [
         [-0.07, -0.015, 1],
         [0.07, 0.035, -1],
@@ -345,11 +388,11 @@ export function deposit(ctx: Ctx, d: number, px: number, py: number, s: number, 
         ctx.lineTo(fx - dir * 0.085 * s, fy - 0.025 * s);
         ctx.lineTo(fx - dir * 0.085 * s, fy + 0.025 * s);
         ctx.closePath();
-        stroke(ctx, CREAM);
+        fillStroke(ctx, OBJ.fish);
       }
       break;
     case Deposit.Berries: {
-      // A bush with red berries.
+      // A green bush with red berries.
       ctx.beginPath();
       ctx.moveTo(px - 0.11 * s, py);
       ctx.arc(px - 0.055 * s, py - 0.025 * s, 0.06 * s, Math.PI * 0.9, Math.PI * 1.75);
@@ -357,8 +400,8 @@ export function deposit(ctx: Ctx, d: number, px: number, py: number, s: number, 
       ctx.arc(px + 0.07 * s, py - 0.02 * s, 0.05 * s, Math.PI * 1.4, Math.PI * 0.1);
       ctx.lineTo(px - 0.11 * s, py);
       ctx.closePath();
-      fillStroke(ctx);
-      ctx.fillStyle = RED;
+      fillStroke(ctx, OBJ.bush);
+      ctx.fillStyle = OBJ.berry;
       for (const [dx, dy] of [
         [-0.05, -0.04],
         [0.01, -0.07],

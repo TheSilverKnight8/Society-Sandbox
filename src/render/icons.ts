@@ -1,6 +1,6 @@
 import { hash2 } from '../lib/rng';
-import { Deposit, Terrain, isWater } from '../map/terrain';
-import { DEEP, LAND, LAND_FACE_L, LAND_FACE_R, NAVY, SHALLOW, WATER_FACE_L, WATER_FACE_R } from './style';
+import { Deposit } from '../map/terrain';
+import { FACE_L, FACE_R, GROUND, NAVY } from './style';
 import { biomeSparse, deposit as drawDeposit } from './symbols';
 
 // Small pictures of single tiles for Map mode's tool buttons, drawn with the map's own
@@ -32,26 +32,25 @@ export function tileIcon(terrain: number, dep: number = Deposit.None, px = 56): 
   ctx.setTransform(L, 0, 0, L, (px * dpr) / 2, px * dpr * 0.36);
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
-  const lw = (1.6 * dpr) / L;
+  const lw = (1.9 * dpr) / L;
   ctx.lineWidth = lw;
-  const water = isWater(terrain);
   const d = 0.12;
   // Faces, top, outline.
-  ctx.fillStyle = water ? WATER_FACE_L : LAND_FACE_L;
+  ctx.fillStyle = FACE_L[terrain];
   ctx.beginPath();
   ctx.moveTo(-0.5, 0.25);
   ctx.lineTo(0, 0.5);
   ctx.lineTo(0, 0.5 + d);
   ctx.lineTo(-0.5, 0.25 + d);
   ctx.fill();
-  ctx.fillStyle = water ? WATER_FACE_R : LAND_FACE_R;
+  ctx.fillStyle = FACE_R[terrain];
   ctx.beginPath();
   ctx.moveTo(0, 0.5);
   ctx.lineTo(0.5, 0.25);
   ctx.lineTo(0.5, 0.25 + d);
   ctx.lineTo(0, 0.5 + d);
   ctx.fill();
-  ctx.fillStyle = water ? (terrain === Terrain.ShallowWater ? SHALLOW : DEEP) : LAND;
+  ctx.fillStyle = GROUND[terrain];
   ctx.beginPath();
   ctx.moveTo(0, 0);
   ctx.lineTo(0.5, 0.25);

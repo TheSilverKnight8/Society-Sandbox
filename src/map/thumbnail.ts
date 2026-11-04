@@ -1,16 +1,12 @@
-import { TERRAINS } from './terrain';
+import { GROUND_RGB } from '../render/style';
 import type { Tiles } from './generate';
 
-// Cream blended toward navy, as in the map view (src/render/style.ts).
-const TOPS = TERRAINS.map((t) => {
-  const k = t.thumbTint;
-  return [250 + (0 - 250) * k, 238 + (38 - 238) * k, 218 + (87 - 218) * k] as const;
-});
+/** The same ground colors as the map view. */
+const TOPS = GROUND_RGB;
 
 /**
- * A small picture of a map for Home: cream land and navy water, with light navy shading
- * for forests, hills and mountains and for slopes facing away, turned into the same
- * diamond the map view uses.
+ * A small picture of a map for Home: each tile's ground color, with slopes facing away
+ * from the light shaded toward navy, turned into the same diamond the map view uses.
  */
 export function makeThumbnail(tiles: Tiles, size: number, width = 480): string {
   const flat = document.createElement('canvas');

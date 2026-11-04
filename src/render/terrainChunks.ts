@@ -1,7 +1,7 @@
 import { hash2 } from '../lib/rng';
 import { Deposit, isWater } from '../map/terrain';
 import { CHUNK, STEP, isoX, isoY, type TileSource } from './iso';
-import { DEEP, LAND, LAND_FACE_L, LAND_FACE_R, NAVY, SHALLOW, WATER_FACE_L, WATER_FACE_R } from './style';
+import { FACE_L, FACE_R, GROUND, NAVY } from './style';
 import { biomeDetail, biomeSparse, deposit as drawDepositMark } from './symbols';
 
 // Draws the terrain in chunks of CHUNK x CHUNK tiles and keeps each drawn chunk as a
@@ -11,9 +11,10 @@ import { biomeDetail, biomeSparse, deposit as drawDepositMark } from './symbols'
 // view picks the level nearest above the current zoom and scales it down slightly.
 // Pictures are dropped least recently used first when they pass a memory budget.
 //
-// The look follows Stickman Arena: cream land, navy water, navy outlines with round
-// ends, and line drawings on the tiles that say what each one is. Zoomed far out, one
-// larger drawing stands for a patch of tiles, so biomes still read.
+// The look follows Stickman Arena: each biome's ground is a shade of the cream, water is
+// navy, everything has navy outlines with round ends, and a few drawings sit on the
+// tiles (navy line art for the environment, natural colors for objects such as trees).
+// Zoomed far out, one larger drawing stands for a patch of tiles.
 
 export const LEVELS = [4, 8, 16, 32, 64, 128] as const;
 
@@ -24,10 +25,10 @@ const SKIRT = 2;
 
 /** At each detail level: one drawing every `grid` tiles, `scale` times the size; room kept around a chunk for drawings that stick out. */
 function levelStyle(level: number) {
-  if (level <= 4) return { grid: 8, scale: 6.5, top: 3.4, side: 2, lineV: 1.1 };
-  if (level <= 8) return { grid: 4, scale: 3.4, top: 1.9, side: 1.1, lineV: 1.2 };
-  if (level <= 16) return { grid: 2, scale: 1.7, top: 1, side: 0.6, lineV: 1.4 };
-  return { grid: 1, scale: 1, top: 0.7, side: 0.35, lineV: level >= 128 ? 4.4 : level >= 64 ? 3 : 2 };
+  if (level <= 4) return { grid: 8, scale: 6.5, top: 3.4, side: 2, lineV: 1.3 };
+  if (level <= 8) return { grid: 4, scale: 3.4, top: 1.9, side: 1.1, lineV: 1.5 };
+  if (level <= 16) return { grid: 2, scale: 1.7, top: 1, side: 0.6, lineV: 1.9 };
+  return { grid: 1, scale: 1, top: 0.7, side: 0.35, lineV: level >= 128 ? 5.6 : level >= 64 ? 3.8 : 2.6 };
 }
 const MAX_STYLE = levelStyle(4);
 
@@ -261,7 +262,7 @@ function drawChunkTiles(ctx: CanvasRenderingContext2D, src: TileSource, cx: numb
       const dl = hl < h ? (h - hl) * STEP : 0;
       const dr = hr < h ? (h - hr) * STEP : 0;
       if (dl > 0) {
-        ctx.fillStyle = y + 1 >= size ? NAVY : water ? WATER_FACE_L : LAND_FACE_L;
+        ctx.fillStyle = y + 1 >= size ? NAVY : FACE_L[t];
         ctx.beginPath();
         ctx.moveTo(X - 0.5 - e, Y + 0.25);
         ctx.lineTo(X + e, Y + 0.5);
@@ -270,7 +271,7 @@ function drawChunkTiles(ctx: CanvasRenderingContext2D, src: TileSource, cx: numb
         ctx.fill();
       }
       if (dr > 0) {
-        ctx.fillStyle = x + 1 >= size ? NAVY : water ? WATER_FACE_R : LAND_FACE_R;
+        ctx.fillStyle = x + 1 >= size ? NAVY : FACE_R[t];
         ctx.beginPath();
         ctx.moveTo(X - e, Y + 0.5);
         ctx.lineTo(X + 0.5 + e, Y + 0.25);
@@ -279,8 +280,8 @@ function drawChunkTiles(ctx: CanvasRenderingContext2D, src: TileSource, cx: numb
         ctx.fill();
       }
 
-      // Top face: cream land, navy water.
-      ctx.fillStyle = water ? (t === 1 ? SHALLOW : DEEP) : LAND;
+      // Top face: each biome's own shade of cream; navy water.
+      ctx.fillStyle = GROUND[t];
       ctx.beginPath();
       ctx.moveTo(X, Y - e);
       ctx.lineTo(X + 0.5 + 2 * e, Y + 0.25);
@@ -293,7 +294,7 @@ function drawChunkTiles(ctx: CanvasRenderingContext2D, src: TileSource, cx: numb
         const hb1 = x > 0 ? elevation[i - 1] : h;
         const hb2 = y > 0 ? elevation[i - size] : h;
         ctx.strokeStyle = NAVY;
-        ctx.lineWidth = lw * 0.6;
+        ctx.lineWidth = lw * 0.8;
         ctx.beginPath();
         if (hb1 < h) {
           ctx.moveTo(X - 0.5, Y + 0.25);

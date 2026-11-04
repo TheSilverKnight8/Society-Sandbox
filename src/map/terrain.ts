@@ -21,8 +21,6 @@ export type Terrain = (typeof Terrain)[keyof typeof Terrain];
 export interface TerrainDef {
   id: Terrain;
   name: string;
-  /** How far toward navy the tile is shaded in the small map pictures on Home (0 = cream). The map view itself tells biomes apart by drawings. */
-  thumbTint: number;
   /** Lowest and highest elevation a tile of this type can have. Painting clamps into this range. */
   minElev: number;
   maxElev: number;
@@ -33,16 +31,16 @@ export interface TerrainDef {
 export const MAX_ELEV = 15;
 
 export const TERRAINS: TerrainDef[] = [
-  { id: Terrain.DeepWater, name: 'Deep water', thumbTint: 1, minElev: 0, maxElev: 0, water: true },
-  { id: Terrain.ShallowWater, name: 'Shallow water', thumbTint: 0.72, minElev: 0, maxElev: 11, water: true },
-  { id: Terrain.Sand, name: 'Sand', thumbTint: 0.03, minElev: 1, maxElev: 4 },
-  { id: Terrain.Grassland, name: 'Grassland', thumbTint: 0, minElev: 1, maxElev: 11 },
-  { id: Terrain.Forest, name: 'Forest', thumbTint: 0.13, minElev: 1, maxElev: 11 },
-  { id: Terrain.Hills, name: 'Hills', thumbTint: 0.08, minElev: 3, maxElev: 11 },
-  { id: Terrain.Mountain, name: 'Mountain', thumbTint: 0.24, minElev: 6, maxElev: 14 },
-  { id: Terrain.Snow, name: 'Snow', thumbTint: 0, minElev: 9, maxElev: 15 },
-  { id: Terrain.Desert, name: 'Desert', thumbTint: 0.05, minElev: 1, maxElev: 9 },
-  { id: Terrain.Swamp, name: 'Swamp', thumbTint: 0.16, minElev: 1, maxElev: 4 },
+  { id: Terrain.DeepWater, name: 'Deep water', minElev: 0, maxElev: 0, water: true },
+  { id: Terrain.ShallowWater, name: 'Shallow water', minElev: 0, maxElev: 11, water: true },
+  { id: Terrain.Sand, name: 'Sand', minElev: 1, maxElev: 4 },
+  { id: Terrain.Grassland, name: 'Grassland', minElev: 1, maxElev: 11 },
+  { id: Terrain.Forest, name: 'Forest', minElev: 1, maxElev: 11 },
+  { id: Terrain.Hills, name: 'Hills', minElev: 3, maxElev: 11 },
+  { id: Terrain.Mountain, name: 'Mountain', minElev: 6, maxElev: 14 },
+  { id: Terrain.Snow, name: 'Snow', minElev: 9, maxElev: 15 },
+  { id: Terrain.Desert, name: 'Desert', minElev: 1, maxElev: 9 },
+  { id: Terrain.Swamp, name: 'Swamp', minElev: 1, maxElev: 4 },
 ];
 
 export const terrainDef = (t: number): TerrainDef => TERRAINS[t] ?? TERRAINS[0];
