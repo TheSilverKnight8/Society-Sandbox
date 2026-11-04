@@ -20,6 +20,8 @@ WALK_COST[Terrain.Desert] = 1.3;
 WALK_COST[Terrain.Swamp] = 2.5;
 
 const CLIMB_COST = 0.4;
+/** Walking on pavement costs this share of the ground's usual cost. */
+const PAVED = 0.6;
 const SQRT2 = Math.SQRT2;
 const DIRS = [
   [1, 0, 1],
@@ -48,6 +50,8 @@ export class PathFinder {
   expanded = 0;
   /** Fences and gates (see Wall in types.ts): a built fence (2) cannot be walked through. */
   walls?: Uint8Array;
+  /** Pavement (2: paved): walking on it costs less, so people walk faster and prefer it. */
+  roads?: Uint8Array;
 
   constructor(size: number, terrain: Uint8Array, elevation: Uint8Array) {
     this.size = size;
@@ -68,7 +72,7 @@ export class PathFinder {
   }
 
   cost(i: number) {
-    return WALK_COST[this.terrain[i]];
+    return this.roads?.[i] === 2 ? WALK_COST[this.terrain[i]] * PAVED : WALK_COST[this.terrain[i]];
   }
 
   /**
@@ -113,8 +117,9 @@ export class PathFinder {
         if (nx < 0 || ny < 0 || nx >= size || ny >= size) continue;
         const ni = ny * size + nx;
         if (this.closed[ni] === run) continue;
-        const c = WALK_COST[this.terrain[ni]];
-        if (c === Infinity || this.walls?.[ni] === 2) continue;
+        const c0 = WALK_COST[this.terrain[ni]];
+        if (c0 === Infinity || this.walls?.[ni] === 2) continue;
+        const c = this.roads?.[ni] === 2 ? c0 * PAVED : c0;
         // No cutting corners past tiles that cannot be walked.
         if (len !== 1 && (!this.walkable(cy * size + nx) || !this.walkable(ny * size + cx))) continue;
         const climb = Math.max(0, this.elevation[ni] - ch) * CLIMB_COST;

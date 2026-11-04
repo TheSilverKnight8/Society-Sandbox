@@ -371,6 +371,15 @@ A step has 33 ms at 3x, so there is plenty of room for now. People only walk in 
 | Saving | Cultures, people's cultures, and how long a settlement has been without a culture or far from home are saved (world format version 8). Older setups and runs open with no cultures, which form as the run goes on. |
 | In testing | From 360 people in six groups on a Titanic map, the first cultures formed in year 4. Before settlements spread, by year 30 there were 12 to 14 living cultures on two maps, most with one settlement each. With spreading (below), by year 40 the larger cultures held 5 to 9 settlements each, and one far-off settlement on each map had broken away. |
 
+## After 4c (Caleb: the rules menu, where workplaces stand, pavement)
+
+| Item | Choice |
+| --- | --- |
+| The rules menu | It grew upward with each new rule until its title, close button and first rules were hidden under the header with no way to scroll to them. It now stops below the header, shows the rules in two columns where there is room, and scrolls its list when the window is short. |
+| Where workplaces stand (Caleb: mines and the like further from the middle, or outside the settlement, as they usually are) | Mines, quarries, woodcutter's lodges and fishing huts go beside the nearest ore, stone, trees or fish within 35 tiles of the settlement's middle that no workplace of their kind already works (within 8 tiles), on the settlement's land or unclaimed land beside it; the settlement then claims the land within 3 tiles of it. Only when no such spot exists do they go as close to the middle as they fit. Fields go at least 6 tiles from the middle where there is room (the outskirts), then closer. (Fields were not named; they are included as the other buildings usually kept outside a village's middle, and can be changed back.) In testing, mines stood about 18 tiles from the middle on average, quarries and woodcutter's lodges about 13, fields about 10, homes 7 to 9. |
+| Pavement (Caleb: villages put down pavement) | Villages and bigger plan paths each year from their campfire to the door of each of their buildings within 26 tiles (the corner of a field), along the way people would walk, on their own land and off water. Builders pave a planned tile with 1 stone from the store (paid a coin, as for fence work), when the store holds at least 4 stone; they do not break stone just for paving. Walking on pavement costs 0.6 of the ground's usual cost, so people walk faster on it and prefer it. A town fence gets a gate wherever a path crosses it. Pavement is drawn as pale stone slabs with a navy edge where it meets open ground, without the tile's grass or other drawings. The settlement panel shows how much is laid. In testing, 260 tiles were paved by year 25 (of about 960 planned): paving waits for spare stone. |
+| Saving | Pavement and each settlement's planned paths (world format version 12; new fields only). |
+
 ## Technology (Stage 4c)
 
 | Item | Choice |

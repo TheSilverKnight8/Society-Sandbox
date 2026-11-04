@@ -140,7 +140,7 @@ export class World {
   readonly state: SimState;
   /** Food (berries, fish) and stone left on each deposit tile. */
   readonly stock: Uint8Array;
-  private finder: PathFinder;
+  readonly finder: PathFinder;
   readonly rand: Rand;
   readonly byId = new Map<number, Person>();
   private routes = new Map<number, Route>();
@@ -214,6 +214,7 @@ export class World {
     }
     this.towns = new Towns(this);
     this.finder.walls = this.towns.walls;
+    this.finder.roads = this.towns.roads;
     this.cultures = new Cultures(this);
     this.nations = new Nations(this);
     this.tech = new Technology(this);
@@ -1050,6 +1051,7 @@ export class World {
       trees: this.towns.trees.slice(),
       territory: this.towns.territory.slice(),
       walls: this.towns.walls.slice(),
+      roads: this.towns.roads.slice(),
       settlements: this.towns.settlements.map((s) => ({ ...s, queue: s.queue.map((q) => ({ ...q })) })),
       buildings: this.towns.buildings.map((b) => ({ ...b })),
       cultures: this.cultures.list.map((c) => ({ ...c, traits: { ...c.traits }, support: c.support ? { ...c.support } : undefined, techs: c.techs ? [...c.techs] : undefined, progress: c.progress ? { ...c.progress } : undefined })),

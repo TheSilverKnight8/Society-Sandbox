@@ -666,6 +666,16 @@ export class Economy {
         }
         return this.done(p);
       }
+      if (step === 'fetch-pave') {
+        // A builder at the store, taking stone for paving.
+        const n = s ? Math.min(4, this.stockOf(s).stone) : 0;
+        if (s && n > 0) {
+          this.stockOf(s).stone -= n;
+          p.load = { kind: 'stone', n };
+          this.t.settlementsChanged = true;
+        }
+        return this.done(p);
+      }
       if (step === 'fetch-fence') {
         // A builder at the store, taking wood for the town's fence.
         const n = s ? Math.min(4, this.stockOf(s).wood) : 0;
@@ -1000,6 +1010,25 @@ export class Economy {
     }
     // Only what the settlement's technology allows (Caleb: some buildings are locked behind technology).
     return options.filter((o) => this.w.tech.canBuild(s, o.kind));
+  }
+
+  /**
+   * Resource tiles a workplace of this kind could stand beside, nearest `from` first, leaving
+   * out those another workplace of its kind already works (Caleb: mines and the like stand at
+   * their resource, often outside the settlement).
+   */
+  resourceSpots(kind: BuildingKind, from: number, range: number): number[] {
+    if (kind === BuildingKind.Woodcutter) {
+      const t = this.t.nearestTree(from, range);
+      return t >= 0 ? [t] : [];
+    }
+    const list = kind === BuildingKind.Mine ? this.oreTiles : kind === BuildingKind.Quarry ? this.stoneTiles : kind === BuildingKind.FishingHut ? this.fishTiles : null;
+    if (!list) return [];
+    const taken = this.t.buildings.filter((b) => b.kind === kind).map((b) => this.t.middleTile(b));
+    return list
+      .filter((t) => this.w.stock[t] > 0 && this.t.dist2(t, from) <= range * range && !taken.some((m) => this.t.dist2(m, t) < 64))
+      .sort((a, b) => this.t.dist2(a, from) - this.t.dist2(b, from))
+      .slice(0, 8);
   }
 
   private nearList(list: number[], from: number, r: number) {

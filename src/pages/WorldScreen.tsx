@@ -82,6 +82,11 @@ function treeCounts(doc: WorldDoc): Uint8Array {
   return out;
 }
 
+function roadsOf(doc: WorldDoc): Uint8Array {
+  const n = doc.size * doc.size;
+  return doc.state.roads && doc.state.roads.length === n ? doc.state.roads.slice() : new Uint8Array(n);
+}
+
 function wallsOf(doc: WorldDoc): Uint8Array {
   const n = doc.size * doc.size;
   return doc.state.walls && doc.state.walls.length === n ? doc.state.walls.slice() : new Uint8Array(n);
@@ -159,6 +164,7 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
   const territory = useRef(territoryOf(doc));
   const covered = useRef(new Uint8Array(doc.size * doc.size));
   const walls = useRef(wallsOf(doc));
+  const roads = useRef(roadsOf(doc));
   const buildingsRef = useRef<BuildingView[]>([]);
   const buildingAt = useRef(new Map<number, BuildingView>());
   const settlementsRef = useRef<SettlementView[]>([]);
@@ -368,7 +374,7 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
   // Start the simulation and the view once, when the screen opens.
   useEffect(() => {
     const canvas = canvasRef.current!;
-    const view = new IsoView(canvas, { size: doc.size, terrain: doc.terrain, elevation: doc.elevation, deposit: doc.deposit, empty: empty.current, trees: trees.current, territory: territory.current, covered: covered.current, walls: walls.current });
+    const view = new IsoView(canvas, { size: doc.size, terrain: doc.terrain, elevation: doc.elevation, deposit: doc.deposit, empty: empty.current, trees: trees.current, territory: territory.current, covered: covered.current, walls: walls.current, roads: roads.current });
     const client = new SimClient();
     viewRef.current = view;
     clientRef.current = client;
@@ -401,6 +407,7 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
         if (f === TileField.Empty) empty.current[t] = v;
         else if (f === TileField.Trees) trees.current[t] = v;
         else if (f === TileField.Walls) walls.current[t] = v;
+        else if (f === TileField.Roads) roads.current[t] = v;
         else territory.current[t] = v;
         stockDirty.add(t);
       }
@@ -800,9 +807,10 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
     territory.current.set(territoryOf(setup));
     covered.current.fill(0);
     walls.current.set(wallsOf(setup));
+    roads.current.set(roadsOf(setup));
     buildingsRef.current = [];
     buildingAt.current = new Map();
-    viewRef.current?.replaceTiles({ size: setup.size, terrain: doc.terrain, elevation: doc.elevation, deposit: doc.deposit, empty: empty.current, trees: trees.current, territory: territory.current, covered: covered.current, walls: walls.current });
+    viewRef.current?.replaceTiles({ size: setup.size, terrain: doc.terrain, elevation: doc.elevation, deposit: doc.deposit, empty: empty.current, trees: trees.current, territory: territory.current, covered: covered.current, walls: walls.current, roads: roads.current });
     choose([]);
     chooseSettlement(null);
     setSavedTick(setup.state.tick);
@@ -1590,8 +1598,8 @@ function RulesPanel({ toggles, onChange, onClose }: { toggles: Toggles; onChange
     { key: 'cultures', label: 'Culture formation', note: 'Off: no new cultures form, and none break away by themselves. Cultures that exist stay; newcomers still take up the culture they live among, and you can still order a settlement to break away.' },
   ];
   return (
-    <div className="absolute bottom-36 left-1/2 w-[28rem] max-w-[calc(100%-1.5rem)] -translate-x-1/2 animate-rise rounded-2xl border border-line bg-surface p-4 text-sm shadow-pop">
-      <div className="flex items-start justify-between gap-2">
+    <div className="absolute bottom-36 left-1/2 flex max-h-[calc(100%-10.5rem)] w-[46rem] max-w-[calc(100%-1.5rem)] -translate-x-1/2 animate-rise flex-col rounded-2xl border border-line bg-surface p-4 text-sm shadow-pop">
+      <div className="flex shrink-0 items-start justify-between gap-2">
         <div>
           <h2 className="text-xl">Rules</h2>
           <p className="mt-0.5 text-xs text-muted">Automatic behaviors you can turn off. More appear as their systems are built.</p>
@@ -1600,7 +1608,7 @@ function RulesPanel({ toggles, onChange, onClose }: { toggles: Toggles; onChange
           <X className="size-4" />
         </IconButton>
       </div>
-      <ul className="mt-3 space-y-2">
+      <ul className="-mr-2 mt-3 grid min-h-0 flex-1 grid-cols-1 gap-2 overflow-y-auto pr-2 scrollbar-thin md:grid-cols-2">
         {rows.map((r) => (
           <li key={r.key} className="flex items-start gap-3 rounded-lg border border-line bg-raised/40 p-2.5">
             <button
@@ -1619,7 +1627,7 @@ function RulesPanel({ toggles, onChange, onClose }: { toggles: Toggles; onChange
           </li>
         ))}
       </ul>
-      <p className="mt-3 text-xs text-muted">
+      <p className="mt-3 shrink-0 text-xs text-muted">
         Always on (SPEC 10): people meeting their needs and doing their tasks, including dying of unmet needs or injury; fights settled by stats and equipment; succession when a leader dies or
         leaves.
       </p>
@@ -2271,6 +2279,14 @@ function SettlementPanel({
             <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
               <dt className="text-muted">Treasury</dt>
               <dd>{d.coins} coins</dd>
+              {d.paved + d.toPave > 0 && (
+                <>
+                  <dt className="text-muted">Pavement</dt>
+                  <dd>
+                    {d.paved} of {d.paved + d.toPave} tiles laid
+                  </dd>
+                </>
+              )}
               {(d.stage === 'town' || d.stage === 'city') && (
                 <>
                   <dt className="text-muted">Fence</dt>

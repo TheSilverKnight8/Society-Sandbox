@@ -23,8 +23,9 @@ import type { WorldDoc } from './types';
 //      people, officials' taxes, cultures' support for policies; the four new rules.
 //  11  Stage 4c: cultures' technologies and research, nations' technologies, scholars; the
 //      research rule. (Older cultures start knowing nothing; buildings already standing stay.)
+//  12  Pavement on each tile, and each settlement's planned paths. (New fields only.)
 
-export const WORLD_FORMAT_VERSION = 11;
+export const WORLD_FORMAT_VERSION = 12;
 
 export function upgradeWorld(version: number, doc: WorldDoc): WorldDoc {
   if (version > WORLD_FORMAT_VERSION) throw new Error('This was saved by a newer version of the app. Reload the app to update it, then try again.');

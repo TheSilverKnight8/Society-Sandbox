@@ -1,7 +1,7 @@
 import { hash2 } from '../lib/rng';
 import { Deposit, isWater } from '../map/terrain';
 import { CHUNK, STEP, isoX, isoY, type TileSource } from './iso';
-import { FACE_L, FACE_R, GROUND, NAVY } from './style';
+import { FACE_L, FACE_R, GROUND, LAND, NAVY } from './style';
 import { biomeDetail, biomeSparse, deposit as drawDepositMark, fence } from './symbols';
 
 // Draws the terrain in chunks of CHUNK x CHUNK tiles and keeps each drawn chunk as a
@@ -289,6 +289,53 @@ function drawChunkTiles(ctx: CanvasRenderingContext2D, src: TileSource, cx: numb
       ctx.lineTo(X - 0.5 - 2 * e, Y + 0.25);
       ctx.fill();
 
+      // Pavement: stone slabs, with a navy edge where it meets open ground.
+      const paved = src.roads ? src.roads[i] === 2 : false;
+      if (paved) {
+        const R = src.roads!;
+        ctx.fillStyle = LAND.paving;
+        ctx.beginPath();
+        ctx.moveTo(X, Y + 0.04);
+        ctx.lineTo(X + 0.44, Y + 0.25);
+        ctx.lineTo(X, Y + 0.46);
+        ctx.lineTo(X - 0.44, Y + 0.25);
+        ctx.fill();
+        if (level >= 16) {
+          // Joints between four slabs, offset a little from tile to tile.
+          const o = (hash2(x, y, 71) - 0.5) * 0.12;
+          ctx.strokeStyle = LAND.pavingJoint;
+          ctx.lineWidth = lw * 0.6;
+          ctx.beginPath();
+          ctx.moveTo(X - 0.22 + o, Y + 0.14 + o / 2);
+          ctx.lineTo(X + 0.22 + o, Y + 0.36 + o / 2);
+          ctx.moveTo(X + 0.22 - o, Y + 0.14 + o / 2);
+          ctx.lineTo(X - 0.22 - o, Y + 0.36 + o / 2);
+          ctx.stroke();
+        }
+        const open = (xx: number, yy: number) => xx < 0 || yy < 0 || xx >= size || yy >= size || R[yy * size + xx] !== 2;
+        ctx.strokeStyle = NAVY;
+        ctx.lineWidth = lw * 0.7;
+        ctx.beginPath();
+        if (open(x - 1, y)) {
+          ctx.moveTo(X - 0.44, Y + 0.25);
+          ctx.lineTo(X, Y + 0.04);
+        }
+        if (open(x, y - 1)) {
+          ctx.moveTo(X, Y + 0.04);
+          ctx.lineTo(X + 0.44, Y + 0.25);
+        }
+        if (open(x + 1, y)) {
+          ctx.moveTo(X + 0.44, Y + 0.25);
+          ctx.lineTo(X, Y + 0.46);
+        }
+        if (open(x, y + 1)) {
+          ctx.moveTo(X, Y + 0.46);
+          ctx.lineTo(X - 0.44, Y + 0.25);
+        }
+        ctx.stroke();
+        ctx.lineWidth = lw;
+      }
+
       // A settlement's land: a light red tint (or its color on a map view), with a dashed border where it ends.
       const own = src.territory ? src.territory[i] : 0;
       if (own) {
@@ -370,8 +417,8 @@ function drawChunkTiles(ctx: CanvasRenderingContext2D, src: TileSource, cx: numb
         const W = src.walls!;
         const built = (xx: number, yy: number) => xx >= 0 && yy >= 0 && xx < size && yy < size && (W[yy * size + xx] === 2 || W[yy * size + xx] === 4);
         fence(ctx, X, Y, { nw: built(x - 1, y), ne: built(x, y - 1), se: built(x + 1, y), sw: built(x, y + 1) }, wall === 4, lw);
-      } else if (src.covered?.[i]) {
-        // A building stands here.
+      } else if (src.covered?.[i] || paved) {
+        // A building stands here, or the tile is paved.
       } else if (st.grid === 1) {
         biomeDetail(ctx, t, x, y, h, cxp, cyp, lw, src.trees ? src.trees[i] : undefined);
         const d = deposit[i];

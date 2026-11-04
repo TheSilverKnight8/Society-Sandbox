@@ -74,6 +74,8 @@ export const LAND = {
   sandMark: shadeHex(BIOME[Terrain.Sand], 0.78),
   duneMark: shadeHex(BIOME[Terrain.Desert], 0.74),
   foam: '#ffffff',
+  paving: '#d4c7ac',
+  pavingJoint: '#ad9f84',
 };
 
 /** Natural colors for objects. */

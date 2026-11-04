@@ -16,7 +16,7 @@ import type { BuildingKind, Good, JobKind, SettlementStage } from './buildings';
 export type Task = 'idle' | 'walk' | 'gather' | 'eat' | 'sleep' | 'chop' | 'quarry' | 'build' | 'farm' | 'harvest' | 'mine' | 'fish' | 'dig' | 'craft' | 'trade' | 'study';
 
 /** Why a person is walking. */
-export type Purpose = 'stroll' | 'food' | 'order' | 'home' | 'wood' | 'stone' | 'site' | 'settle' | 'job' | 'deliver' | 'fetch' | 'store' | 'trade' | 'tradeHome' | 'fence' | 'tax' | 'taxHome';
+export type Purpose = 'stroll' | 'food' | 'order' | 'home' | 'wood' | 'stone' | 'site' | 'settle' | 'job' | 'deliver' | 'fetch' | 'store' | 'trade' | 'tradeHome' | 'fence' | 'tax' | 'taxHome' | 'pave';
 
 /** An imperative given to a unit by the player (SPEC 4). */
 export interface Order {
@@ -72,7 +72,7 @@ export interface Person {
   /** Their workplace (a building), if they have a job. */
   job?: number;
   /** What they are doing for their job, while walking to it. */
-  jobStep?: 'tend' | 'harvest' | 'collect' | 'gather' | 'fetch-wood' | 'fetch-stone' | 'fetch-tools' | 'fetch-input' | 'craft' | 'fetch-fence' | 'trade-load' | 'study';
+  jobStep?: 'tend' | 'harvest' | 'collect' | 'gather' | 'fetch-wood' | 'fetch-stone' | 'fetch-tools' | 'fetch-input' | 'craft' | 'fetch-fence' | 'trade-load' | 'study' | 'fetch-pave';
   /** Their own coins (Caleb: coins; SPEC 6: wealth earned from jobs and trade). */
   coins?: number;
   /** Household goods they own (pottery). Wealth is coins plus what they own. */
@@ -82,6 +82,8 @@ export interface Person {
   tradeOwed?: number;
   /** The fence tile a builder is putting up. */
   fenceTile?: number;
+  /** The tile a builder is paving. */
+  paveTile?: number;
   /** The construction site they are working for. */
   site?: number;
   /** Where they are going to found a settlement (sent as settlers), and the settlement they left. */
@@ -124,6 +126,8 @@ export interface Settlement {
   coins?: number;
   /** Fence tiles it plans to put up (towns and cities). */
   fencePlan?: number[];
+  /** Tiles it plans to pave: paths from its middle to its buildings' doors (villages and bigger; Caleb after 4c). */
+  roadPlan?: number[];
   /** Since when none of its people has had a culture (a culture forms after a while; SPEC 7). Unset: since it was founded. */
   cultureless?: number;
   /** Since when it has been far from every other settlement of its culture (it may break away; Caleb, Stage 4). */
@@ -281,6 +285,8 @@ export interface SimState {
   nextBuildingId?: number;
   /** Fences and gates on each tile (see Wall). */
   walls?: Uint8Array;
+  /** Pavement on each tile: 1 planned, 2 paved. */
+  roads?: Uint8Array;
   cultures?: Culture[];
   nextCultureId?: number;
   nations?: Nation[];
@@ -313,6 +319,9 @@ export interface SettlementDetails {
   /** Fence tiles built and planned (towns and cities). */
   fenceBuilt: number;
   fencePlanned: number;
+  /** Tiles paved and still to pave. */
+  paved: number;
+  toPave: number;
   /** Jobs filled and offered, adults with no job, and children in light jobs. */
   jobsFilled: number;
   jobsOffered: number;
@@ -528,7 +537,7 @@ export type NationOrder =
   | { kind: 'expand'; tile: number };
 
 /** What a tile change is about. */
-export const TileField = { Empty: 0, Trees: 1, Territory: 2, Walls: 3 } as const;
+export const TileField = { Empty: 0, Trees: 1, Territory: 2, Walls: 3, Roads: 4 } as const;
 
 /** Poses for drawing. */
 export const Pose = { Stand: 0, Sleep: 1, Work: 2 } as const;
