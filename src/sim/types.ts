@@ -13,7 +13,7 @@ export type Speed = 0 | 1 | 2 | 3;
 import type { BuildingKind, Good, JobKind, SettlementStage } from './buildings';
 
 /** What a person is doing right now. */
-export type Task = 'idle' | 'walk' | 'gather' | 'eat' | 'sleep' | 'chop' | 'quarry' | 'build' | 'farm' | 'harvest' | 'mine' | 'fish' | 'dig' | 'craft' | 'trade';
+export type Task = 'idle' | 'walk' | 'gather' | 'eat' | 'sleep' | 'chop' | 'quarry' | 'build' | 'farm' | 'harvest' | 'mine' | 'fish' | 'dig' | 'craft' | 'trade' | 'study';
 
 /** Why a person is walking. */
 export type Purpose = 'stroll' | 'food' | 'order' | 'home' | 'wood' | 'stone' | 'site' | 'settle' | 'job' | 'deliver' | 'fetch' | 'store' | 'trade' | 'tradeHome' | 'fence' | 'tax' | 'taxHome';
@@ -72,7 +72,7 @@ export interface Person {
   /** Their workplace (a building), if they have a job. */
   job?: number;
   /** What they are doing for their job, while walking to it. */
-  jobStep?: 'tend' | 'harvest' | 'collect' | 'gather' | 'fetch-wood' | 'fetch-stone' | 'fetch-tools' | 'fetch-input' | 'craft' | 'fetch-fence' | 'trade-load';
+  jobStep?: 'tend' | 'harvest' | 'collect' | 'gather' | 'fetch-wood' | 'fetch-stone' | 'fetch-tools' | 'fetch-input' | 'craft' | 'fetch-fence' | 'trade-load' | 'study';
   /** Their own coins (Caleb: coins; SPEC 6: wealth earned from jobs and trade). */
   coins?: number;
   /** Household goods they own (pottery). Wealth is coins plus what they own. */
@@ -164,6 +164,10 @@ export interface Culture {
   extinct?: number;
   /** How much it supports each policy choice, 0 to 100, keyed 'policy:choice' (SPEC 7, a [Claude's call] item). */
   support?: Record<string, number>;
+  /** Technologies it knows, what it is researching now, and research done toward each (SPEC 7: tracked on cultures). */
+  techs?: string[];
+  research?: string;
+  progress?: Record<string, number>;
 }
 
 /** Why someone is unique (SPEC 6). */
@@ -199,6 +203,8 @@ export interface Nation {
   destroyed?: number;
   /** Formed before its people had a culture: it takes up its first main culture's ways. */
   unshaped?: boolean;
+  /** Technologies it has: all of its main culture's, and some of its other cultures' (SPEC 7). */
+  techs?: string[];
 }
 
 export interface Relation {
@@ -245,9 +251,11 @@ export interface Toggles {
   policyChanges: boolean;
   /** People becoming unique by themselves (SPEC 10: emergence of unique individuals). */
   uniques: boolean;
+  /** Cultures researching, and nations taking technology from their cultures (SPEC 10: culture research and nation tech derivation). */
+  research: boolean;
 }
 
-export const DEFAULT_TOGGLES: Toggles = { lifeCycle: true, founding: true, cultures: true, nations: true, diplomacy: true, policyChanges: true, uniques: true };
+export const DEFAULT_TOGGLES: Toggles = { lifeCycle: true, founding: true, cultures: true, nations: true, diplomacy: true, policyChanges: true, uniques: true, research: true };
 
 /** Life stages, for drawing and the inspect panel. */
 export const ADULT_AGE = 14;
@@ -374,6 +382,7 @@ export interface NationView {
   /** Its settlements in unrest. */
   unrest: number;
   destroyedYear?: number;
+  techs: string[];
 }
 
 /** Changes the player can make to a nation (SPEC 4 and 7: changing nation rules; everything can be modified). */
@@ -400,6 +409,13 @@ export interface CultureView {
   origin?: string;
   parent?: number;
   extinctYear?: number;
+  techs: string[];
+  /** What it is researching: how far along, what it costs, and a good it is waiting for, if any. */
+  research?: { tech: string; progress: number; cost: number; waiting?: string };
+  /** Research it does a year now (from its people and its scholars). */
+  researchRate: number;
+  /** Technologies whose research is done, waiting for goods (with the goods each needs). */
+  awaiting: { tech: string; needs: string }[];
 }
 
 /** Changes the player can make to a culture (SPEC 7: cultures can be edited after they emerge). */
@@ -407,6 +423,10 @@ export interface CultureEdit {
   name?: string;
   color?: number;
   traits?: Partial<CultureTraits>;
+  /** What it researches next (SPEC 4: the player can steer research; Caleb). */
+  research?: string;
+  /** Sets the technologies it knows (SPEC 1: everything can be modified). */
+  techs?: string[];
 }
 
 /** What the inspect panel shows about one person. */

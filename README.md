@@ -6,7 +6,7 @@
 
 It is an installable web app (PWA) for Chrome on a computer, hosted on GitHub Pages. Everything runs in the browser. Maps are saved in the browser on your computer and nowhere else.
 
-## What is in it (Stages 1 to 3, 4a and 4b)
+## What is in it (Stages 1 to 4)
 
 | Area | What it does |
 | --- | --- |
@@ -22,11 +22,12 @@ It is an installable web app (PWA) for Chrome on a computer, hosted on GitHub Pa
 | Towns and cities | A village with 60 people and 12 homes becomes a town; a town with 200 and 40 becomes a city. Towns build townhouses and put up a wooden fence with gates around their buildings. |
 | Cultures | Cultures form among people who have lived without one for a few years, and children are born into them. Each has traits (temper, livelihood, outlook, order) that the player can edit, along with its name and color. A settlement far from the rest of its culture may break away and found a new one, or can be ordered to. **Map: Cultures** colors each settlement's land by its culture. **Rules** turns culture formation off. |
 | Nations | A person of high influence claims rule and founds a nation; nations can also be placed (Units, Nation). Rulers (crowned) succeed one another by the nation's succession policy; officials at a hall collect taxes. Policies follow the main culture; unhappy people revolt or break from their culture. Nations stand in peace, trade, alliance or rivalry, and expansionist ones send settlers. **Map: Nations** colors their lands. Unique people get names. |
+| Technology | Cultures research a tree of 17 medieval technologies, faster with scholars at a scriptorium or university; some need goods from the store. The market, smithy, mint, townhouse, hall and town fences need their technology first; others speed farming, building, workshops, trade and research, or allow policies. The sim picks what to research by a culture's traits; the culture panel or the Research order steers it. Nations take their main culture's technology and some of their other cultures'. |
 | Life cycle | People age (children are drawn smaller, elders grey-haired) and can die of old age. Adults pair up, pairs have children, and children stay near their mother. Inspect shows the pair, parents and children. **Rules** (Main tab) turns pairing, births and aging off together, which freezes the population. |
 | Moving around | Wheel zooms toward the pointer. Right or middle drag moves the map; so do WASD and the arrow keys. **+** and **−** zoom; the corner button shows the whole map. |
 | Map files | The download button on a map saves it as one file (`<name>.map.json`). **Import map** adds a map from such a file. |
 
-Coming next (Stage 4c): technology and research.
+Coming next (Stage 5): military and war.
 
 ## Run it on your computer
 

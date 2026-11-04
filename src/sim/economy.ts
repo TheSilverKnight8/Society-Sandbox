@@ -72,6 +72,8 @@ const RENT = 1;
 const TAX_RANGE = 100;
 /** Shares of taxes collected that go to the official who carried them and to the ruler (the rest to the nation's treasury). */
 const OFFICIAL_SHARE = 0.1;
+/** What a scholar is paid for a spell of study. */
+const SCHOLAR_WAGE = 2;
 const RULER_SHARE = 0.1;
 
 export class Economy {
@@ -367,6 +369,11 @@ export class Economy {
   }
 
   /** Steps for a piece of work: quicker with tools in the store. */
+  /** What a trader carries: half again as much with banking (Stage 4c). */
+  private tradeLoad(s: Settlement) {
+    return this.w.tech.has(s, 'banking') ? Math.round(TRADE_LOAD * 1.5) : TRADE_LOAD;
+  }
+
   private steps(p: Person, n: number) {
     const s = p.settlement !== undefined ? this.t.byId(p.settlement) : undefined;
     return s && this.hasTools(s) ? Math.round(n / TOOL_SPEED) : n;
@@ -388,6 +395,12 @@ export class Economy {
     const job = BUILDINGS[b.kind].job!;
     if (job === 'trader') return this.trade(p, b, s);
     if (job === 'official') return this.official(p, b, s);
+    if (job === 'scholar') {
+      if (this.ageOf(p) < ADULT_AGE) return false;
+      p.jobStep = 'study';
+      w.goTo(p, this.doorTile(b), 'job');
+      return true;
+    }
     if (job === 'smith' || job === 'minter' || job === 'potter') return this.make(p, b, s, job);
     // Carrying what they made: take it to the store.
     if (p.load && p.site === undefined) {
@@ -517,7 +530,7 @@ export class Economy {
         if (surplus < 3) continue;
         const margin = this.price(dest, g) - this.price(home, g);
         if (margin < 0.5) continue;
-        const n = Math.min(TRADE_LOAD, surplus);
+        const n = Math.min(this.tradeLoad(home), surplus);
         const score = (margin * n) / (dist + 20);
         if (score > bestScore) {
           bestScore = score;
@@ -590,7 +603,7 @@ export class Economy {
         p.wait = this.steps(p, HARVEST_STEPS);
       } else if (step === 'collect') {
         // A farmer carries a whole harvest's sheaves at once.
-        const n = Math.min(HARVEST_YIELD, b.output ?? 0);
+        const n = Math.min(HARVEST_YIELD + 2, b.output ?? 0);
         if (n > 0) {
           b.output = (b.output ?? 0) - n;
           p.load = { kind: 'food', n };
@@ -599,6 +612,10 @@ export class Economy {
         this.done(p);
       } else if (step === 'craft') {
         p.task = 'craft';
+        // Guilds make workshops quicker (Stage 4c).
+        p.wait = this.steps(p, Math.round(CRAFT_STEPS * (this.w.tech.has(this.t.byId(b.settlement ?? -1), 'guilds') ? 0.8 : 1)));
+      } else if (step === 'study') {
+        p.task = 'study';
         p.wait = this.steps(p, CRAFT_STEPS);
       } else if (step === 'gather') {
         if (job === 'woodcutter') {
@@ -754,7 +771,7 @@ export class Economy {
           }
           if (best) {
             const cost = this.price(dest, best);
-            const n = Math.min(TRADE_LOAD, Math.floor(ds[best] - this.target(dest, best)), Math.floor((p.coins ?? 0) / cost));
+            const n = Math.min(home ? this.tradeLoad(home) : TRADE_LOAD, Math.floor(ds[best] - this.target(dest, best)), Math.floor((p.coins ?? 0) / cost));
             if (n > 0) {
               this.charge(p, dest, n * cost);
               ds[best] -= n;
@@ -798,7 +815,9 @@ export class Economy {
         const before = this.cropLook(b);
         const s = b.settlement !== undefined ? this.t.byId(b.settlement) : undefined;
         const tool = s && this.hasTools(s) ? TOOL_SPEED : 1;
-        b.growth = Math.min(1, (b.growth ?? 0) + TEND_GROWTH * tool * (this.ageOf(p) < ADULT_AGE ? 0.5 : 1));
+        // Crop rotation makes fields ripen a quarter faster (Stage 4c).
+        const rotation = this.w.tech.has(s, 'cropRotation') ? 1.25 : 1;
+        b.growth = Math.min(1, (b.growth ?? 0) + TEND_GROWTH * tool * rotation * (this.ageOf(p) < ADULT_AGE ? 0.5 : 1));
         if (this.cropLook(b) !== before) this.t.buildingsChanged = true;
       }
       // Very hungry or tired: stop and see to it.
@@ -813,7 +832,8 @@ export class Economy {
       const b = p.job !== undefined ? this.t.byBuildingId(p.job) : undefined;
       if (b && (b.growth ?? 0) >= 1) {
         b.growth = 0;
-        b.output = (b.output ?? 0) + HARVEST_YIELD;
+        // The heavy plough gives 12 instead of 10 (Stage 4c).
+        b.output = (b.output ?? 0) + (this.w.tech.has(this.t.byId(b.settlement ?? -1), 'heavyPlough') ? HARVEST_YIELD + 2 : HARVEST_YIELD);
         this.t.buildingsChanged = true;
       }
       this.wear(p);
@@ -832,6 +852,15 @@ export class Economy {
         else p.load = { kind, n: take };
       }
       this.wear(p);
+      return this.done(p);
+    }
+    if (p.task === 'study') {
+      // A scholar's spell of study: research for their culture, and a wage from the treasury.
+      if (--p.wait > 0) return true;
+      const b = p.job !== undefined ? this.t.byBuildingId(p.job) : undefined;
+      const s = p.settlement !== undefined ? this.t.byId(p.settlement) : undefined;
+      if (b) this.w.tech.study(p, b.kind);
+      if (s) this.pay(s, p, SCHOLAR_WAGE);
       return this.done(p);
     }
     if (p.task === 'craft') {
@@ -929,6 +958,9 @@ export class Economy {
       // A mercantile culture builds its market sooner (Stage 4a).
       if (!count(BuildingKind.Market) && people >= (traits?.livelihood === 'mercantile' ? 15 : 25) && neighbor) options.push({ kind: BuildingKind.Market, test: any });
       if ((s.stage === 'town' || s.stage === 'city') && !count(BuildingKind.Mint) && (st.gold >= 3 || near(this.goldTiles, 30))) options.push({ kind: BuildingKind.Mint, test: any });
+      // Research buildings (Caleb: research has its own building and workers).
+      if (!count(BuildingKind.Scriptorium) && people >= 25) options.push({ kind: BuildingKind.Scriptorium, test: any });
+      if ((s.stage === 'town' || s.stage === 'city') && !count(BuildingKind.University)) options.push({ kind: BuildingKind.University, test: any });
     };
     // When many adults have no work, a growing settlement adds more of the workplaces it already has.
     const coming = mine.reduce((n, b) => n + (b.progress < 1 ? BUILDINGS[b.kind].jobs : 0), 0);
@@ -966,7 +998,8 @@ export class Economy {
       if (food >= people) options.unshift(hall);
       else options.push(hall);
     }
-    return options;
+    // Only what the settlement's technology allows (Caleb: some buildings are locked behind technology).
+    return options.filter((o) => this.w.tech.canBuild(s, o.kind));
   }
 
   private nearList(list: number[], from: number, r: number) {

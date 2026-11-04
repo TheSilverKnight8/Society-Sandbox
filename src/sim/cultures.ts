@@ -223,6 +223,8 @@ export class Cultures {
     const traits: CultureTraits = parent
       ? { ...parent.traits }
       : (Object.fromEntries(TRAIT_AXES.map((a) => [a.key, a.poles[w.rand.int(2)]])) as unknown as CultureTraits);
+    // What the parent knew is not forgotten.
+    const techs = parent?.techs ? [...parent.techs] : undefined;
     if (parent && set) Object.assign(traits, set);
     else if (parent) {
       // A break keeps the old ways but one.
@@ -234,6 +236,7 @@ export class Cultures {
     const free = CULTURE_COLORS.map((_, i) => i).filter((i) => !used.has(i));
     const color = free.length ? free[0] : w.rand.int(CULTURE_COLORS.length);
     const c: Culture = { id: w.state.nextCultureId!++, name: this.newName(), color, founded: w.state.tick, origin: origin?.id, parent: parent?.id, traits };
+    if (techs) c.techs = techs;
     this.list.push(c);
     this.byId.set(c.id, c);
     this.changed = true;
@@ -318,6 +321,7 @@ export class Cultures {
         if (v !== undefined && a.poles.includes(v)) (c.traits as unknown as Record<string, string>)[a.key] = v;
       }
     }
+    if (e.research !== undefined || e.techs) this.w.tech.edit(c, e.research, e.techs);
     this.changed = true;
   }
 
@@ -341,6 +345,8 @@ export class Cultures {
       origin: c.origin !== undefined ? this.w.towns.settlementName(c.origin) : undefined,
       parent: c.parent,
       extinctYear: c.extinct !== undefined ? Math.floor(c.extinct / TICKS_PER_YEAR) + 1 : undefined,
+      techs: [...(c.techs ?? [])],
+      ...this.w.tech.researchView(c),
     }));
   }
 

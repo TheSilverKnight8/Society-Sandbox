@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router';
-import { Amphora, Anvil, Apple, Axe, Blocks, Building, Coins, Crown, Eraser, Landmark, MapPinPlus, Fish, Flag, Flame, Footprints, Hammer, Hand, House, ListChecks, LogOut, Maximize, Minus, Moon, Pause, Pencil, Pickaxe, Play, Plus, RotateCcw, Save, Split, Store, Tent, User, Users, Warehouse, Wheat, X } from 'lucide-react';
+import { Amphora, Anvil, Apple, Axe, Blocks, BookOpen, Building, Coins, Crown, Eraser, GraduationCap, ScrollText, Landmark, MapPinPlus, Fish, Flag, Flame, Footprints, Hammer, Hand, House, ListChecks, LogOut, Maximize, Minus, Moon, Pause, Pencil, Pickaxe, Play, Plus, RotateCcw, Save, Split, Store, Tent, User, Users, Warehouse, Wheat, X } from 'lucide-react';
 import { ButtonLink, Button, IconButton, Input, Segmented, Spinner, cx } from '../components/ui';
 import { alertDialog, confirmDialog, notify, promptDialog } from '../components/dialogs';
 import { useApp } from '../lib/store';
@@ -14,6 +14,7 @@ import { BUILDINGS, BuildingKind, GOODS, GOOD_NAME, JOB_NAME, LIGHT_JOB_NAME, ST
 import { maxTrees } from '../sim/towns';
 import { TileField, type BuildingView, type CultureEdit, type CultureView, type Focus, type NationEdit, type NationView, type RelationKind, type SettlementDetails, type SettlementView } from '../sim/types';
 import { NATION_COLORS, POLICY_DEFS, RELATION_NAME } from '../sim/nations';
+import { BUILDING_TECH, POLICY_TECH, TECHS, TECH_BY_ID } from '../sim/tech';
 import { CULTURE_COLORS, TRAIT_AXES } from '../sim/cultures';
 import { STEP } from '../render/iso';
 import { IsoView } from '../render/IsoView';
@@ -91,10 +92,10 @@ function territoryOf(doc: WorldDoc): Uint16Array {
   return doc.state.territory && doc.state.territory.length === n ? doc.state.territory.slice() : new Uint16Array(n);
 }
 
-type SettlementOrderKind = 'build' | 'focus' | 'settlers' | 'abandon' | 'breakCulture' | 'expand';
+type SettlementOrderKind = 'build' | 'focus' | 'settlers' | 'abandon' | 'breakCulture' | 'expand' | 'research';
 type MapView = 'nations' | 'cultures' | 'plain';
 /** A settlement imperative being given: waiting for which settlement, then (build, settlers) where. */
-type PendingSettlement = { kind: SettlementOrderKind; stage: 'which' | 'where'; building?: BuildingKind; focus?: Focus } | null;
+type PendingSettlement = { kind: SettlementOrderKind; stage: 'which' | 'where'; building?: BuildingKind; focus?: Focus; tech?: string } | null;
 
 const FOCUS_LABEL: Record<Focus, string> = { balanced: 'Balanced', food: 'Food', housing: 'Housing', goods: 'Goods' };
 const BUILD_ORDER_KINDS = BUILDINGS.filter((b) => b.buildable).map((b) => b.kind);
@@ -115,6 +116,8 @@ const BUILDING_ICON: Record<number, typeof House> = {
   [BuildingKind.Mint]: Coins,
   [BuildingKind.Townhouse]: Building,
   [BuildingKind.Hall]: Landmark,
+  [BuildingKind.Scriptorium]: ScrollText,
+  [BuildingKind.University]: GraduationCap,
 };
 
 type OrderKind = 'move' | 'gather' | 'rest' | 'stop';
@@ -270,12 +273,26 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
   const chooseRef = useRef(choose);
   chooseRef.current = choose;
 
+  /** A settlement's technologies: its nation's, or its own culture's (Stage 4c). */
+  const techsOfSettlement = (id: number): Set<string> => {
+    const sv = settlementsRef.current.find((x) => x.id === id);
+    const n = sv?.nation !== undefined ? nationsRef.current.find((x) => x.id === sv.nation) : undefined;
+    if (n) return new Set(n.techs);
+    const c = sv?.culture !== undefined ? culturesRef.current.find((x) => x.id === sv.culture) : undefined;
+    return new Set(c?.techs ?? []);
+  };
+
   /** Gives an imperative to a settlement (SPEC 4). */
   const giveSettlement = (ps: NonNullable<PendingSettlement>, id: number, tile?: number) => {
     const client = clientRef.current;
     if (!client) return;
     const name = settlementsRef.current.find((x) => x.id === id)?.name ?? 'The settlement';
     if (ps.kind === 'build' && ps.building !== undefined && tile !== undefined) {
+      const need = BUILDING_TECH[ps.building];
+      if (need && !techsOfSettlement(id).has(need)) {
+        notify(`${name} does not know ${TECH_BY_ID.get(need)!.name} yet, which a ${BUILDINGS[ps.building].name.toLowerCase()} needs.`, 'warn');
+        return;
+      }
       client.settlementOrder(id, { kind: 'build', building: ps.building, tile, rot: live.current.rot });
       notify(`${name}: build a ${BUILDINGS[ps.building].name.toLowerCase()} there.`);
     } else if (ps.kind === 'focus' && ps.focus) {
@@ -293,6 +310,26 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
       }
       client.nationOrder(n.id, { kind: 'expand', tile });
       notify(`${n.name}: settlers are setting out to take land there.`);
+    } else if (ps.kind === 'research' && ps.tech) {
+      // An order to the settlement's culture (SPEC 4: imperatives to cultures; Caleb: the player can steer research).
+      const sv = settlementsRef.current.find((x) => x.id === id);
+      const c = culturesRef.current.find((x) => x.id === sv?.culture);
+      const t = TECH_BY_ID.get(ps.tech)!;
+      if (!c) {
+        notify(`${name} has no culture yet.`, 'warn');
+        return;
+      }
+      if (c.techs.includes(t.id)) {
+        notify(`The ${c.name} already know ${t.name}.`, 'warn');
+        return;
+      }
+      const missing = t.needs.filter((x) => !c.techs.includes(x));
+      if (missing.length) {
+        notify(`The ${c.name} need ${missing.map((x) => TECH_BY_ID.get(x)!.name).join(' and ')} before ${t.name}.`, 'warn');
+        return;
+      }
+      client.cultureEdit(c.id, { research: t.id });
+      notify(`The ${c.name} now research ${t.name}.`);
     } else if (ps.kind === 'breakCulture') {
       const sv = settlementsRef.current.find((x) => x.id === id);
       const culture = culturesRef.current.find((c) => c.id === sv?.culture);
@@ -1094,6 +1131,17 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
                 </div>
               </div>
               <div className="flex flex-col justify-center gap-1 border-l border-line pl-3 pr-1">
+                <span className="label-caps text-muted">Cultures</span>
+                <div className="flex gap-1">
+                  <OrderMenu
+                    active={pendingS?.kind === 'research'}
+                    label="Research"
+                    icon={<BookOpen className="size-5" />}
+                    options={TECHS.map((t) => ({ label: t.name, onPick: () => onSettlementOrder({ kind: 'research', stage: 'which', tech: t.id }) }))}
+                  />
+                </div>
+              </div>
+              <div className="flex flex-col justify-center gap-1 border-l border-line pl-3 pr-1">
                 <span className="label-caps text-muted">Nations</span>
                 <div className="flex gap-1">
                   <ToolButton active={pendingS?.kind === 'expand'} label="Expand" onClick={() => onSettlementOrder({ kind: 'expand', stage: 'which' })}>
@@ -1169,6 +1217,7 @@ const TASK_TEXT: Record<string, string> = {
   fish: 'Fishing',
   dig: 'Digging clay',
   craft: 'Working at the workshop',
+  study: 'Studying',
   trade: 'Trading',
   quarry: 'Breaking stone',
   build: 'Building',
@@ -1288,7 +1337,7 @@ function InspectPanel({
             <dd>
               {d.job ? (
                 <>
-                  {d.job.light ? (LIGHT_JOB_NAME[d.job.kind] ?? JOB_NAME[d.job.kind]) : d.job.kind === 'trader' || d.job.kind === 'official' ? JOB_NAME[d.job.kind] : `Tradesman: ${JOB_NAME[d.job.kind].toLowerCase()}`}
+                  {d.job.light ? (LIGHT_JOB_NAME[d.job.kind] ?? JOB_NAME[d.job.kind]) : d.job.kind === 'trader' || d.job.kind === 'official' || d.job.kind === 'scholar' ? JOB_NAME[d.job.kind] : `Tradesman: ${JOB_NAME[d.job.kind].toLowerCase()}`}
                   <span className="text-muted"> ({d.job.at})</span>
                 </>
               ) : (
@@ -1537,6 +1586,7 @@ function RulesPanel({ toggles, onChange, onClose }: { toggles: Toggles; onChange
     { key: 'policyChanges', label: 'Nation policy changes during major events', note: 'Off: nations keep their policies through changes of ruler, revolts and falls. You can still change them.' },
     { key: 'diplomacy', label: 'Diplomatic relation changes', note: 'Off: nations stay as they stand with each other. You can still change relations in a nation’s panel.' },
     { key: 'uniques', label: 'Emergence of unique individuals', note: 'Off: people no longer become unique by their influence. Rulers are still unique, and you can still name anyone.' },
+    { key: 'research', label: 'Culture research and nation tech derivation', note: 'Off: cultures stop researching and nations stop taking up technology from their cultures. What they know stays, and you can still set it in a culture’s panel.' },
     { key: 'cultures', label: 'Culture formation', note: 'Off: no new cultures form, and none break away by themselves. Cultures that exist stay; newcomers still take up the culture they live among, and you can still order a settlement to break away.' },
   ];
   return (
@@ -1726,6 +1776,7 @@ function CulturePanel({
               </div>
             ))}
           </dl>
+          {c.extinctYear === undefined && <ResearchSection culture={c} onEdit={onEdit} />}
           <div className="mt-3">
             <Button size="xs" variant={editing ? 'navy' : 'secondary'} onClick={() => setEditing((e) => !e)}>
               <Pencil className="size-3.5" />
@@ -1762,6 +1813,29 @@ function CulturePanel({
                   ))}
                 </div>
               </div>
+              <div>
+                <span className="text-xs text-muted">Technologies it knows</span>
+                <ul className="mt-1 grid grid-cols-2 gap-x-2 gap-y-0.5">
+                  {TECHS.map((t) => {
+                    const known = c.techs.includes(t.id);
+                    const can = t.needs.every((x) => c.techs.includes(x));
+                    return (
+                      <li key={t.id}>
+                        <label className={cx('flex items-center gap-1.5 text-xs', !known && !can && 'text-muted')}>
+                          <input
+                            type="checkbox"
+                            checked={known}
+                            disabled={!known && !can}
+                            onChange={(e) => onEdit({ techs: e.target.checked ? [...c.techs, t.id] : c.techs.filter((x) => x !== t.id) })}
+                          />
+                          {t.name}
+                        </label>
+                      </li>
+                    );
+                  })}
+                </ul>
+                <p className="mt-1 text-[0.6875rem] text-muted">Unticking one also takes away those that need it.</p>
+              </div>
               {TRAIT_AXES.map((a) => (
                 <div key={a.key} className="flex items-center gap-2">
                   <span className="w-16 text-xs text-muted">{a.label}</span>
@@ -1784,7 +1858,59 @@ function CulturePanel({
   );
 }
 
-const TRAIT_NOTE = 'Mercantile cultures build markets sooner; agrarian ones keep more fields. Progressive cultures break away more readily when far from home than traditional ones. Temper and order matter once nations and wars exist.';
+/** What a culture is researching, how fast, what waits for goods, and what it knows; and choosing what is next (Caleb: the player can steer). */
+function ResearchSection({ culture: c, onEdit }: { culture: CultureView; onEdit: (e: CultureEdit) => void }) {
+  const known = new Set(c.techs);
+  const next = TECHS.filter((t) => !known.has(t.id) && t.needs.every((x) => known.has(x)));
+  const r = c.research;
+  const rt = r ? TECH_BY_ID.get(r.tech) : undefined;
+  return (
+    <>
+      <p className="label-caps mt-3 flex justify-between text-muted">
+        <span>Research</span>
+        <span>{c.researchRate} a year</span>
+      </p>
+      {rt && r ? (
+        <div className="mt-1" title={rt.opens}>
+          <div className="flex justify-between gap-2">
+            <span>{rt.name}</span>
+            <span className="text-xs text-muted">{r.waiting ? `waiting for ${r.waiting}` : `${r.progress} of ${r.cost}`}</span>
+          </div>
+          <div className="mt-1 h-1.5 rounded-full bg-raised">
+            <div className="h-full rounded-full bg-navy" style={{ width: `${Math.min(100, (r.progress / r.cost) * 100)}%` }} />
+          </div>
+          <p className="mt-0.5 text-[0.6875rem] text-muted">{rt.opens}</p>
+        </div>
+      ) : (
+        <p className="mt-1 text-xs text-muted">{next.length ? 'Nothing chosen yet.' : 'It knows everything it can research now.'}</p>
+      )}
+      {c.awaiting.filter((a) => a.tech !== r?.tech).length > 0 && (
+        <p className="mt-1 text-xs text-muted">
+          Done, waiting for goods: {c.awaiting.filter((a) => a.tech !== r?.tech).map((a) => `${TECH_BY_ID.get(a.tech)?.name} (${a.needs})`).join(', ')}
+        </p>
+      )}
+      {next.length > 0 && (
+        <label className="mt-2 flex items-center gap-2">
+          <span className="text-xs text-muted">Research</span>
+          <select className="h-8 min-w-0 flex-1 rounded-lg border border-line bg-surface px-2 text-sm" value={r?.tech ?? ''} onChange={(e) => e.target.value && onEdit({ research: e.target.value })}>
+            {!r && <option value="">Choose…</option>}
+            {next.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name} ({t.cost})
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+      <p className="mt-2 text-xs text-muted">
+        Knows {c.techs.length} of {TECHS.length}
+        {c.techs.length > 0 && `: ${c.techs.map((t) => TECH_BY_ID.get(t)?.name).join(' · ')}`}
+      </p>
+    </>
+  );
+}
+
+const TRAIT_NOTE = 'Mercantile cultures build markets sooner; agrarian ones keep more fields. Progressive cultures break away more readily when far from home than traditional ones. Traits also shape what a culture researches, and nations’ policies; temper matters more once wars exist.';
 
 const UNIQUE_WHY: Record<string, string> = { ruler: 'a ruler', founder: 'a founder', chosen: 'named by you', influence: 'by their influence', revolt: 'led a revolt' };
 
@@ -1941,6 +2067,13 @@ function NationPanel({
                   </div>
                 ))}
               </dl>
+              <p className="label-caps mt-3 flex justify-between text-muted">
+                <span>Technology</span>
+                <span>
+                  {n.techs.length} of {TECHS.length}
+                </span>
+              </p>
+              <p className="mt-1 text-xs leading-relaxed">{n.techs.length ? n.techs.map((t) => TECH_BY_ID.get(t)?.name).join(' · ') : <span className="text-muted">None yet. A nation has all of its main culture’s technology, and some of its other cultures’.</span>}</p>
               {n.relations.length > 0 && (
                 <>
                   <p className="label-caps mt-3 text-muted">Relations</p>
@@ -2025,7 +2158,11 @@ function NationPanel({
                         size="xs"
                         value={n.policies[d.key] as string}
                         onChange={(v) => onEdit({ policies: { [d.key]: v } })}
-                        options={d.choices.map((c, k) => ({ value: c, label: d.names[k] }))}
+                        options={d.choices.map((c, k) => {
+                          const need = POLICY_TECH[`${d.key}:${c}`];
+                          const locked = need && !n.techs.includes(need);
+                          return { value: c, label: locked ? `${d.names[k]} (needs ${TECH_BY_ID.get(need)!.name})` : d.names[k] };
+                        })}
                       />
                     </div>
                   ))}

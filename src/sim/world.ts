@@ -5,6 +5,7 @@ import { packLook, unpackLook } from './look';
 import { Towns } from './towns';
 import { Cultures } from './cultures';
 import { Nations } from './nations';
+import { Technology } from './tech';
 import { BUILDINGS } from './buildings';
 import {
   ADULT_AGE,
@@ -166,6 +167,7 @@ export class World {
   readonly towns: Towns;
   readonly cultures: Cultures;
   readonly nations: Nations;
+  readonly tech: Technology;
   /** Why people died recently (for the inspect panel); cleared as it is read. */
   readonly deaths = new Map<number, string>();
 
@@ -214,6 +216,7 @@ export class World {
     this.finder.walls = this.towns.walls;
     this.cultures = new Cultures(this);
     this.nations = new Nations(this);
+    this.tech = new Technology(this);
   }
 
   /** Records that a tile's drawing changed (deposit used up or back, trees, land). */
@@ -255,6 +258,7 @@ export class World {
     this.towns.step();
     if (st.tick % TICKS_PER_MONTH === 13) this.cultures.monthly();
     if (st.tick % TICKS_PER_MONTH === 19) this.nations.monthly();
+    if (st.tick % TICKS_PER_MONTH === 23) this.tech.monthly();
     if (this.toggles.lifeCycle) {
       if (st.tick % 25 === 0) this.buildGrid();
     } else {
@@ -1026,12 +1030,13 @@ export class World {
     const t = this.towns;
     const buildings = t.buildingsChanged ? t.buildingViews() : undefined;
     const settlements = t.settlementsChanged ? t.settlementViews() : undefined;
-    const cultures = this.cultures.changed ? this.cultures.views() : undefined;
+    const cultures = this.cultures.changed || this.tech.changed ? this.cultures.views() : undefined;
     const nations = this.nations.changed ? this.nations.views() : undefined;
     t.buildingsChanged = false;
     t.settlementsChanged = false;
     this.cultures.changed = false;
     this.nations.changed = false;
+    this.tech.changed = false;
     return { tick: this.state.tick, ids, pos, look, flags, tileChanges, buildings, settlements, cultures, nations, stepMs };
   }
 
@@ -1047,8 +1052,8 @@ export class World {
       walls: this.towns.walls.slice(),
       settlements: this.towns.settlements.map((s) => ({ ...s, queue: s.queue.map((q) => ({ ...q })) })),
       buildings: this.towns.buildings.map((b) => ({ ...b })),
-      cultures: this.cultures.list.map((c) => ({ ...c, traits: { ...c.traits }, support: c.support ? { ...c.support } : undefined })),
-      nations: this.nations.list.map((n) => ({ ...n, policies: { ...n.policies } })),
+      cultures: this.cultures.list.map((c) => ({ ...c, traits: { ...c.traits }, support: c.support ? { ...c.support } : undefined, techs: c.techs ? [...c.techs] : undefined, progress: c.progress ? { ...c.progress } : undefined })),
+      nations: this.nations.list.map((n) => ({ ...n, policies: { ...n.policies }, techs: n.techs ? [...n.techs] : undefined })),
       relations: this.nations.relations.map((r) => ({ ...r })),
       people: this.state.people.map((p) => {
         const q: Person = { ...p, wait: Number.isFinite(p.wait) ? Math.min(p.wait, 100) : 0 };

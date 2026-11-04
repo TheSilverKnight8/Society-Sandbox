@@ -57,6 +57,8 @@ const C = {
   slate: '#5f6772',
   slateDark: '#4a515b',
   banner: '#c8433a',
+  limestone: '#ddd3c1',
+  page: '#f6efdf',
 };
 
 /** Shapes, in tile widths. `wall` and `roof` are heights; the walls stand `inset` in from the footprint's edge. */
@@ -83,6 +85,8 @@ const SHAPES: Partial<Record<BuildingKind, Shape>> = {
   [BuildingKind.Mint]: { wall: 0.6, roof: 0.42, inset: 0.24, roofKind: 'gable', wallColor: C.stone, roofColor: C.tile, roofShade: C.tileDark, roofLine: C.tileDark },
   [BuildingKind.Townhouse]: { wall: 0.92, roof: 0.66, inset: 0.16, roofKind: 'gable', wallColor: C.plaster, roofColor: C.tile, roofShade: C.tileDark, roofLine: C.tileDark },
   [BuildingKind.Hall]: { wall: 0.86, roof: 0.74, inset: 0.14, roofKind: 'gable', wallColor: C.stone, roofColor: C.slate, roofShade: C.slateDark, roofLine: C.slateDark },
+  [BuildingKind.Scriptorium]: { wall: 0.66, roof: 0.6, inset: 0.18, roofKind: 'gable', wallColor: C.stone, roofColor: C.tile, roofShade: C.tileDark, roofLine: C.tileDark },
+  [BuildingKind.University]: { wall: 1.0, roof: 0.72, inset: 0.16, roofKind: 'gable', wallColor: C.limestone, roofColor: C.tile, roofShade: C.tileDark, roofLine: C.tileDark },
 };
 
 type P = [number, number];
@@ -208,7 +212,7 @@ function drawHouseLike(ctx: CanvasRenderingContext2D, kind: BuildingKind, sh: Sh
         }
         for (const t of [0.33, 0.66]) line(ctx, on(0.02, lower * t), on(0.98, lower * t), C.stoneDark, 0.8);
       }
-    } else if (kind === BuildingKind.Smithy || kind === BuildingKind.Mint || kind === BuildingKind.Hall) {
+    } else if (kind === BuildingKind.Smithy || kind === BuildingKind.Mint || kind === BuildingKind.Hall || kind === BuildingKind.Scriptorium || kind === BuildingKind.University) {
       for (let k = 1; k < 4; k++) {
         const h = (wall * k) / 4;
         line(ctx, left(0.02, h), left(0.98, h), C.stoneDark, 0.8);
@@ -258,8 +262,9 @@ function drawHouseLike(ctx: CanvasRenderingContext2D, kind: BuildingKind, sh: Sh
       // The forge's glow through an opening in the right wall.
       wallRect(ctx, right, 0.3, 0.7, wall * 0.15, wall * 0.55, C.glow);
     }
-    if (kind === BuildingKind.Townhouse || kind === BuildingKind.Mint || kind === BuildingKind.Hall) {
-      const rows = kind === BuildingKind.Townhouse ? [wall * 0.18, wall * 0.62] : kind === BuildingKind.Hall ? [wall * 0.55] : [wall * 0.45];
+    if (kind === BuildingKind.Townhouse || kind === BuildingKind.Mint || kind === BuildingKind.Hall || kind === BuildingKind.Scriptorium || kind === BuildingKind.University) {
+      const rows =
+        kind === BuildingKind.Townhouse || kind === BuildingKind.University ? [wall * 0.18, wall * 0.62] : kind === BuildingKind.Hall ? [wall * 0.55] : [wall * 0.45];
       for (const h0 of rows) {
         for (const [on, len, ts] of [
           [left, lenL, lenL > 1.2 ? [0.2, 0.82] : [0.82]],
@@ -382,6 +387,16 @@ function chimney(ctx: CanvasRenderingContext2D, base: P, rh: number) {
 function drawProps(ctx: CanvasRenderingContext2D, kind: BuildingKind, w: number, d: number, banner?: string) {
   const a = w / 2;
   const b = d / 2;
+  if (kind === BuildingKind.Scriptorium || kind === BuildingKind.University) {
+    // A sign by the door with an open book.
+    const s0 = onLeft(a - (kind === BuildingKind.University ? 0.16 : 0.18), b - 0.18, 0.2, 0.46);
+    beam(ctx, [s0[0], s0[1]], [s0[0] - 0.16, s0[1] + 0.04], C.timber, 1);
+    const bx = s0[0] - 0.14;
+    const by = s0[1] + 0.1;
+    poly(ctx, [[bx - 0.08, by], [bx, by + 0.025], [bx, by + 0.085], [bx - 0.08, by + 0.06]], C.page);
+    poly(ctx, [[bx, by + 0.025], [bx + 0.08, by], [bx + 0.08, by + 0.06], [bx, by + 0.085]], C.page);
+    return;
+  }
   if (kind === BuildingKind.Hall) {
     // A tall pole by the front corner flying the nation's banner.
     const base = pt(a + 0.05, b - 0.1);

@@ -2,6 +2,7 @@ import { hash2 } from '../lib/rng';
 import { Deposit, Terrain, isWater } from '../map/terrain';
 import { BUILDINGS, BuildingKind, STAGES, STAGE_NEEDS, anchorFor, footprint, kindAllowsTerrain, needsShore, settlementName, type BuildingDef } from './buildings';
 import { Economy } from './economy';
+import { FENCE_TECH } from './tech';
 import { ADULT_AGE, TICKS_PER_MONTH, TICKS_PER_YEAR, TileField, Wall, type Building, type BuildingView, type Person, type Settlement, type SettlementDetails, type SettlementOrder, type SettlementView } from './types';
 import type { World } from './world';
 
@@ -421,7 +422,8 @@ export class Towns {
     this.spread(s, c);
     this.economy.assignJobs(s);
     // Towns and cities fence their built-up middle, looked at again every year (Caleb: fencing and gates for towns and above).
-    if ((s.stage === 'town' || s.stage === 'city') && (!s.fencePlan || Math.floor(this.w.state.tick / TICKS_PER_MONTH) % 12 === 0)) this.planFence(s);
+    // (Fences need Fortification, Stage 4c.)
+    if ((s.stage === 'town' || s.stage === 'city') && this.w.tech.has(s, FENCE_TECH) && (!s.fencePlan || Math.floor(this.w.state.tick / TICKS_PER_MONTH) % 12 === 0)) this.planFence(s);
     // How many buildings it puts up at once grows with its people (a builder crew per site).
     let sites = mine.filter((b) => b.progress < 1).length;
     const maxSites = Math.min(8, (s.stage === 'camp' ? 1 : 2) + Math.floor(c.people / 20) + (s.focus === 'housing' ? 1 : 0));
@@ -450,7 +452,7 @@ export class Towns {
     const planned = mine.reduce((n, b) => n + this.def(b).homes, 0);
     if (homeless <= planned) return false;
     const town = s.stage === 'town' || s.stage === 'city';
-    const kind = town && stoneNear && this.economy.stockOf(s).tools >= 2 ? BuildingKind.Townhouse : s.stage !== 'camp' && stoneNear ? BuildingKind.House : BuildingKind.Hut;
+    const kind = town && stoneNear && this.economy.stockOf(s).tools >= 2 && this.w.tech.canBuild(s, BuildingKind.Townhouse) ? BuildingKind.Townhouse : s.stage !== 'camp' && stoneNear ? BuildingKind.House : BuildingKind.Hut;
     const spot = this.freeSpot(s, kind);
     if (!spot) return false;
     this.addBuilding(kind, spot.tile, s.id, false, spot.rot);
@@ -904,7 +906,8 @@ export class Towns {
         return true;
       }
       const stepBefore = Math.floor(b.progress * 10);
-      b.progress += 1 / this.def(b).work;
+      // Masonry makes builders a fifth quicker (Stage 4c).
+      b.progress += (this.w.tech.has(b.settlement !== undefined ? this.sById.get(b.settlement) : undefined, 'masonry') ? 1.2 : 1) / this.def(b).work;
       const home = b.settlement !== undefined ? this.sById.get(b.settlement) : undefined;
       if (b.progress >= 1) {
         this.finished(b);
@@ -1275,6 +1278,8 @@ export class Towns {
     const w = this.w;
     switch (o.kind) {
       case 'build': {
+        // Its people can only build what their technology allows (Stage 4c).
+        if (!w.tech.canBuild(s, o.building)) return;
         // The tile clicked is the building's middle; it must be on the settlement's land or nobody's.
         const { w: fw, d: fd } = footprint(o.building, o.rot);
         const anchor = anchorFor(o.building, o.rot, o.tile, w.size);

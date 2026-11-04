@@ -17,8 +17,8 @@ Macro to micro, with a test checkpoint at the end of each stage. Each system's t
    - 3c. Goods, coins and trade: workshops, traders between settlements, wages, wealth and inheritance; the town and city stages; fences and gates for towns and above. **(done)**
 4. **Cultures, nations and technology**, in three steps:
    - 4a. Cultures: formation, membership, traits, breaks from a culture far from home, editing cultures, the culture map view, the culture formation rule. **(done; settlements spreading added after it)**
-   - 4b. Nations: influence, leaders claiming rule, placed nations, settlements joining, rulers and succession, unique individuals, officials and taxes, policies and culture support, unrest, revolts and breaks over policies, nations sending settlers, diplomacy, the nation map view, their rules. (Caleb kept this as one step.) **(this step)**
-   - 4c. Technology and research: research by cultures at a research building with its own workers, the technologies and what they open up, nations' technology from their cultures, the research rule.
+   - 4b. Nations: influence, leaders claiming rule, placed nations, settlements joining, rulers and succession, unique individuals, officials and taxes, policies and culture support, unrest, revolts and breaks over policies, nations sending settlers, diplomacy, the nation map view, their rules. (Caleb kept this as one step.) **(done)**
+   - 4c. Technology and research: research by cultures at a research building with its own workers, the technologies and what they open up, nations' technology from their cultures, the research rule. **(this step)**
 5. **Military and war:** soldier types, weapons and equipment, armies and their leaders, battles with group orders and individual resolution, war declarations.
 6. **Disasters, effects, beasts and criminals;** scenario events (player- and sim-triggered) and the record of events.
 7. **Finishing:** a pass over every toggle and imperative against SPEC 10, tuning, and content additions Caleb asks for.
@@ -67,6 +67,9 @@ Macro to micro, with a test checkpoint at the end of each stage. Each system's t
 | How settlements outside any nation come to belong to one, before war (Stage 5) | Settlements founded by a nation's own settlers belong to it. Besides that, only "same culture": an independent settlement near a nation joins it only if most of its people hold the nation's main culture; others stay independent. |
 | What a revolt does (people unhappy with their nation's policies) | By size: a small revolt sends a group of families away to found a settlement outside the nation; a large one (most of a settlement) makes the settlement break from the nation and stand on its own, possibly as a new nation. (Breaking away from the culture over policies is the other outcome, as answered before 4a.) |
 | Whether to split 4b | Keep it as one step. |
+| Whether technology locks things that already exist (asked before 4c) | Lock some existing: the advanced buildings already in the game (smithy, mint, townhouse, town fences, market, hall) need their technology first, so growth runs through research. New things are added too. |
+| Who decides what a culture researches | The sim picks by the culture's traits; the player can set what a culture researches next (from its panel, or as a culture imperative). |
+| How technology is organized | A tree: individual technologies with prerequisites, researched one at a time. |
 | Whether grown settlements spread (asked at the 4a checkpoint) | "Grown villages should spread when some sort of expansion threshold is hit, whether it is a small family or group of people striking out, a village exceeds its max population, people are leaving due to a revolt, a nation want to expand more, etc." Families striking out and settlements past their most people (or crowded) came after 4a; revolts and nations wanting land come with nations (4b). |
 
 ## Questions settled by the builder in Stage 3c (Caleb can change them)
@@ -88,6 +91,24 @@ Macro to micro, with a test checkpoint at the end of each stage. Each system's t
 | SPEC 10 lists "Pairing, births, and aging (turning these off freezes the population)" as one item. One switch or three? | One switch, as the spec groups them. It can be split into three. |
 | Who pairs with whom? | One man and one woman, since pairs are what births come from (SPEC 6: "specific individuals pair up and have children"). Close relatives (parent and child, brothers and sisters, half-siblings) never pair. |
 | How do children get fed? | From what a parent nearby carries when there is any; otherwise they forage close by themselves. Households come with houses (Stage 3). |
+
+## Questions settled by the builder in Stage 4c (Caleb can change them)
+
+| Question | What 4c does |
+| --- | --- |
+| The technologies (SPEC 7: the Middle Ages with a little classical; SPEC 11: the list is code's) | 17, in a tree (Caleb). Classical: Writing, Masonry, Iron working, Commerce (needs Writing), Law (Writing), Mathematics (Writing), Coinage (Commerce, Iron working). Early Medieval: Crop rotation, Administration (Writing, Law), Fortification (Masonry), Heavy plough (Iron working, Crop rotation), Feudalism (Administration). High Medieval: Architecture (Masonry, Mathematics), Guilds (Commerce, Iron working), Scholasticism (Mathematics, Architecture). Late Medieval: Banking (Coinage, Guilds), Printing press (Scholasticism, Guilds). Research costs run from 60 (Writing) to 240 (Printing press). |
+| What is locked (Caleb: lock some existing) | Market (Commerce), smithy (Iron working), mint (Coinage), townhouse (Architecture), hall (Administration), town fences and gates (Fortification). A settlement cannot build them by itself or be ordered to until it has the technology; buildings already standing keep working, and the player can still place any building (SPEC 1). |
+| New things | Scriptorium (Writing; 2 by 3; 10 wood, 10 stone; 2 scholars) and University (Scholasticism; 3 by 3; 20 wood, 24 stone, 2 tools; 3 scholars; towns and cities): Caleb's research building and worker. Improvements: Masonry (builders a fifth faster), Crop rotation (fields ripen a quarter faster), Heavy plough (harvests 12 food, not 10), Guilds (workshops a fifth faster), Banking (traders carry 15, not 10), Mathematics (research a quarter faster), Printing press (research half again as fast). Policy choices: elective succession needs Law, the levy needs Feudalism (SPEC 7: technology affects policies). |
+| Resources (SPEC 7: advances through research and resources) | Some technologies take goods from a store of the culture's settlements once their research is done: Masonry 10 stone, Iron working 6 iron ore, Fortification 10 wood, Coinage 4 gold ore, Heavy plough 6 iron ore, Architecture 20 stone, Banking 6 gold ore, Printing press 6 iron ore. Until the goods are there the technology waits, and the culture researches something else meanwhile. (At first a waiting technology held up all research; a culture with no gold near stood still for decades.) |
+| How fast research goes | Every culture with people researches 5 a year plus 0.2 per person by itself. A scholar's spell of study (about 10 seconds at 1x) adds 8 at a scriptorium, 16 at a university; scholars are paid 2 coins a spell from the treasury. Progressive cultures research a fifth faster. In testing (360 people in six groups, cultures forming in year 4), cultures knew 0 to 2 technologies by year 10, and the leading culture or nation knew 15 of 17 by year 30 to 35. |
+| What a culture researches next (Caleb: the sim by traits, the player can steer) | Among what it can research now: each technology leans to some traits (Iron working to martial, Commerce to mercantile, Crop rotation to agrarian, Writing to peaceful and progressive, and so on); a technology is picked with weight 1 + 2 per matching trait, cheaper ones a little more often. The player sets it in the culture panel or with the Research order; research done toward a technology is kept if research moves elsewhere. |
+| A nation's technology (SPEC 7) | All of its main culture's. Each technology one of its other cultures (5 people or more in the nation) knows is taken up with a 30% chance each year, only while a store of the nation holds the goods it needs; once taken up it stays while that culture lives in the nation. A settlement uses its nation's technology, or its own culture's if it belongs to no nation; without either, nothing locked. |
+| Cultures that break away | Keep what their parent culture knew. |
+
+## Builder's additions in Stage 4c (not named in the spec; easy to remove)
+
+- **Technologies it knows** in the culture panel's Edit (SPEC 1: everything can be modified); unticking one also takes away those that need it.
+- **Research** as an order to cultures in Imperatives (SPEC 4: imperatives to cultures), besides the choice in the culture panel.
 
 ## Questions settled by the builder in Stage 4b (Caleb can change them)
 
@@ -350,6 +371,15 @@ A step has 33 ms at 3x, so there is plenty of room for now. People only walk in 
 | Saving | Cultures, people's cultures, and how long a settlement has been without a culture or far from home are saved (world format version 8). Older setups and runs open with no cultures, which form as the run goes on. |
 | In testing | From 360 people in six groups on a Titanic map, the first cultures formed in year 4. Before settlements spread, by year 30 there were 12 to 14 living cultures on two maps, most with one settlement each. With spreading (below), by year 40 the larger cultures held 5 to 9 settlements each, and one far-off settlement on each map had broken away. |
 
+## Technology (Stage 4c)
+
+| Item | Choice |
+| --- | --- |
+| Research (SPEC 7: done by the culture, expedited by buildings) | See above. Settlements build a scriptorium at 25 people once their culture knows Writing, and towns and cities a university once they know Scholasticism. |
+| What the app shows | The culture panel's Research: research a year, what it is researching (with a bar, what it opens, and the goods it is waiting for), technologies done but waiting for goods, a choice of what to research next, and what it knows. The nation panel's Technology: what it has. The nation editor marks policy choices that need a technology. A settlement ordered to build something its technology does not allow says so. Scholars and studying show in the inspect panel. |
+| The rule (SPEC 10: culture research and nation tech derivation) | Off: cultures stop researching and nations stop taking up technology. What they know stays, and the player can still set it. |
+| Saving | Cultures' technologies, research and progress, nations' technologies (world format version 11). Older setups and runs open with cultures knowing nothing; buildings already standing stay and keep working. |
+
 ## Nations (Stage 4b)
 
 | Item | Choice |
@@ -463,6 +493,10 @@ With cultures: 2,000 people placed in 40 groups grew to 2,390 by year 5. Simulat
 ## Performance (Stage 4b)
 
 With nations: 2,000 people placed in 40 groups grew to 2,540 by year 5. Simulation step 3.2 to 3.6 ms on average, at most 11 ms (Node). In headless Chrome at 3x with about 2,200 people: 50 frames a second for the whole map and 58 at mid zoom.
+
+## Performance (Stage 4c)
+
+With technology: 2,000 people placed in 40 groups grew to 2,420 by year 5. Simulation step 3 to 3.9 ms on average, at most 18 ms (Node). In headless Chrome at 3x with about 2,200 people: 51 frames a second for the whole map and 49 to 57 at mid zoom. One fix came out of measuring: research progress was sent to the app after every scholar's spell of study, redrawing the panels on almost every update (the whole map fell to 31 to 35 frames a second); it is now sent once a month and when a technology is learned or chosen.
 
 ## Fixes found while building 4a
 

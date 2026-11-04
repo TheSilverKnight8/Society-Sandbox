@@ -1,5 +1,6 @@
 import { BUILDINGS } from './buildings';
 import { TRAIT_AXES } from './cultures';
+import { POLICY_TECH } from './tech';
 import {
   ADULT_AGE,
   TICKS_PER_YEAR,
@@ -239,7 +240,7 @@ export class Nations {
       if (n.unshaped) {
         const c = this.mainCulture(n);
         if (c) {
-          n.policies = this.policiesFor(c);
+          n.policies = this.policiesFor(c, new Set(n.techs ?? c.techs ?? []));
           delete n.unshaped;
           this.fitName(n);
           this.markChanged();
@@ -479,7 +480,8 @@ export class Nations {
     const w = this.w;
     const people = w.state.people.filter((p) => p.settlement === s.id);
     const culture = this.cultureOfGroup(people);
-    const policies = this.policiesFor(culture);
+    const techs = new Set(culture?.techs ?? []);
+    const policies = this.policiesFor(culture, techs);
     const used = new Set(this.alive().map((n) => n.color));
     const free = NATION_COLORS.map((_, i) => i).filter((i) => !used.has(i));
     const n: Nation = {
@@ -490,6 +492,7 @@ export class Nations {
       capital: s.id,
       policies,
       coins: 0,
+      techs: [...techs],
     };
     if (!culture) n.unshaped = true;
     this.list.push(n);
@@ -502,15 +505,22 @@ export class Nations {
     return n;
   }
 
-  /** Policies as a culture's traits would have them (random where there is no culture). */
-  private policiesFor(culture: Culture | undefined): Policies {
+  /** Policies as a culture's traits would have them (random where there is no culture), among the choices its technology allows. */
+  private policiesFor(culture: Culture | undefined, techs: Set<string>): Policies {
     return Object.fromEntries(
       POLICY_DEFS.map((d) => {
         const t = culture?.traits[d.axis];
         const fit = t !== undefined ? d.fits.indexOf(t) : -1;
-        return [d.key, d.choices[fit >= 0 ? fit : this.w.rand.int(2)]];
+        let choice = d.choices[fit >= 0 ? fit : this.w.rand.int(2)];
+        if (!allowed(d.key, choice, techs)) choice = d.choices[1 - d.choices.indexOf(choice)];
+        return [d.key, choice];
       }),
     ) as unknown as Policies;
+  }
+
+  /** Whether a nation's technology allows a policy choice (SPEC 7). */
+  allows(n: Nation, key: PolicyKey, choice: string) {
+    return allowed(key, choice, new Set(n.techs ?? []));
   }
 
   /** The realm word in a nation's name follows its succession (unless the player renamed it). */
@@ -618,7 +628,7 @@ export class Nations {
         const sNow = sup[`${d.key}:${now}`];
         const sOther = sup[`${d.key}:${other}`];
         // The better its current policy is supported, the less likely it changes (SPEC 7, [Claude's call]).
-        if (sOther > sNow && w.rand.next() < 0.6 * (1 - sNow / 100)) {
+        if (sOther > sNow && this.allows(n, d.key, other) && w.rand.next() < 0.6 * (1 - sNow / 100)) {
           (n.policies as unknown as Record<string, string>)[d.key] = other;
           if (d.key === 'succession') this.fitName(n);
           this.markChanged();
@@ -672,7 +682,7 @@ export class Nations {
     if (e.policies) {
       for (const d of POLICY_DEFS) {
         const v = e.policies[d.key];
-        if (v !== undefined && d.choices.includes(v)) (n.policies as unknown as Record<string, string>)[d.key] = v;
+        if (v !== undefined && d.choices.includes(v) && this.allows(n, d.key, v)) (n.policies as unknown as Record<string, string>)[d.key] = v;
       }
       delete n.unshaped;
       if (e.policies.succession) this.fitName(n);
@@ -739,6 +749,7 @@ export class Nations {
           .map((o) => ({ other: o.id, kind: this.relation(n.id, o.id) })),
         unrest: mine.filter((s) => (s.unrest ?? 0) >= UNREST_MONTHS).length,
         destroyedYear: n.destroyed !== undefined ? Math.floor(n.destroyed / TICKS_PER_YEAR) + 1 : undefined,
+        techs: [...(n.techs ?? [])],
       };
     });
   }
@@ -765,6 +776,11 @@ export class Nations {
 
   /** Workers a hall can use. */
   static hallJobs = BUILDINGS[14].jobs;
+}
+
+function allowed(key: PolicyKey, choice: string, techs: Set<string>) {
+  const need = POLICY_TECH[`${key}:${choice}`];
+  return !need || techs.has(need);
 }
 
 function monthlyChance(yearly: number) {

@@ -21,8 +21,10 @@ import type { WorldDoc } from './types';
 //      last sent people out; settlers' home settlement. (New fields only; nothing to change.)
 //  10  Stage 4b: nations, relations between them, settlements' nation and unrest, unique
 //      people, officials' taxes, cultures' support for policies; the four new rules.
+//  11  Stage 4c: cultures' technologies and research, nations' technologies, scholars; the
+//      research rule. (Older cultures start knowing nothing; buildings already standing stay.)
 
-export const WORLD_FORMAT_VERSION = 10;
+export const WORLD_FORMAT_VERSION = 11;
 
 export function upgradeWorld(version: number, doc: WorldDoc): WorldDoc {
   if (version > WORLD_FORMAT_VERSION) throw new Error('This was saved by a newer version of the app. Reload the app to update it, then try again.');
@@ -69,6 +71,10 @@ export function upgradeWorld(version: number, doc: WorldDoc): WorldDoc {
   if (version < 10) {
     // No nations yet; the new rules start on. (Runs without the nations field need nothing else.)
     doc = { ...doc, state: { ...doc.state, toggles: { ...DEFAULT_TOGGLES, ...doc.state.toggles }, nations: doc.state.nations ?? [], nextNationId: doc.state.nextNationId ?? 1, relations: doc.state.relations ?? [] } };
+  }
+  if (version < 11) {
+    // The new rule (culture research) starts on; cultures and nations know nothing yet.
+    doc = { ...doc, state: { ...doc.state, toggles: { ...DEFAULT_TOGGLES, ...doc.state.toggles } } };
   }
   return doc;
 }
