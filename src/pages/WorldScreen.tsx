@@ -1382,7 +1382,7 @@ function EditPerson({ details, cultures, onEdit, onUnpair }: { details: PersonDe
 function RulesPanel({ toggles, onChange, onClose }: { toggles: Toggles; onChange: (t: Toggles) => void; onClose: () => void }) {
   const rows: { key: keyof Toggles; label: string; note: string }[] = [
     { key: 'lifeCycle', label: 'Pairing, births and aging', note: 'Off freezes the population: nobody pairs up, is born, ages, or dies of old age.' },
-    { key: 'founding', label: 'Settlement founding by units', note: 'Off: people no longer found settlements by themselves. They still join settlements, and you can still place campfires and send settlers.' },
+    { key: 'founding', label: 'Settlement founding by units', note: 'Off: people no longer found settlements by themselves, and grown settlements no longer send people out to found new ones. People still join settlements, and you can still place campfires and send settlers.' },
     { key: 'cultures', label: 'Culture formation', note: 'Off: no new cultures form, and none break away by themselves. Cultures that exist stay; newcomers still take up the culture they live among, and you can still order a settlement to break away.' },
   ];
   return (
@@ -1662,7 +1662,10 @@ function SettlementPanel({
           <div className="-mr-2 mt-3 min-h-0 flex-1 overflow-y-auto pr-2 scrollbar-thin">
             <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
               <dt className="text-muted">Founded</dt>
-              <dd>Year {d.foundedYear}</dd>
+              <dd>
+                Year {d.foundedYear}
+                {d.from && <span className="text-muted">, by settlers from {d.from}</span>}
+              </dd>
               <dt className="text-muted">People</dt>
               <dd>{d.people}</dd>
               <dt className="text-muted">Homes</dt>

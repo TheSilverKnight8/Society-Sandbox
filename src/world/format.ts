@@ -17,8 +17,10 @@ import type { WorldDoc } from './types';
 //      pottery, clay deposits hold clay, fences and gates.
 //   8  Stage 4a: cultures; people's culture; how long a settlement has been without a culture
 //      or far from its culture; the culture formation rule.
+//   9  Settlements spread: which settlement founded one, how long it has been crowded, when it
+//      last sent people out; settlers' home settlement. (New fields only; nothing to change.)
 
-export const WORLD_FORMAT_VERSION = 8;
+export const WORLD_FORMAT_VERSION = 9;
 
 export function upgradeWorld(version: number, doc: WorldDoc): WorldDoc {
   if (version > WORLD_FORMAT_VERSION) throw new Error('This was saved by a newer version of the app. Reload the app to update it, then try again.');

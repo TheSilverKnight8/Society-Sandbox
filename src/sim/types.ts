@@ -84,8 +84,9 @@ export interface Person {
   fenceTile?: number;
   /** The construction site they are working for. */
   site?: number;
-  /** Where they are going to found a settlement (sent as settlers). */
+  /** Where they are going to found a settlement (sent as settlers), and the settlement they left. */
   settleAt?: number;
+  settleFrom?: number;
   /** Asleep in their home (not drawn; shelter met). */
   indoors?: boolean;
   /** Their culture (SPEC 6: exactly one once a culture exists; they can start with none). */
@@ -119,6 +120,11 @@ export interface Settlement {
   cultureless?: number;
   /** Since when it has been far from every other settlement of its culture (it may break away; Caleb, Stage 4). */
   farSince?: number;
+  /** The settlement whose settlers founded it, if any. */
+  from?: number;
+  /** Since when many of its people have been homeless (it sends people out after a while), and when it last sent people out. */
+  crowdedSince?: number;
+  spreadAt?: number;
 }
 
 /** A culture's traits: one side of each pair (SPEC 11: culture traits; the list is the builder's). */
@@ -240,6 +246,8 @@ export interface SettlementDetails {
   /** Its culture (the one most of its people hold), and how many other cultures live there. */
   culture?: number;
   otherCultures: number;
+  /** The settlement whose settlers founded it. */
+  from?: string;
 }
 
 /** A building, as drawn. */

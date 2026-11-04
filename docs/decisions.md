@@ -64,6 +64,7 @@ Macro to micro, with a test checkpoint at the end of each stage. Each system's t
 | What officials do (SPEC 6) | They collect taxes for the nation. Research gets its own building and a new kind of worker, separate from officials ("which can come now or later"; it comes with research in step 4c). |
 | How cultures and nations show on the map | Switchable views, as WorldBox has: nations (each in its color), cultures (each in its color), or plain. Nations is the default (from 4b, when nations exist). |
 | When units decide a break from their culture (SPEC 7) | When a settlement has lived far from the rest of its culture for many years (step 4a), and when a culture's people live under a nation whose policies their culture does not support (step 4b). |
+| Whether grown settlements spread (asked at the 4a checkpoint) | "Grown villages should spread when some sort of expansion threshold is hit, whether it is a small family or group of people striking out, a village exceeds its max population, people are leaving due to a revolt, a nation want to expand more, etc." Families striking out and settlements past their most people (or crowded) came after 4a; revolts and nations wanting land come with nations (4b). |
 
 ## Questions settled by the builder in Stage 3c (Caleb can change them)
 
@@ -319,7 +320,20 @@ A step has 33 ms at 3x, so there is plenty of room for now. People only walk in 
 | Map views (Caleb: switchable views) | **Map: Plain / Cultures** at the top right. Plain shows settlements' land in the light red tint; Cultures shows each settlement's land in its culture's color (settlements with no culture yet in a faint grey), with a key of cultures under the world panel. The nations view comes with nations (4b) and will be the default. Culture colors are given most distinct first (green late, since it is hard to see on grassland). |
 | The rule (SPEC 10: culture formation) | "Culture formation" in Rules. Off: no culture forms and none breaks away by itself. Cultures that exist stay, newcomers still take up the culture they live among, and the player can still order a break. |
 | Saving | Cultures, people's cultures, and how long a settlement has been without a culture or far from home are saved (world format version 8). Older setups and runs open with no cultures, which form as the run goes on. |
-| In testing | From 360 people in six groups on a Titanic map, the first cultures formed in year 4; by year 30 there were 12 to 14 living cultures on two maps, most with one settlement each, since villages do not found new settlements by themselves (see the note in Stage 4a's checkpoint). Settlers sent 80 tiles away founded a settlement that was far from home from then on. |
+| In testing | From 360 people in six groups on a Titanic map, the first cultures formed in year 4. Before settlements spread, by year 30 there were 12 to 14 living cultures on two maps, most with one settlement each. With spreading (below), by year 40 the larger cultures held 5 to 9 settlements each, and one far-off settlement on each map had broken away. |
+
+## Spreading (after 4a; Caleb: grown villages spread when an expansion threshold is hit)
+
+| Item | Choice |
+| --- | --- |
+| A family strikes out | Each year, a village or bigger with at least 30 people has a 15% chance that one young pair (both 16 to 35) and their children leave to found a settlement of their own. |
+| Past its most people, or crowded | A settlement with more people than its stage holds (camp 40, village 120, town 300, city 600), or a village or bigger with more than 30% of its people homeless for 2 years, sends about a quarter of its people (whole families) to found a new settlement. |
+| Not too often | Nobody leaves a settlement in its first 2 years, and at least a year passes between groups leaving one settlement. Camps never count as crowded, since their people are still building their first homes. |
+| Where they go | A spot 25 to 50 tiles away (1 time in 5, 60 to 100 tiles, which in time may make a settlement far from the rest of its culture): free land that can be built on, at least 20 tiles from any settlement's middle, with trees within 30 tiles; open grassland with stone near is preferred. They go as settlers do (with food for the road), keep their culture, and the new settlement's panel says whose settlers founded it. |
+| Revolts and nations | People leaving after a revolt, and nations sending settlers to take land, come with nations (4b), through the same way of sending people out. |
+| The rule | "Settlement founding by units" covers spreading too: off, grown settlements no longer send people out (the player can still send settlers). |
+| In testing | From 360 people in six groups, 40 years on two maps: 38 and 42 settlements (29 founded by settlers), 3 or 4 towns, the rest villages and young camps; population 788 and 663. An earlier try that let crowded camps split broke the start into 22 small settlements in five years and no town formed in 40, so camps do not split for crowding and nobody leaves in a settlement's first 2 years. |
+| Saving | Which settlement founded each one, how long it has been crowded, when it last sent people out, and settlers' home settlement (world format version 9; new fields only). |
 
 ## Towns, fences and gates (Stage 3c)
 
@@ -399,6 +413,10 @@ With coins, workshops, traders and fences: 2,000 people placed in 40 groups acro
 ## Performance (Stage 4a)
 
 With cultures: 2,000 people placed in 40 groups grew to 2,390 by year 5. Simulation step 3.1 to 3.8 ms on average, at most 15 ms (Node). In headless Chrome at 3x with about 2,200 people: 44 frames a second for the whole map and 56 at mid zoom. The culture map view redraws the land only when a settlement's culture or a culture's color changes.
+
+## Performance (after spreading)
+
+2,000 people placed in 40 groups grew to 2,540 by year 5 with 95 settlements. Simulation step 2.7 to 4 ms on average, at most 23 ms in one busy step (Node). In headless Chrome at 3x with about 2,300 people: 39 to 44 frames a second for the whole map (two runs) and 54 at mid zoom.
 
 ## Fixes found while building 4a
 

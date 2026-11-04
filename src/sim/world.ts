@@ -406,7 +406,10 @@ export class World {
           this.release(p);
         }
         if (p.purpose === 'order') delete p.order;
-        if (p.purpose === 'settle') delete p.settleAt;
+        if (p.purpose === 'settle') {
+          delete p.settleAt;
+          delete p.settleFrom;
+        }
         this.towns.dropWork(p);
         delete p.purpose;
         p.wait = 10 + this.rand.int(30);

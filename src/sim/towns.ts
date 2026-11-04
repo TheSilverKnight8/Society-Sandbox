@@ -42,6 +42,23 @@ const STONE_RANGE = 40;
 /** How far from home someone will walk to sleep in it. */
 const HOME_RANGE = 40;
 
+// Spreading (Caleb after 4a: grown villages spread when an expansion threshold is hit).
+/** Most people a settlement holds at each stage; past this, a group leaves to found a new settlement. */
+const MAX_PEOPLE: Record<Settlement['stage'], number> = { camp: 40, village: 120, town: 300, city: 600 };
+/** A village or bigger with more than this share of its people homeless for this many years is crowded, and a group leaves. */
+const CROWDED_SHARE = 0.3;
+const CROWDED_YEARS = 2;
+/** Chance each year that a young family strikes out from a village or bigger with at least this many people. */
+const STRIKE_OUT_CHANCE = 0.15;
+const STRIKE_OUT_MIN = 30;
+/** How far settlers go (tiles): mostly near, now and then far. */
+const SPREAD_NEAR: [number, number] = [25, 50];
+const SPREAD_FAR: [number, number] = [60, 100];
+const SPREAD_FAR_SHARE = 0.2;
+/** At least this long between groups leaving one settlement, and nobody leaves a settlement this young. */
+const SPREAD_GAP_YEARS = 1;
+const SETTLING_YEARS = 2;
+
 /** Terrain a building can stand on. */
 function buildableTerrain(t: number) {
   return t === Terrain.Grassland || t === Terrain.Sand || t === Terrain.Desert || t === Terrain.Hills || t === Terrain.Forest;
@@ -308,7 +325,7 @@ export class Towns {
   // ---------------------------------------------------------------- settlements
 
   /** Founds a settlement at a tile: a campfire and a little land. */
-  found(tile: number, founders: Person[]): Settlement | null {
+  found(tile: number, founders: Person[], from?: number): Settlement | null {
     const w = this.w;
     if (!this.buildable(tile)) {
       // Look for a free tile close by.
@@ -333,6 +350,7 @@ export class Towns {
     }
     const st = w.state;
     const s: Settlement = { id: st.nextSettlementId!++, name: settlementName(w.rand.next), stage: 'camp', center: tile, founded: st.tick, focus: 'balanced', queue: [] };
+    if (from !== undefined) s.from = from;
     this.settlements.push(s);
     this.sById.set(s.id, s);
     this.counts.set(s.id, { people: 0, housed: 0, homes: 0, homeBuildings: 0 });
@@ -400,6 +418,7 @@ export class Towns {
     // A settlement whose people are all gone stands empty.
     if (c.people === 0 && this.w.state.tick - s.founded > TICKS_PER_YEAR * 2) return;
     this.housePeople(s);
+    this.spread(s, c);
     this.economy.assignJobs(s);
     // Towns and cities fence their built-up middle, looked at again every year (Caleb: fencing and gates for towns and above).
     if ((s.stage === 'town' || s.stage === 'city') && (!s.fencePlan || Math.floor(this.w.state.tick / TICKS_PER_MONTH) % 12 === 0)) this.planFence(s);
@@ -804,12 +823,14 @@ export class Towns {
       }
       case 'settle': {
         const at = p.settleAt;
+        const from = p.settleFrom;
         delete p.settleAt;
+        delete p.settleFrom;
         if (at === undefined) return false;
         // Join settlers who got here first, or found the new settlement.
         const close = this.settlements.find((s) => !s.abandoned && this.dist2(s.center, w.tileOf(p)) <= 64);
         if (close) this.join(p, close);
-        else this.found(w.tileOf(p), [p]);
+        else this.found(w.tileOf(p), [p], from);
         p.task = 'idle';
         p.wait = 10;
         return true;
@@ -1261,40 +1282,10 @@ export class Towns {
         s.focus = o.focus;
         this.settlementsChanged = true;
         return;
-      case 'settlers': {
+      case 'settlers':
         // About a quarter of its people leave, a family at a time.
-        const members = w.state.people.filter((p) => p.settlement === s.id);
-        const want = Math.max(2, Math.ceil(members.length / 4));
-        const leaving = new Set<Person>();
-        for (const p of members) {
-          if (leaving.size >= want) break;
-          if (leaving.has(p) || w.ageOf(p) < ADULT_AGE) continue;
-          leaving.add(p);
-          const partner = p.pair !== undefined ? w.byId.get(p.pair) : undefined;
-          if (partner && partner.settlement === s.id) leaving.add(partner);
-          for (const q of members) if (w.ageOf(q) < ADULT_AGE && (q.mother === p.id || q.father === p.id)) leaving.add(q);
-        }
-        const store = this.economy.stockOf(s);
-        for (const p of leaving) {
-          // Food for the road, from the store.
-          const food = Math.min(3 - p.carry, Math.floor(store.food));
-          if (food > 0) {
-            store.food -= food;
-            p.carry += food;
-          }
-          w.stop(p);
-          this.dropWork(p);
-          delete p.settlement;
-          delete p.home;
-          delete p.indoors;
-          this.economy.quit(p);
-          p.settleAt = o.tile;
-          delete p.order;
-          w.goTo(p, o.tile, 'settle', true);
-        }
-        this.recount();
+        this.sendSettlers(s, this.families(s, 'quarter'), o.tile);
         return;
-      }
       case 'abandon':
         this.abandon(s);
         return;
@@ -1302,6 +1293,122 @@ export class Towns {
         w.cultures.orderBreak(s.id);
         return;
     }
+  }
+
+  // ---------------------------------------------------------------- spreading
+
+  /**
+   * Once a month: a settlement past its stage's most people, or a village or bigger crowded
+   * (many homeless) for two years, sends about a quarter of its people (whole families) to
+   * found a new settlement (none leave in its first two years);
+   * now and then a young family strikes out on its own (Caleb: grown villages spread when an
+   * expansion threshold is hit). Revolts and nations wanting land come with nations (4b).
+   */
+  private spread(s: Settlement, c: { people: number; housed: number }) {
+    const w = this.w;
+    const tick = w.state.tick;
+    const homeless = c.people - c.housed;
+    // Camps are not crowded: their people are still building their first homes.
+    if (s.stage !== 'camp' && homeless > c.people * CROWDED_SHARE) s.crowdedSince ??= tick;
+    else delete s.crowdedSince;
+    if (!w.toggles.founding || tick - s.founded < SETTLING_YEARS * TICKS_PER_YEAR) return;
+    if (s.spreadAt !== undefined && tick - s.spreadAt < SPREAD_GAP_YEARS * TICKS_PER_YEAR) return;
+    const over = c.people > MAX_PEOPLE[s.stage];
+    const crowded = s.crowdedSince !== undefined && tick - s.crowdedSince >= CROWDED_YEARS * TICKS_PER_YEAR;
+    if (over || crowded) {
+      const spot = this.spreadSpot(s);
+      if (spot >= 0 && this.sendSettlers(s, this.families(s, 'quarter'), spot)) delete s.crowdedSince;
+      return;
+    }
+    if (s.stage !== 'camp' && c.people >= STRIKE_OUT_MIN && w.rand.next() < 1 - Math.pow(1 - STRIKE_OUT_CHANCE, 1 / 12)) {
+      const spot = this.spreadSpot(s);
+      if (spot >= 0) this.sendSettlers(s, this.families(s, 'young'), spot);
+    }
+  }
+
+  /** People who would leave together: about a quarter of the settlement, or one young pair; each with their children. */
+  private families(s: Settlement, which: 'quarter' | 'young'): Set<Person> {
+    const w = this.w;
+    const members = w.state.people.filter((p) => p.settlement === s.id);
+    const leaving = new Set<Person>();
+    const addFamily = (p: Person) => {
+      leaving.add(p);
+      const partner = p.pair !== undefined ? w.byId.get(p.pair) : undefined;
+      if (partner && partner.settlement === s.id) leaving.add(partner);
+      for (const q of members) if (w.ageOf(q) < ADULT_AGE && (q.mother === p.id || q.father === p.id)) leaving.add(q);
+    };
+    if (which === 'young') {
+      const young = members.filter((p) => {
+        const partner = p.pair !== undefined ? w.byId.get(p.pair) : undefined;
+        const age = w.ageOf(p);
+        return age >= 16 && age <= 35 && partner && partner.settlement === s.id && w.ageOf(partner) <= 35;
+      });
+      if (young.length) addFamily(young[w.rand.int(young.length)]);
+      return leaving;
+    }
+    const want = Math.max(2, Math.ceil(members.length / 4));
+    for (const p of members) {
+      if (leaving.size >= want) break;
+      if (leaving.has(p) || w.ageOf(p) < ADULT_AGE) continue;
+      addFamily(p);
+    }
+    return leaving;
+  }
+
+  /** A place for settlers from `s` to found a new settlement: free land with trees near, away from other settlements. -1 if none found. */
+  private spreadSpot(s: Settlement): number {
+    const w = this.w;
+    const size = w.size;
+    const [cx, cy] = this.tileXY(s.center);
+    const [r0, r1] = w.rand.next() < SPREAD_FAR_SHARE ? SPREAD_FAR : SPREAD_NEAR;
+    let best = -1;
+    let bestScore = -Infinity;
+    for (let k = 0; k < 24; k++) {
+      const a = w.rand.next() * Math.PI * 2;
+      const r = r0 + w.rand.next() * (r1 - r0);
+      const x = Math.round(cx + Math.cos(a) * r);
+      const y = Math.round(cy + Math.sin(a) * r);
+      if (x < 2 || y < 2 || x >= size - 2 || y >= size - 2) continue;
+      const t = y * size + x;
+      if (!this.buildable(t) || this.territory[t] !== 0) continue;
+      if (this.settlements.some((o) => !o.abandoned && this.dist2(o.center, t) < FOUND_GAP * FOUND_GAP)) continue;
+      if (this.nearestTree(t, FOUND_WOOD_RANGE) < 0) continue;
+      // Open grassland with stone near is best; nearer is a little better.
+      const score = (w.terrain[t] === Terrain.Grassland ? 1 : 0) + (this.stoneNear(t) ? 1 : 0) - r / 100 + w.rand.next() * 0.3;
+      if (score > bestScore) {
+        bestScore = score;
+        best = t;
+      }
+    }
+    return best;
+  }
+
+  /** Sends people from a settlement to found a new one at `tile` (they take food for the road from the store). */
+  private sendSettlers(s: Settlement, leaving: Set<Person>, tile: number): boolean {
+    const w = this.w;
+    if (!leaving.size) return false;
+    const store = this.economy.stockOf(s);
+    for (const p of leaving) {
+      const food = Math.min(3 - p.carry, Math.floor(store.food));
+      if (food > 0) {
+        store.food -= food;
+        p.carry += food;
+      }
+      w.stop(p);
+      this.dropWork(p);
+      delete p.settlement;
+      delete p.home;
+      delete p.indoors;
+      this.economy.quit(p);
+      p.settleAt = tile;
+      p.settleFrom = s.id;
+      delete p.order;
+      w.goTo(p, tile, 'settle', true);
+    }
+    s.spreadAt = w.state.tick;
+    this.recount();
+    this.settlementsChanged = true;
+    return true;
   }
 
   /** Its people leave and its land is given up; its buildings stand empty for anyone to take over. */
@@ -1396,6 +1503,7 @@ export class Towns {
         const c = this.w.cultures.ofSettlement(s.id);
         return { culture: c.culture, otherCultures: c.others };
       })(),
+      from: s.from !== undefined ? this.settlementName(s.from) : undefined,
     };
   }
 
