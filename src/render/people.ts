@@ -1,5 +1,6 @@
 import { CLOTHES, HAIRS, SKINS, unpackLook } from '../sim/look';
 import type { SimClient } from '../sim/client';
+import { Pose } from '../sim/types';
 import { isoX, isoY } from './iso';
 import type { IsoView } from './IsoView';
 import { NAVY } from './style';
@@ -24,11 +25,102 @@ interface Sprite {
 
 const sprites = new Map<string, Sprite>();
 
-function sprite(look: number, male: boolean, frame: number, px: number): Sprite {
-  const key = `${look}|${male ? 1 : 0}|${frame}|${px}`;
+function sprite(look: number, male: boolean, pose: number, frame: number, px: number): Sprite {
+  const key = `${look}|${male ? 1 : 0}|${pose}|${frame}|${px}`;
   const hit = sprites.get(key);
   if (hit) return hit;
   if (sprites.size > 4000) sprites.clear();
+  const s = pose === Pose.Sleep ? drawSleeping(look, male, px) : drawStanding(look, male, pose, frame, px);
+  sprites.set(key, s);
+  return s;
+}
+
+/** A colored line with a navy outline, like a stick figure's limb. */
+function limbOf(ctx: CanvasRenderingContext2D, H: number, lw: number) {
+  return (pts: [number, number][], color: string, width: number) => {
+    ctx.beginPath();
+    ctx.moveTo(pts[0][0] * H, pts[0][1] * H);
+    for (const p of pts.slice(1)) ctx.lineTo(p[0] * H, p[1] * H);
+    ctx.strokeStyle = NAVY;
+    ctx.lineWidth = width + lw * 1.6;
+    ctx.stroke();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.stroke();
+  };
+}
+
+/** Lying on the ground asleep, head to the left, with a small "z". */
+function drawSleeping(look: number, male: boolean, px: number): Sprite {
+  const H = px;
+  const lw = Math.max(1.2, H * 0.08);
+  const w = Math.ceil(H * 1.0 + lw * 2);
+  const h = Math.ceil(H * 0.62 + lw * 2);
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d')!;
+  const ax = w / 2;
+  const ay = h - lw - 1;
+  ctx.translate(ax, ay);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  const { skin, hair, clothes } = unpackLook(look);
+  const limb = limbOf(ctx, H, lw);
+  const limbW = Math.max(1.3, H * 0.08);
+  // Legs.
+  limb(
+    [
+      [0.08, -0.07],
+      [0.4, -0.05],
+    ],
+    LEGS,
+    limbW,
+  );
+  // Body (tunic or dress) lying flat.
+  ctx.beginPath();
+  ctx.moveTo(-0.2 * H, -0.15 * H);
+  ctx.lineTo((male ? 0.1 : 0.3) * H, -0.13 * H);
+  ctx.lineTo((male ? 0.1 : 0.3) * H, -0.01 * H);
+  ctx.lineTo(-0.2 * H, -0.02 * H);
+  ctx.closePath();
+  ctx.fillStyle = CLOTHES[clothes];
+  ctx.fill();
+  ctx.strokeStyle = NAVY;
+  ctx.lineWidth = lw;
+  ctx.stroke();
+  // Head with hair.
+  ctx.beginPath();
+  ctx.arc(-0.32 * H, -0.1 * H, 0.12 * H, 0, Math.PI * 2);
+  ctx.fillStyle = SKINS[skin];
+  ctx.fill();
+  ctx.save();
+  ctx.clip();
+  ctx.fillStyle = HAIRS[hair];
+  ctx.fillRect(-0.46 * H, -0.24 * H, 0.1 * H, 0.3 * H);
+  ctx.restore();
+  ctx.beginPath();
+  ctx.arc(-0.32 * H, -0.1 * H, 0.12 * H, 0, Math.PI * 2);
+  ctx.strokeStyle = NAVY;
+  ctx.stroke();
+  // A "z" above the head.
+  if (H >= 18) {
+    ctx.beginPath();
+    const zx = -0.18 * H;
+    const zy = -0.48 * H;
+    const zs = 0.1 * H;
+    ctx.moveTo(zx, zy);
+    ctx.lineTo(zx + zs, zy);
+    ctx.lineTo(zx, zy + zs);
+    ctx.lineTo(zx + zs, zy + zs);
+    ctx.lineWidth = Math.max(1, lw * 0.8);
+    ctx.strokeStyle = NAVY;
+    ctx.stroke();
+  }
+  return { canvas, ax, ay };
+}
+
+function drawStanding(look: number, male: boolean, pose: number, frame: number, px: number): Sprite {
   const H = px;
   const lw = Math.max(1.2, H * 0.08);
   const w = Math.ceil(H * 0.7 + lw * 2);
@@ -46,19 +138,9 @@ function sprite(look: number, male: boolean, frame: number, px: number): Sprite 
   const skinC = SKINS[skin];
   const hairC = HAIRS[hair];
   const clothC = CLOTHES[clothes];
-  const swing = frame === 1 ? 1 : frame === 3 ? -1 : 0;
-
-  const limb = (pts: [number, number][], color: string, width: number) => {
-    ctx.beginPath();
-    ctx.moveTo(pts[0][0] * H, pts[0][1] * H);
-    for (const p of pts.slice(1)) ctx.lineTo(p[0] * H, p[1] * H);
-    ctx.strokeStyle = NAVY;
-    ctx.lineWidth = width + lw * 1.6;
-    ctx.stroke();
-    ctx.strokeStyle = color;
-    ctx.lineWidth = width;
-    ctx.stroke();
-  };
+  const work = pose === Pose.Work;
+  const swing = work ? 0 : frame === 1 ? 1 : frame === 3 ? -1 : 0;
+  const limb = limbOf(ctx, H, lw);
   const limbW = Math.max(1.3, H * 0.08);
 
   // Long hair falls behind the head and shoulders.
@@ -89,11 +171,12 @@ function sprite(look: number, male: boolean, frame: number, px: number): Sprite 
     LEGS,
     limbW,
   );
-  // Arms.
+  // Arms: swinging when walking; reaching down and forward in turn when gathering or eating.
+  const reach = work ? (frame % 2 === 0 ? 1 : -1) : 0;
   limb(
     [
       [-0.09, -0.62],
-      [-0.15 - swing * 0.04, -0.4],
+      work ? [-0.13, reach > 0 ? -0.34 : -0.48] : [-0.15 - swing * 0.04, -0.4],
     ],
     skinC,
     limbW,
@@ -101,7 +184,7 @@ function sprite(look: number, male: boolean, frame: number, px: number): Sprite 
   limb(
     [
       [0.09, -0.62],
-      [0.15 + swing * 0.04, -0.4],
+      work ? [0.13, reach > 0 ? -0.48 : -0.34] : [0.15 + swing * 0.04, -0.4],
     ],
     skinC,
     limbW,
@@ -133,10 +216,7 @@ function sprite(look: number, male: boolean, frame: number, px: number): Sprite 
   ctx.strokeStyle = NAVY;
   ctx.lineWidth = lw;
   ctx.stroke();
-
-  const s = { canvas, ax, ay };
-  sprites.set(key, s);
-  return s;
+  return { canvas, ax, ay };
 }
 
 /** Positions of people this frame, kept between frames to avoid making garbage. */
@@ -144,7 +224,7 @@ let buf = new Float32Array(0);
 let order = new Int32Array(0);
 
 /** Draws everyone on screen, back to front. */
-export function drawPeople(ctx: CanvasRenderingContext2D, view: IsoView, client: SimClient, now: number, selected: number | null) {
+export function drawPeople(ctx: CanvasRenderingContext2D, view: IsoView, client: SimClient, now: number, selected: ReadonlySet<number>) {
   const n = client.population;
   if (!n) return;
   if (buf.length < n * 6) {
@@ -187,7 +267,7 @@ export function drawPeople(ctx: CanvasRenderingContext2D, view: IsoView, client:
     const look = buf[o + 3];
     const flags = buf[o + 4];
     const id = buf[o + 5];
-    if (id === selected) drawSelection(ctx, sx, sy, z);
+    if (selected.has(id)) drawSelection(ctx, sx, sy, z);
     if (figurePx < MIN_FIGURE_PX) {
       const r = Math.max(1.6, 0.06 * z);
       ctx.beginPath();
@@ -199,8 +279,9 @@ export function drawPeople(ctx: CanvasRenderingContext2D, view: IsoView, client:
       ctx.stroke();
       continue;
     }
-    const frame = flags & 1 ? (t + id) % 4 : 0;
-    const sp = sprite(look, (flags & 4) !== 0, frame, Math.min(figurePx, 90));
+    const pose = (flags >> 3) & 3;
+    const frame = flags & 1 ? (t + id) % 4 : pose === Pose.Work ? Math.floor((t + id) / 2) % 2 : 0;
+    const sp = sprite(look, (flags & 4) !== 0, pose, frame, Math.min(figurePx, 90));
     const scale = figurePx > 90 ? figurePx / 90 : 1;
     ctx.drawImage(sp.canvas, sx - (sp.ax * scale) / dpr, sy - (sp.ay * scale) / dpr, (sp.canvas.width * scale) / dpr, (sp.canvas.height * scale) / dpr);
   }

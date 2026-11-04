@@ -313,15 +313,17 @@ function rock(ctx: Ctx, px: number, py: number, r: number, fill: string) {
 }
 
 /** Draws a deposit's marker on a tile. Small objects get a slightly thinner outline so their color still shows. */
-export function deposit(ctx: Ctx, d: number, px: number, py: number, s0: number, lw0: number) {
+export function deposit(ctx: Ctx, d: number, px: number, py: number, s0: number, lw0: number, empty = false) {
   const s = s0 * 1.3;
   const lw = lw0 * 0.75;
   ctx.lineWidth = lw;
-  drawDeposit(ctx, d, px, py, s, lw);
+  drawDeposit(ctx, d, px, py, s, lw, empty);
   ctx.lineWidth = lw0;
 }
 
-function drawDeposit(ctx: Ctx, d: number, px: number, py: number, s: number, lw: number) {
+/** `empty`: used up for now: fished-out water shows nothing, a picked bush shows no berries. */
+function drawDeposit(ctx: Ctx, d: number, px: number, py: number, s: number, lw: number, empty: boolean) {
+  if (empty && d === Deposit.Fish) return;
   switch (d) {
     case Deposit.Stone:
     case Deposit.Iron:
@@ -401,6 +403,7 @@ function drawDeposit(ctx: Ctx, d: number, px: number, py: number, s: number, lw:
       ctx.lineTo(px - 0.11 * s, py);
       ctx.closePath();
       fillStroke(ctx, OBJ.bush);
+      if (empty) break;
       ctx.fillStyle = OBJ.berry;
       for (const [dx, dy] of [
         [-0.05, -0.04],

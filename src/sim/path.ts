@@ -97,7 +97,10 @@ export class PathFinder {
       const cur = this.pop();
       if (this.closed[cur] === run) continue;
       this.closed[cur] = run;
-      if (cur === goal) return this.trace(start, goal);
+      if (cur === goal) {
+        this.expanded += looked;
+        return this.trace(start, goal);
+      }
       if (++looked > limit) break;
       const cx = cur % size;
       const cy = (cur - cx) / size;
@@ -134,7 +137,6 @@ export class PathFinder {
       cur = this.from[cur];
     }
     out.reverse();
-    this.expanded += out.length;
     return out;
   }
 

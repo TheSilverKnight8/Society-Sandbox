@@ -8,8 +8,8 @@ Macro to micro, with a test checkpoint at the end of each stage. Each system's t
 
 1. **Foundation and maps:** Home, Map mode (generate and paint by hand), the isometric view, saving maps in the browser, map files. **(done)**
 2. **The main screen and people**, in three steps, each tested on its own:
-   - 2a. Setups and saved runs; the main screen (the map with the WorldBox-style toolbar and time controls); placing and removing people; inspecting a person; the simulation running in its own thread; a performance check at 2,000+ individuals, which is the test for SPEC 2's Godot rule. **(this step)**
-   - 2b. Needs (food, shelter, rest, safety, job) and survival: gathering from tiles, death from unmet needs or injury, the inspect panel showing needs and the current task, editing a person by hand.
+   - 2a. Setups and saved runs; the main screen (the map with the WorldBox-style toolbar and time controls); placing and removing people; inspecting a person; the simulation running in its own thread; a performance check at 2,000+ individuals, which is the test for SPEC 2's Godot rule. **(done)**
+   - 2b. Needs (food, shelter, rest, safety, job) and survival: gathering from tiles, death from unmet needs or injury, the inspect panel showing needs and the current task, editing a person by hand, and the first imperatives (orders to units). **(this step)**
    - 2c. The life cycle: aging, pairing, births and children, natural death, with their toggles (SPEC 10).
 3. **Settlements, buildings and economy:** settlements founded by individuals, construction, buildings that consume, produce and employ, building placement, jobs (tradesman, trader), goods carried by hand, wealth.
 4. **Cultures, nations and technology:** culture formation and breaks, research, nations (placed and emerging), policies and culture support, technology, diplomacy, officials, influence, unique individuals, succession.
@@ -32,6 +32,14 @@ Macro to micro, with a test checkpoint at the end of each stage. Each system's t
 - **Map files** (export and import). The spec says saving covers setups and runs; files are the only copy that survives Chrome's site data being cleared.
 - **Height tools** (raise, lower, flatten, smooth). Elevation is part of how the isometric view shows the land (see Map), so painting needs a way to set it.
 - **One tab per map:** a map open in one tab cannot be opened in a second one (Web Locks API), because two copies would save over each other.
+
+## Questions settled by the builder in Stage 2b (Caleb can change them)
+
+| Question | What 2b does |
+| --- | --- |
+| How is shelter met before houses exist (Stage 3)? | It is not: the inspect panel shows shelter as unmet ("None yet"), and an unmet shelter does no harm until houses can meet it. |
+| What threatens safety before beasts, criminals and war exist? | Nothing yet: safety shows as met. |
+| When do imperatives arrive? | With the systems they order (the rule above). 2b gives people tasks, so it brings the first unit orders: Move, Gather food, Rest and Stop. Orders to settlements, nations and cultures come with those. |
 
 ## Builder's additions in Stage 2a (not named in the spec; easy to remove)
 
@@ -118,7 +126,7 @@ Macro to micro, with a test checkpoint at the end of each stage. Each system's t
 | Item | Choice |
 | --- | --- |
 | Layout | The map fills the screen. Top left: the setup or run's name, the date, the number of people and whether time is running. Top right: zoom buttons. Along the bottom: the toolbar (see the WorldBox question above). Right side: the inspect panel when a person is chosen. |
-| Toolbar tabs | **Main** (shown first): Play/Pause, 1x 2x 3x, Save setup or Save run, Start again from setup. **Units**: Person (click or drag on land to place adults, one per tile) and Remove (a brush, 1 to 8). **Disasters & effects** and **Imperatives** are shown but cannot be chosen yet; they come in the stages that build what they act on. |
+| Toolbar tabs | **Main** (shown first): Play/Pause, 1x 2x 3x, Save setup or Save run, Start again from setup. **Units**: Person (click or drag on land to place adults, one per tile) and Remove (a brush, 1 to 8). **Imperatives** (from 2b): orders to units. **Disasters & effects** is shown but cannot be chosen yet; it comes in Stage 6. |
 | Inspecting | In the Main tab, clicking a person chooses them (a red ring at their feet) and opens the panel: number, sex, age, health, job, culture, pair and what they are doing (SPEC 4). Job, culture and pair read None until those systems exist. Esc closes it. |
 
 ## People (Stage 2a)
@@ -140,6 +148,45 @@ Measured on a 512 × 512 map at 3x speed, in headless Chrome without a graphics 
 | 5,000 | about 2 ms | 53 / 55 / 60 |
 
 A step has 33 ms at 3x, so there is plenty of room for now. People only walk in 2a; needs, jobs and buildings will cost more per step, so this is measured again at the end of each step of Stage 2. Nothing so far points toward the Godot rule (SPEC 2).
+
+## Needs and survival (Stage 2b)
+
+| Item | Choice |
+| --- | --- |
+| Needs (SPEC 6) | Each person has **food** and **rest**, 0 to 100, shown as bars on the inspect panel. **Shelter** and **safety** are shown but nothing meets or threatens them yet (see the questions above). **Job** reads None until jobs exist (Stage 3). |
+| Food | Lost steadily: from full to hungry (45) in about 45 seconds at 1x, and to empty in about 80 seconds. A hungry person eats food they carry; if they carry none, they go to the nearest berry bush or fish with food left (looking within 14 tiles, then 40, and only when very hungry as far as 90), gather up to 3 food, and eat one. Each food is worth 50. When they are only a little hungry and food is close by, they top up what they carry. |
+| Where food comes from | Berry bushes and fish on the map (SPEC 3 and 8: resources from map tiles). A bush holds up to 6 food and fish up to 8; each grows back by one now and then (about 6 times in 10 months for berries, 8 in 10 for fish). A picked bush is drawn without berries and fished-out water without fish until they grow back. Hunting comes with animals (Stage 6) and farming with buildings (Stage 3). |
+| Sharing food | People claim a share of a bush on their way to it, so a crowd spreads over several bushes instead of all heading for one. |
+| Carrying | The food a person gathers is carried (SPEC 8: goods are carried by individuals); the inspect panel shows it. |
+| Rest | Lost while awake (about 95 seconds from full to tired at 1x); a tired person lies down and sleeps where they are until rested (about 12 seconds). At no rest at all they fall asleep wherever they are. |
+| Health and death (SPEC 10) | With no food at all, health falls from full to nothing in about 25 seconds at 1x, and at no health the person dies (the inspect panel says what of). Fed and rested people slowly heal. Injury from fighting, beasts and disasters comes with those systems. |
+| Living off the land | With foraging only, an area feeds as many people as its bushes and fish grow back for. A crowd placed in one spot eats the area out and many starve; spread out, a Titanic map feeds many thousands. Farming (Stage 3) will raise this. |
+| What it looks like | Sleeping people lie down with a small "z"; gathering and eating people reach down and forward in turn. |
+| Saving | Needs, carried food, orders and the food left on each tile are saved (world format version 2). Setups and runs saved in 2a open with everyone fed and rested and every bush full. |
+
+## Imperatives (Stage 2b, units only)
+
+| Item | Choice |
+| --- | --- |
+| Orders | **Move** (go to a spot), **Gather food** (gather from the nearest food to a spot), **Rest** (lie down and sleep now) and **Stop** (cancel orders and go back to their own choices). |
+| Either way round (SPEC 4) | Choose people first (click one in Main or Imperatives, or drag a box in Imperatives), then pick the order; or pick the order first, then click a person or drag a box. Move and Gather food then ask where (a click on the map). Esc cancels a half-given order. |
+| Groups (SPEC 4) | Only unit orders take a box of people, as the spec says; orders to settlements, nations and cultures will not. |
+| Obeying | An order comes before what a person would choose for themselves. It wakes a sleeper unless they are worn out. Needs keep running while they obey, so an order cannot keep someone from starving; when an order is done they go back to their own choices. |
+
+## Editing people (Stage 2b, SPEC 1)
+
+The inspect panel's **Edit** opens sliders for health, food and rest, a choice of sex, and the age in years. Changes take effect at once, paused or running.
+
+## Performance (Stage 2b)
+
+Measured as in 2a (512 map, 3x, headless Chrome without a graphics card), with everyone placed in one crowded spot so food runs short (the hardest case for path searches):
+
+| People | Simulation step (average, while food runs short) | Frames a second (whole map / mid zoom / close) |
+| --- | --- | --- |
+| 2,000 | 1.5 to 11 ms | 59 / 56 / 58 |
+| 5,000 | 5 to 11 ms (the crowd starves down to about 4,100) | 52 / 55 / 54 |
+
+Two fixes came out of measuring: picked bushes are redrawn together about once a second rather than on every step, and path searches are held to a firm budget per step (12,000 tiles looked at), so a famine makes people wait a moment for a path instead of slowing the whole world. The slowest single step seen was 24 ms, under the 33 ms a step has at 3x.
 
 ## Look
 

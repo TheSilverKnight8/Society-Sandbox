@@ -21,4 +21,6 @@ export interface TileSource {
   terrain: Uint8Array;
   elevation: Uint8Array;
   deposit: Uint8Array;
+  /** 1 where a deposit has been used up for now (berries picked, fish caught); drawn without its goods. */
+  empty?: Uint8Array;
 }

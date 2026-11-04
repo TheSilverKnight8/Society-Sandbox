@@ -1,14 +1,16 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router';
-import { Eraser, Maximize, Minus, Pause, Play, Plus, RotateCcw, Save, User, X } from 'lucide-react';
-import { ButtonLink, Button, IconButton, Spinner, cx } from '../components/ui';
+import { Apple, Eraser, Footprints, Hand, Maximize, Minus, Moon, Pause, Pencil, Play, Plus, RotateCcw, Save, User, X } from 'lucide-react';
+import { ButtonLink, Button, IconButton, Input, Segmented, Spinner, cx } from '../components/ui';
 import { alertDialog, confirmDialog, notify, promptDialog } from '../components/dialogs';
 import { useApp } from '../lib/store';
 import { closeWorld, openWorld, readSetup, saveRunAs, saveWorld, setWorldUnsaved } from '../lib/worlds';
 import { brushTiles } from '../map/paint';
 import { SimClient } from '../sim/client';
 import { CLOTHES, SKINS, unpackLook } from '../sim/look';
-import { MONTHS_PER_YEAR, TICKS_PER_MONTH, TICKS_PER_YEAR, type PersonDetails, type Speed } from '../sim/types';
+import { MONTHS_PER_YEAR, TICKS_PER_MONTH, TICKS_PER_YEAR, type PersonDetails, type PersonEdit, type Speed } from '../sim/types';
+import { Deposit } from '../map/terrain';
+import { STEP } from '../render/iso';
 import { IsoView } from '../render/IsoView';
 import { drawPeople, pickPerson } from '../render/people';
 import { BACKDROP } from '../render/style';
@@ -50,6 +52,22 @@ export function WorldScreenPage() {
   );
 }
 
+/** Builds the "used up" flags for drawing from a world's saved food stock. */
+function emptyFlags(doc: WorldDoc): Uint8Array {
+  const n = doc.size * doc.size;
+  const out = new Uint8Array(n);
+  const stock = doc.state.stock;
+  if (!stock || stock.length !== n) return out;
+  for (let i = 0; i < n; i++) if ((doc.deposit[i] === Deposit.Berries || doc.deposit[i] === Deposit.Fish) && stock[i] === 0) out[i] = 1;
+  return out;
+}
+
+type OrderKind = 'move' | 'gather' | 'rest' | 'stop';
+/** An imperative being given: waiting for who it is for, or for where (SPEC 4: either order works). */
+type Pending = { kind: OrderKind; stage: 'who' | 'where' } | null;
+
+const ORDER_LABEL: Record<OrderKind, string> = { move: 'Move', gather: 'Gather food', rest: 'Rest', stop: 'Stop' };
+
 function WorldScreen({ doc }: { doc: WorldDoc }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const viewRef = useRef<IsoView | null>(null);
@@ -62,8 +80,11 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
   const [speed, setSpeedState] = useState<Speed>(0);
   const [tick, setTick] = useState(doc.state.tick);
   const [population, setPopulation] = useState(doc.state.people.length);
-  const [selected, setSelected] = useState<number | null>(null);
+  /** The people chosen, for inspecting (one) or giving imperatives (one or more). */
+  const [selection, setSelection] = useState<number[]>([]);
   const [details, setDetails] = useState<PersonDetails | null>(null);
+  const [died, setDied] = useState<string | null>(null);
+  const [pending, setPending] = useState<Pending>(null);
   const [busy, setBusy] = useState(false);
   /** The tick the world was at when it was loaded or last saved. */
   const [savedTick, setSavedTick] = useState(doc.state.tick);
@@ -71,16 +92,44 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
   docRef.current = doc;
   const savedTickRef = useRef(savedTick);
   savedTickRef.current = savedTick;
+  const empty = useRef(emptyFlags(doc));
 
-  const live = useRef({ tab, tool, radius, selected });
-  live.current = { tab, tool, radius, selected };
+  const selectedSet = useRef<Set<number>>(new Set());
+  const live = useRef({ tab, tool, radius, pending, selection });
+  live.current = { tab, tool, radius, pending, selection };
+  /** The box being dragged out to choose people, in screen pixels. */
+  const box = useRef<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const atStart = tick === savedTick;
   const isSetup = doc.kind === 'setup';
+  const inspected = selection.length === 1 ? selection[0] : null;
+
+  const choose = (ids: number[]) => {
+    setSelection(ids);
+    selectedSet.current = new Set(ids);
+    setDied(null);
+    if (ids.length !== 1) setDetails(null);
+    clientRef.current?.watch(ids.length === 1 ? ids[0] : null);
+    viewRef.current?.redraw();
+  };
+
+  /** Gives an imperative to the chosen people, at a tile if it needs one. */
+  const giveOrder = (kind: OrderKind, ids: number[], tile?: number) => {
+    const client = clientRef.current;
+    if (!client || !ids.length) return;
+    if (kind === 'stop') client.order(ids, { kind: 'stop' });
+    else client.order(ids, { kind, tile });
+    setWorldUnsaved(true);
+    notify(`${ORDER_LABEL[kind]}: ${ids.length === 1 ? '1 person' : `${ids.length} people`}.`);
+  };
+  const giveRef = useRef(giveOrder);
+  giveRef.current = giveOrder;
+  const chooseRef = useRef(choose);
+  chooseRef.current = choose;
 
   // Start the simulation and the view once, when the screen opens.
   useEffect(() => {
     const canvas = canvasRef.current!;
-    const view = new IsoView(canvas, { size: doc.size, terrain: doc.terrain, elevation: doc.elevation, deposit: doc.deposit });
+    const view = new IsoView(canvas, { size: doc.size, terrain: doc.terrain, elevation: doc.elevation, deposit: doc.deposit, empty: empty.current });
     const client = new SimClient();
     viewRef.current = view;
     clientRef.current = client;
@@ -99,9 +148,30 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
       }
       if (!atStartNow) setWorldUnsaved(true);
       setPopulation(s.ids.length);
+      for (const v of s.stockChanges) {
+        const i = Math.abs(v) - 1;
+        empty.current[i] = v > 0 ? 1 : 0;
+        stockDirty.add(i);
+      }
       view.redraw();
     };
-    client.onWatched = (p) => setDetails(p);
+    // Bushes being picked and growing back are redrawn together about once a second, not on
+    // every step, since each redraw of the terrain costs far more than drawing people.
+    const stockDirty = new Set<number>();
+    const stockTimer = window.setInterval(() => {
+      if (!stockDirty.size) return;
+      view.tilesChanged(stockDirty);
+      stockDirty.clear();
+    }, 1000);
+    // The inspect panel is refreshed a few times a second, not on every step.
+    let lastWatched = 0;
+    client.onWatched = (p, cause) => {
+      const now = performance.now();
+      if (p && now - lastWatched < 250) return;
+      lastWatched = now;
+      setDetails(p);
+      if (!p && cause) setDied(cause);
+    };
     client.onError = (m) => notify(`The simulation stopped with an error: ${m}`, 'warn');
 
     const placed = new Set<number>();
@@ -120,28 +190,95 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
       setWorldUnsaved(true);
     };
 
+    /** People whose feet are inside a screen rectangle. */
+    const inBox = (b: { x0: number; y0: number; x1: number; y1: number }) => {
+      const x0 = Math.min(b.x0, b.x1);
+      const x1 = Math.max(b.x0, b.x1);
+      const y0 = Math.min(b.y0, b.y1);
+      const y1 = Math.max(b.y0, b.y1);
+      const { size, elevation } = view.src;
+      return client.idsWhere(performance.now(), (x, y) => {
+        const h = elevation[Math.min(size - 1, Math.floor(y)) * size + Math.min(size - 1, Math.floor(x))];
+        const [sx, sy] = view.toScreen((x - y) * 0.5, (x + y) * 0.25 - h * STEP);
+        return sx >= x0 && sx <= x1 && sy >= y0 && sy <= y1;
+      });
+    };
+
+    /** A click or a finished box in the Imperatives tab. */
+    const imperativePick = (ids: number[], tile: { x: number; y: number } | null, wasBox: boolean) => {
+      const { pending, selection } = live.current;
+      if (pending?.stage === 'where') {
+        if (!tile || wasBox) return;
+        giveRef.current(pending.kind, selection, tile.y * doc.size + tile.x);
+        setPending(null);
+        return;
+      }
+      chooseRef.current(ids);
+      if (pending?.stage === 'who' && ids.length) {
+        if (pending.kind === 'move' || pending.kind === 'gather') setPending({ kind: pending.kind, stage: 'where' });
+        else {
+          giveRef.current(pending.kind, ids);
+          setPending(null);
+        }
+      }
+    };
+
     view.hooks = {
       onPointerDown: (p) => {
         const { tab } = live.current;
         if (tab === 'main') {
           const id = pickPerson(view, client, p.sx, p.sy, performance.now());
-          setSelected(id);
-          client.watch(id);
-          if (id === null) setDetails(null);
+          chooseRef.current(id === null ? [] : [id]);
+          return;
+        }
+        if (tab === 'imperatives') {
+          box.current = { x0: p.sx, y0: p.sy, x1: p.sx, y1: p.sy };
           return;
         }
         placed.clear();
         act(p.tile);
       },
-      onPointerMove: (p) => act(p.tile),
-      onPointerUp: () => placed.clear(),
-      objects: (ctx, v, now) => drawPeople(ctx, v, client, now, live.current.selected),
+      onPointerMove: (p) => {
+        if (live.current.tab === 'imperatives' && box.current) {
+          box.current.x1 = p.sx;
+          box.current.y1 = p.sy;
+          view.redraw();
+          return;
+        }
+        act(p.tile);
+      },
+      onPointerUp: (p) => {
+        placed.clear();
+        const b = box.current;
+        box.current = null;
+        if (live.current.tab !== 'imperatives' || !b) return;
+        view.redraw();
+        if (Math.hypot(b.x1 - b.x0, b.y1 - b.y0) > 6) imperativePick(inBox(b), null, true);
+        else {
+          const id = pickPerson(view, client, p.sx, p.sy, performance.now());
+          imperativePick(id === null ? [] : [id], p.tile, false);
+        }
+      },
+      objects: (ctx, v, now) => drawPeople(ctx, v, client, now, selectedSet.current),
       overlay: (ctx, v) => {
+        const b = box.current;
+        if (b && Math.hypot(b.x1 - b.x0, b.y1 - b.y0) > 6) {
+          ctx.fillStyle = 'rgba(252, 63, 63, 0.1)';
+          ctx.strokeStyle = 'rgba(252, 63, 63, 0.9)';
+          ctx.lineWidth = 1.5;
+          ctx.setLineDash([6, 4]);
+          const x = Math.min(b.x0, b.x1);
+          const y = Math.min(b.y0, b.y1);
+          ctx.fillRect(x, y, Math.abs(b.x1 - b.x0), Math.abs(b.y1 - b.y0));
+          ctx.strokeRect(x, y, Math.abs(b.x1 - b.x0), Math.abs(b.y1 - b.y0));
+          ctx.setLineDash([]);
+        }
         const h = v.hover;
-        const { tab, tool, radius } = live.current;
-        if (!h || tab !== 'units') return;
+        const { tab, tool, radius, pending } = live.current;
+        const showTile = tab === 'imperatives' && pending?.stage === 'where';
+        if (!h || (tab !== 'units' && !showTile)) return;
         ctx.beginPath();
-        const r = tool === 'person' ? 0.5 : radius - 0.5;
+        const r = tab === 'units' && tool === 'remove' ? radius - 0.5 : 0.5;
         for (const [x, y] of brushTiles(h.x, h.y, r, doc.size)) v.traceTile(ctx, x, y);
         ctx.fillStyle = 'rgba(252, 63, 63, 0.18)';
         ctx.fill();
@@ -154,6 +291,7 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
     view.start();
     if (import.meta.env.DEV) Object.assign(window as unknown as Record<string, unknown>, { __view: view, __sim: client, __pick: pickPerson });
     return () => {
+      window.clearInterval(stockTimer);
       view.destroy();
       client.destroy();
       viewRef.current = null;
@@ -166,7 +304,9 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
   useEffect(() => {
     if (viewRef.current) viewRef.current.animating = speed > 0;
   }, [speed]);
-  useEffect(() => viewRef.current?.redraw(), [tab, tool, radius, selected]);
+  useEffect(() => viewRef.current?.redraw(), [tab, tool, radius, selection, pending]);
+  // Changing tabs drops a half-given imperative.
+  useEffect(() => setPending(null), [tab]);
 
   const setSpeed = (s: Speed) => {
     clientRef.current?.setSpeed(s);
@@ -183,15 +323,28 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
         setSpeed(speed === 0 ? 1 : 0);
       } else if (e.key === '1' || e.key === '2' || e.key === '3') setSpeed(Number(e.key) as Speed);
       else if (e.key === 'Escape') {
-        setSelected(null);
-        setDetails(null);
-        clientRef.current?.watch(null);
-        setTab('main');
+        if (pending) setPending(null);
+        else {
+          choose([]);
+          setTab('main');
+        }
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   });
+
+  const onOrderButton = (kind: OrderKind) => {
+    if (!selection.length) {
+      setPending({ kind, stage: 'who' });
+      return;
+    }
+    if (kind === 'move' || kind === 'gather') setPending({ kind, stage: 'where' });
+    else {
+      giveOrder(kind, selection);
+      setPending(null);
+    }
+  };
 
   const currentState = async () => {
     const client = clientRef.current!;
@@ -253,8 +406,9 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
     if (!setup) return alertDialog({ title: 'The setup is gone', body: 'It was deleted, so there is nothing to start again from.' });
     setSpeed(0);
     clientRef.current?.init(setup.size, setup.terrain, setup.elevation, setup.deposit, setup.state);
-    setSelected(null);
-    setDetails(null);
+    empty.current.set(emptyFlags(setup));
+    viewRef.current?.replaceTiles({ size: setup.size, terrain: doc.terrain, elevation: doc.elevation, deposit: doc.deposit, empty: empty.current });
+    choose([]);
     setSavedTick(setup.state.tick);
     setTick(setup.state.tick);
     setWorldUnsaved(false);
@@ -297,24 +451,32 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
         </IconButton>
       </div>
 
-      {/* Right: the inspected person. */}
-      {selected !== null && (
+      {/* Right: the inspected person, or how many are chosen. */}
+      {inspected !== null && (
         <InspectPanel
           details={details}
-          onClose={() => {
-            setSelected(null);
-            setDetails(null);
-            clientRef.current?.watch(null);
+          died={died}
+          onClose={() => choose([])}
+          onEdit={(edit) => {
+            clientRef.current?.edit(inspected, edit);
+            setWorldUnsaved(true);
           }}
           onRemove={() => {
-            if (selected === null) return;
-            clientRef.current?.removePerson(selected);
+            clientRef.current?.removePerson(inspected);
             setWorldUnsaved(true);
-            setSelected(null);
-            setDetails(null);
-            clientRef.current?.watch(null);
+            choose([]);
           }}
         />
+      )}
+      {selection.length > 1 && (
+        <div className="absolute right-3 top-16 flex w-64 items-center justify-between rounded-xl border border-line bg-surface/97 px-3.5 py-2.5 text-sm shadow-pop">
+          <span>
+            <span className="font-display text-lg uppercase">{selection.length}</span> people chosen
+          </span>
+          <Button size="xs" variant="ghost" onClick={() => choose([])}>
+            Clear
+          </Button>
+        </div>
       )}
 
       {/* Bottom: the toolbar. */}
@@ -330,11 +492,15 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
             <TabButton active={false} disabled title="Disasters and effects come in Stage 6.">
               Disasters &amp; effects
             </TabButton>
-            <TabButton active={false} disabled title="Imperatives come with the systems they give orders to (Stages 2 to 5).">
+            <TabButton active={tab === 'imperatives'} onClick={() => setTab('imperatives')}>
               Imperatives
             </TabButton>
             <span className="ml-auto hidden pr-2 text-xs text-muted lg:block">
-              {tab === 'main' ? 'Click a person to inspect · Space pauses · 1 2 3 set the speed' : 'Left drag places · right drag moves · wheel zooms'}
+              {tab === 'main'
+                ? 'Click a person to inspect · Space pauses · 1 2 3 set the speed'
+                : tab === 'imperatives'
+                  ? 'Click a person or drag a box to choose · right drag moves'
+                  : 'Left drag places · right drag moves · wheel zooms'}
             </span>
           </div>
 
@@ -417,6 +583,31 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
               </p>
             </div>
           )}
+
+          {tab === 'imperatives' && (
+            <div className="flex items-stretch gap-3 p-2">
+              <div className="flex flex-col justify-center gap-1 pr-1">
+                <span className="label-caps text-muted">Units</span>
+                <span className="text-[0.6875rem] text-muted">Settlements, nations and cultures come later</span>
+              </div>
+              <div className="flex gap-1">
+                {(['move', 'gather', 'rest', 'stop'] as const).map((k) => (
+                  <ToolButton key={k} active={pending?.kind === k} label={ORDER_LABEL[k]} onClick={() => onOrderButton(k)}>
+                    {k === 'move' ? <Footprints className="size-5" /> : k === 'gather' ? <Apple className="size-5" /> : k === 'rest' ? <Moon className="size-5" /> : <Hand className="size-5" />}
+                  </ToolButton>
+                ))}
+              </div>
+              <p className="w-64 shrink-0 self-center text-xs text-muted">
+                {pending?.stage === 'who'
+                  ? `${ORDER_LABEL[pending.kind]}: now click a person or drag a box around people. Esc cancels.`
+                  : pending?.stage === 'where'
+                    ? `${ORDER_LABEL[pending.kind]}: now click ${pending.kind === 'move' ? 'where to go' : 'where to look for food'}. Esc cancels.`
+                    : selection.length
+                      ? `${selection.length === 1 ? '1 person' : `${selection.length} people`} chosen. Pick an order.`
+                      : 'Choose people first (click one, or drag a box), or pick an order first and then choose.'}
+              </p>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -456,51 +647,179 @@ function ToolButton({ active, label, onClick, children }: { active: boolean; lab
   );
 }
 
-function InspectPanel({ details, onClose, onRemove }: { details: PersonDetails | null; onClose: () => void; onRemove: () => void }) {
+const TASK_TEXT: Record<string, string> = {
+  idle: 'Standing',
+  sleep: 'Sleeping',
+  gather: 'Gathering food',
+  eat: 'Eating',
+};
+
+function doingText(d: PersonDetails) {
+  if (d.task === 'walk') return d.purpose === 'food' ? 'Going to gather food' : d.purpose === 'order' ? 'Following an order' : 'Walking';
+  return TASK_TEXT[d.task] ?? d.task;
+}
+
+function Bar({ value, warn }: { value: number; warn: boolean }) {
   return (
-    <div className="absolute right-3 top-16 w-64 rounded-xl border border-line bg-surface/97 p-3.5 text-sm shadow-pop">
+    <span className="flex items-center gap-2">
+      <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-raised">
+        <span className={cx('block h-full rounded-full', warn ? 'bg-accent' : 'bg-navy')} style={{ width: `${Math.max(0, Math.min(100, value))}%` }} />
+      </span>
+      <span className="w-7 text-right font-mono text-xs">{value}</span>
+    </span>
+  );
+}
+
+function InspectPanel({
+  details,
+  died,
+  onClose,
+  onEdit,
+  onRemove,
+}: {
+  details: PersonDetails | null;
+  died: string | null;
+  onClose: () => void;
+  onEdit: (e: PersonEdit) => void;
+  onRemove: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const d = details;
+  const needs: string[] = [];
+  if (d) {
+    if (d.food < 45) needs.push(d.food === 0 ? 'Starving' : 'Hungry');
+    if (d.rest < 25) needs.push('Tired');
+    needs.push('Shelter');
+  }
+  return (
+    <div className="absolute right-3 top-16 max-h-[calc(100%-12rem)] w-72 overflow-y-auto rounded-xl border border-line bg-surface/97 p-3.5 text-sm shadow-pop scrollbar-thin">
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-2.5">
-          {details && (
-            <span className="relative block size-9 shrink-0 overflow-hidden rounded-full border-2 border-navy" style={{ background: CLOTHES[unpackLook(details.look).clothes] }}>
-              <span className="absolute left-1/2 top-1 block size-4 -translate-x-1/2 rounded-full border-2 border-navy" style={{ background: SKINS[unpackLook(details.look).skin] }} />
+          {d && (
+            <span className="relative block size-9 shrink-0 overflow-hidden rounded-full border-2 border-navy" style={{ background: CLOTHES[unpackLook(d.look).clothes] }}>
+              <span className="absolute left-1/2 top-1 block size-4 -translate-x-1/2 rounded-full border-2 border-navy" style={{ background: SKINS[unpackLook(d.look).skin] }} />
             </span>
           )}
           <div>
             <p className="label-caps text-muted">Person</p>
-            <p className="font-display text-lg uppercase leading-tight">{details ? `No. ${details.id}` : 'Gone'}</p>
+            <p className="font-display text-lg uppercase leading-tight">{d ? `No. ${d.id}` : died ? 'Died' : 'Gone'}</p>
           </div>
         </div>
         <IconButton label="Close" onClick={onClose}>
           <X className="size-4" />
         </IconButton>
       </div>
-      {details ? (
+      {d ? (
         <>
-          <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+          <dl className="mt-3 grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-1">
             <dt className="text-muted">Sex</dt>
-            <dd>{details.sex === 1 ? 'Male' : 'Female'}</dd>
+            <dd>{d.sex === 1 ? 'Male' : 'Female'}</dd>
             <dt className="text-muted">Age</dt>
-            <dd>{details.ageYears}</dd>
+            <dd>{d.ageYears}</dd>
             <dt className="text-muted">Health</dt>
-            <dd>{details.health} / 100</dd>
+            <dd>
+              <Bar value={d.health} warn={d.health < 40} />
+            </dd>
             <dt className="text-muted">Job</dt>
-            <dd className="text-muted">None</dd>
+            <dd className="text-muted">None (jobs come in Stage 3)</dd>
             <dt className="text-muted">Culture</dt>
             <dd className="text-muted">None</dd>
             <dt className="text-muted">Pair</dt>
             <dd className="text-muted">None</dd>
-            <dt className="text-muted">Doing</dt>
-            <dd>{details.task === 'walk' ? 'Walking' : 'Standing'}</dd>
           </dl>
-          <p className="mt-3 text-xs text-muted">Needs, jobs, cultures and pairs arrive in the next steps.</p>
-          <Button size="xs" variant="danger" className="mt-3" onClick={onRemove}>
-            Remove
-          </Button>
+          <p className="label-caps mt-3 text-muted">Needs</p>
+          <dl className="mt-1 grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-1">
+            <dt className="text-muted">Food</dt>
+            <dd>
+              <Bar value={d.food} warn={d.food < 45} />
+            </dd>
+            <dt className="text-muted">Rest</dt>
+            <dd>
+              <Bar value={d.rest} warn={d.rest < 25} />
+            </dd>
+            <dt className="text-muted">Shelter</dt>
+            <dd className="text-xs text-muted">None yet: houses come in Stage 3</dd>
+            <dt className="text-muted">Safety</dt>
+            <dd className="text-xs">Safe (no threats exist yet)</dd>
+          </dl>
+          <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+            <dt className="text-muted">Doing</dt>
+            <dd>{doingText(d)}</dd>
+            <dt className="text-muted">Unmet needs</dt>
+            <dd>{needs.length ? needs.join(', ') : 'None'}</dd>
+            <dt className="text-muted">Carrying</dt>
+            <dd>{d.carry ? `${d.carry} food` : 'Nothing'}</dd>
+            <dt className="text-muted">Order</dt>
+            <dd>{d.order ? ORDER_LABEL[d.order] : 'None'}</dd>
+          </dl>
+          <div className="mt-3 flex gap-2">
+            <Button size="xs" variant={editing ? 'navy' : 'secondary'} onClick={() => setEditing((e) => !e)}>
+              <Pencil className="size-3.5" />
+              Edit
+            </Button>
+            <Button size="xs" variant="danger" onClick={onRemove}>
+              Remove
+            </Button>
+          </div>
+          {editing && <EditPerson details={d} onEdit={onEdit} />}
         </>
       ) : (
-        <p className="mt-3 text-muted">This person is no longer in the world.</p>
+        <p className="mt-3 text-muted">{died ? `This person died of ${died}.` : 'This person is no longer in the world.'}</p>
       )}
+    </div>
+  );
+}
+
+/** Editing a person by hand (SPEC 1: everything can be modified). */
+function EditPerson({ details, onEdit }: { details: PersonDetails; onEdit: (e: PersonEdit) => void }) {
+  const [age, setAge] = useState(String(details.ageYears));
+  const slider = (label: string, key: 'health' | 'food' | 'rest', value: number) => (
+    <label className="block space-y-1">
+      <span className="flex justify-between text-xs text-muted">
+        <span>{label}</span>
+        <span className="font-mono">{value}</span>
+      </span>
+      <input
+        type="range"
+        className="slider"
+        min={key === 'health' ? 1 : 0}
+        max={100}
+        value={value}
+        style={{ ['--fill' as string]: `${value}%` }}
+        onChange={(e) => onEdit({ [key]: Number(e.target.value) })}
+      />
+    </label>
+  );
+  return (
+    <div className="mt-3 space-y-2.5 rounded-lg border border-line bg-raised/50 p-2.5">
+      {slider('Health', 'health', details.health)}
+      {slider('Food', 'food', details.food)}
+      {slider('Rest', 'rest', details.rest)}
+      <div className="flex items-center gap-2">
+        <span className="w-10 text-xs text-muted">Sex</span>
+        <Segmented
+          size="xs"
+          value={details.sex === 1 ? 'm' : 'f'}
+          onChange={(v) => onEdit({ sex: v === 'm' ? 1 : 0 })}
+          options={[
+            { value: 'f', label: 'Female' },
+            { value: 'm', label: 'Male' },
+          ]}
+        />
+      </div>
+      <label className="flex items-center gap-2">
+        <span className="w-10 text-xs text-muted">Age</span>
+        <Input
+          className="h-8 w-20 text-sm"
+          inputMode="numeric"
+          value={age}
+          onChange={(e) => setAge(e.target.value.replace(/\D/g, '').slice(0, 3))}
+          onBlur={() => age && onEdit({ ageYears: Number(age) })}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && age) onEdit({ ageYears: Number(age) });
+          }}
+        />
+      </label>
     </div>
   );
 }

@@ -28,8 +28,13 @@ function post(msg: FromSim, transfer: Transferable[] = []) {
 function sendSnapshot() {
   if (!world) return;
   const s = world.snapshot(stepMs);
-  post({ type: 'snap', ...s }, [s.ids.buffer, s.pos.buffer, s.look.buffer, s.flags.buffer]);
-  if (watching !== null) post({ type: 'watched', person: world.details(watching) });
+  post({ type: 'snap', ...s }, [s.ids.buffer, s.pos.buffer, s.look.buffer, s.flags.buffer, s.stockChanges.buffer]);
+  if (watching !== null) {
+    const person = world.details(watching);
+    const died = person ? undefined : world.deaths.get(watching);
+    post({ type: 'watched', person, died });
+  }
+  world.deaths.clear();
 }
 
 ctx.onmessage = (e: MessageEvent<ToSim>) => {
@@ -65,6 +70,14 @@ ctx.onmessage = (e: MessageEvent<ToSim>) => {
         break;
       case 'save':
         if (world) post({ type: 'saved', req: m.req, state: world.saveState(), deposit: world.deposit.slice() });
+        break;
+      case 'edit':
+        world?.edit(m.id, m.edit);
+        sendSoon = true;
+        break;
+      case 'order':
+        world?.order(m.ids, m.order);
+        sendSoon = true;
         break;
       case 'spawnTest':
         world?.spawnTest(m.n, m.x, m.y);

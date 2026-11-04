@@ -6,7 +6,7 @@
 
 It is an installable web app (PWA) for Chrome on a computer, hosted on GitHub Pages. Everything runs in the browser. Maps are saved in the browser on your computer and nowhere else.
 
-## What is in it (Stage 1 and Stage 2a)
+## What is in it (Stage 1, Stage 2a and Stage 2b)
 
 | Area | What it does |
 | --- | --- |
@@ -14,10 +14,12 @@ It is an installable web app (PWA) for Chrome on a computer, hosted on GitHub Pa
 | Map mode | The map in an angled isometric view. Paint terrain (10 types), raise, lower, flatten or smooth the ground, and place deposits (stone, iron ore, gold ore, clay, fish, berries). **Generate** makes a new map from a seed and settings. Undo and redo. Saves by itself. |
 | Main screen | Opens a setup or saved run. The toolbar along the bottom: **Main** (Play/Pause, 1x 2x 3x, Save setup or Save run, Start again from setup) and **Units** (place people, remove people). Click a person in Main to inspect them. |
 | Setups and runs | A setup keeps its own copy of the map. Build it, **Save setup**, press Play; **Save run…** keeps a moment of a run as a saved run. |
+| People | Get hungry and tired. They gather berries and fish (which run out and grow back), carry and eat food, and sleep where they stand. Starving takes health; at none they die. Inspect shows their needs and what they are doing; **Edit** changes health, food, rest, sex and age. |
+| Imperatives | Orders to people: Move, Gather food, Rest, Stop. Choose people (click one, or drag a box) then the order, or the order then the people. |
 | Moving around | Wheel zooms toward the pointer. Right or middle drag moves the map; so do WASD and the arrow keys. **+** and **−** zoom; the corner button shows the whole map. |
 | Map files | The download button on a map saves it as one file (`<name>.map.json`). **Import map** adds a map from such a file. |
 
-Coming next (Stage 2b): needs and survival.
+Coming next (Stage 2c): the life cycle (aging, pairing, births, natural death).
 
 ## Run it on your computer
 

@@ -332,7 +332,7 @@ function drawChunkTiles(ctx: CanvasRenderingContext2D, src: TileSource, cx: numb
         const d = deposit[i];
         if (d !== Deposit.None) {
           const ox = (hash2(x, y, 51) - 0.5) * 0.1;
-          drawDepositMark(ctx, d, cxp + ox, cyp + 0.02, 1, lw);
+          drawDepositMark(ctx, d, cxp + ox, cyp + 0.02, 1, lw, src.empty?.[i] === 1);
         }
       } else {
         // Zoomed out: one larger drawing on one tile of each grid x grid patch, at a fixed random spot in the patch.

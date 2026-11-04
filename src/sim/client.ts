@@ -1,4 +1,4 @@
-import type { FromSim, PersonDetails, SimState, Snapshot, Speed, ToSim } from './types';
+import type { FromSim, Order, PersonDetails, PersonEdit, SimState, Snapshot, Speed, ToSim } from './types';
 
 // The app's side of the simulation: starts the worker, sends it commands, and keeps the
 // last two snapshots so people can be drawn moving smoothly between steps.
@@ -16,7 +16,7 @@ export class SimClient {
   private req = 0;
   speed: Speed = 0;
   onSnapshot?: (s: Snapshot) => void;
-  onWatched?: (p: PersonDetails | null) => void;
+  onWatched?: (p: PersonDetails | null, died?: string) => void;
   onError?: (message: string) => void;
 
   constructor() {
@@ -43,7 +43,7 @@ export class SimClient {
         break;
       }
       case 'watched':
-        this.onWatched?.(m.person);
+        this.onWatched?.(m.person, m.died);
         break;
       case 'saved':
         this.saveWaiters.get(m.req)?.({ state: m.state, deposit: m.deposit });
@@ -81,6 +81,23 @@ export class SimClient {
 
   watch(id: number | null) {
     this.send({ type: 'watch', id });
+  }
+
+  edit(id: number, edit: PersonEdit) {
+    this.send({ type: 'edit', id, edit });
+  }
+
+  order(ids: number[], order: Order | { kind: 'stop' }) {
+    if (ids.length) this.send({ type: 'order', ids, order });
+  }
+
+  /** IDs of everyone whose position (blended for drawing) passes the test. */
+  idsWhere(now: number, test: (x: number, y: number) => boolean): number[] {
+    const out: number[] = [];
+    this.forEach(now, (_k, id, x, y) => {
+      if (test(x, y)) out.push(id);
+    });
+    return out;
   }
 
   spawnTest(n: number, x: number, y: number) {
