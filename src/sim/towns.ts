@@ -1,6 +1,7 @@
 import { hash2 } from '../lib/rng';
 import { Deposit, Terrain, isWater } from '../map/terrain';
-import { BUILDINGS, BuildingKind, STAGES, STAGE_NEEDS, anchorFor, footprint, settlementName, type BuildingDef } from './buildings';
+import { BUILDINGS, BuildingKind, STAGES, STAGE_NEEDS, anchorFor, footprint, kindAllowsTerrain, needsShore, settlementName, type BuildingDef } from './buildings';
+import { Economy } from './economy';
 import { ADULT_AGE, TICKS_PER_MONTH, TICKS_PER_YEAR, TileField, type Building, type BuildingView, type Focus, type Person, type Settlement, type SettlementDetails, type SettlementView } from './types';
 import type { World } from './world';
 
@@ -13,7 +14,8 @@ import type { World } from './world';
 // build: homes for the homeless, a storehouse once it is a village, and anything it has
 // been ordered to build. Its adults build: they cut trees and break stone, carry the
 // wood and stone to the site, and then put the building up. A finished home takes in a
-// family, who sleep there (their shelter need is met).
+// family, who sleep there (their shelter need is met). Jobs, workplaces and the store are
+// in economy.ts (Stage 3b).
 
 /** Wood from one tree, and stone broken in one go. */
 const WOOD_PER_TREE = 3;
@@ -83,6 +85,7 @@ export class Towns {
   private occupants = new Map<number, number>();
   buildingsChanged = true;
   settlementsChanged = true;
+  readonly economy: Economy;
 
   constructor(w: World) {
     this.w = w;
@@ -120,6 +123,32 @@ export class Towns {
       if (w.deposit[i] === Deposit.Stone) this.stoneTiles.push(i);
     }
     this.recount();
+    this.economy = new Economy(w, this);
+  }
+
+  byId(id: number) {
+    return this.sById.get(id);
+  }
+
+  /** People living in a settlement, as of the last monthly count. */
+  peopleOf(s: Settlement) {
+    return this.counts.get(s.id)?.people ?? 0;
+  }
+
+  byBuildingId(id: number) {
+    return this.bById.get(id);
+  }
+
+  /** The tile at the middle of a building's footprint. */
+  middleTile(b: Building) {
+    const { w, d } = footprint(b.kind, b.rot);
+    return b.tile + Math.floor(d / 2) * this.w.size + Math.floor(w / 2);
+  }
+
+  /** Where to stand to work a tile that cannot be walked on (fish in deep water): a walkable tile beside it. */
+  approach(t: number) {
+    const a = this.w.approach(t);
+    return a >= 0 ? a : t;
   }
 
   private treeCell(t: number) {
@@ -163,7 +192,7 @@ export class Towns {
     return [x, (t - x) / this.w.size];
   }
 
-  private dist2(a: number, b: number) {
+  dist2(a: number, b: number) {
     const [ax, ay] = this.tileXY(a);
     const [bx, by] = this.tileXY(b);
     return (ax - bx) ** 2 + (ay - by) ** 2;
@@ -185,7 +214,7 @@ export class Towns {
    * that settlement's (or nobody's, if `allowFree`). With `lanes`, no other building may touch
    * it, so a path stays open around every building.
    */
-  areaFree(anchor: number, w: number, d: number, owner?: number, allowFree = false, lanes = false): boolean {
+  areaFree(anchor: number, w: number, d: number, owner?: number, allowFree = false, lanes = false, kind?: BuildingKind): boolean {
     const size = this.w.size;
     const x0 = anchor % size;
     const y0 = (anchor - x0) / size;
@@ -196,6 +225,7 @@ export class Towns {
       for (let x = x0; x < x0 + w; x++) {
         const t = y * size + x;
         if (!this.buildable(t)) return false;
+        if (kind !== undefined && !kindAllowsTerrain(kind, this.w.terrain[t], this.trees[t] === 0)) return false;
         if (owner !== undefined && this.territory[t] !== owner && !(allowFree && this.territory[t] === 0)) return false;
         const e = this.w.elevation[t];
         lo = Math.min(lo, e);
@@ -203,6 +233,7 @@ export class Towns {
       }
     }
     if (hi - lo > 1) return false;
+    if (kind !== undefined && needsShore(kind) && !this.economy.shoreSpot(anchor, w, d)) return false;
     if (lanes) {
       for (let y = y0 - 1; y <= y0 + d; y++) {
         for (let x = x0 - 1; x <= x0 + w; x++) {
@@ -363,6 +394,7 @@ export class Towns {
     // A settlement whose people are all gone stands empty.
     if (c.people === 0 && this.w.state.tick - s.founded > TICKS_PER_YEAR * 2) return;
     this.housePeople(s);
+    this.economy.assignJobs(s);
     const sites = mine.filter((b) => b.progress < 1);
     const maxSites = (s.stage === 'camp' ? 1 : 2) + (s.focus === 'housing' ? 1 : 0);
     if (sites.length >= maxSites + (s.queue.length ? 1 : 0)) return;
@@ -370,7 +402,7 @@ export class Towns {
     while (s.queue.length) {
       const q = s.queue.shift()!;
       const { w, d } = footprint(q.kind, q.rot);
-      if (this.areaFree(q.tile, w, d)) {
+      if (this.areaFree(q.tile, w, d, undefined, false, false, q.kind)) {
         this.addBuilding(q.kind, q.tile, s.id, false, q.rot);
         return;
       }
@@ -382,13 +414,26 @@ export class Towns {
     if (homeless > planned) {
       const kind = s.stage !== 'camp' && stoneNear ? BuildingKind.House : BuildingKind.Hut;
       const spot = this.freeSpot(s, kind);
-      if (spot) this.addBuilding(kind, spot.tile, s.id, false, spot.rot);
-      return;
+      if (spot) {
+        this.addBuilding(kind, spot.tile, s.id, false, spot.rot);
+        return;
+      }
     }
     const hasStore = mine.some((b) => b.kind === BuildingKind.Storehouse);
     if (s.stage !== 'camp' && !hasStore && stoneNear && s.focus !== 'housing') {
       const spot = this.freeSpot(s, BuildingKind.Storehouse);
-      if (spot) this.addBuilding(BuildingKind.Storehouse, spot.tile, s.id, false, spot.rot);
+      if (spot) {
+        this.addBuilding(BuildingKind.Storehouse, spot.tile, s.id, false, spot.rot);
+        return;
+      }
+    }
+    // Workplaces (villages and bigger): food first when it is short, then materials.
+    for (const work of this.economy.nextWorkplaces(s, c.people, mine)) {
+      const spot = this.freeSpot(s, work.kind, work.test);
+      if (spot) {
+        this.addBuilding(work.kind, spot.tile, s.id, false, spot.rot);
+        return;
+      }
     }
   }
 
@@ -398,7 +443,7 @@ export class Towns {
   }
 
   /** A place on the settlement's land for a building, close to its middle, with a lane around it; or null. */
-  private freeSpot(s: Settlement, kind: BuildingKind): { tile: number; rot: 0 | 1 } | null {
+  private freeSpot(s: Settlement, kind: BuildingKind, test?: (anchor: number, w: number, d: number) => boolean): { tile: number; rot: 0 | 1 } | null {
     const w = this.w;
     const [cx, cy] = this.tileXY(s.center);
     for (let r = 2; r <= 22; r++) {
@@ -413,7 +458,7 @@ export class Towns {
           for (const rot of [0, 1] as const) {
             const { w: fw, d: fd } = footprint(kind, rot);
             const anchor = anchorFor(kind, rot, center, w.size);
-            if (this.areaFree(anchor, fw, fd, s.id, false, true)) options.push({ tile: anchor, rot });
+            if (this.areaFree(anchor, fw, fd, s.id, false, true, kind) && (!test || test(anchor, fw, fd))) options.push({ tile: anchor, rot });
           }
         }
       }
@@ -529,6 +574,20 @@ export class Towns {
     if (!site) return false;
     const def = this.def(site);
     const inc = this.incoming.get(site.id) ?? { wood: 0, stone: 0 };
+    // Take wood and stone from the store when it has some.
+    const home = this.sById.get(p.settlement);
+    const store = home ? this.economy.stockOf(home) : undefined;
+    if (home && store) {
+      const kind = site.wood + inc.wood < def.wood && store.wood > 0 ? 'wood' : site.stone + inc.stone < def.stone && store.stone > 0 ? 'stone' : null;
+      if (kind) {
+        inc[kind] += 4;
+        this.incoming.set(site.id, inc);
+        p.site = site.id;
+        p.jobStep = kind === 'wood' ? 'fetch-wood' : 'fetch-stone';
+        w.goTo(p, this.economy.storeTile(home, w.tileOf(p)), 'fetch');
+        return true;
+      }
+    }
     if (site.wood + inc.wood < def.wood) {
       const t = this.nearestTree(site.tile);
       if (t < 0) return false;
@@ -575,13 +634,16 @@ export class Towns {
     this.siteWorkers.clear();
     this.incoming.clear();
     for (const p of this.w.state.people) {
-      if (p.site === undefined) continue;
-      const getting = p.purpose === 'wood' || p.purpose === 'stone' || p.task === 'chop' || p.task === 'quarry';
+      const getting = p.purpose === 'wood' || p.purpose === 'stone' || (p.purpose === 'job' && p.jobStep === 'gather') || p.task === 'chop' || p.task === 'quarry';
       if (getting && p.target !== undefined) this.claimRes(p.target, 1);
+      if (p.site === undefined) continue;
       const inc = this.incoming.get(p.site) ?? { wood: 0, stone: 0 };
       if (p.load) {
         if (p.load.kind === 'wood') inc.wood += p.load.n;
-        else inc.stone += p.load.n;
+        else if (p.load.kind === 'stone') inc.stone += p.load.n;
+      } else if (p.purpose === 'fetch') {
+        if (p.jobStep === 'fetch-stone') inc.stone += 4;
+        else inc.wood += 4;
       } else if (p.purpose === 'wood' || p.task === 'chop') inc.wood += WOOD_PER_TREE;
       else if (p.purpose === 'stone' || p.task === 'quarry') inc.stone += STONE_PER_TRIP;
       else if (p.task === 'build' || p.purpose === 'site') this.siteWorkers.set(p.site, (this.siteWorkers.get(p.site) ?? 0) + 1);
@@ -659,7 +721,7 @@ export class Towns {
         }
         if (p.load) {
           if (p.load.kind === 'wood') b.wood = Math.min(this.def(b).wood, b.wood + p.load.n);
-          else b.stone = Math.min(this.def(b).stone, b.stone + p.load.n);
+          else if (p.load.kind === 'stone') b.stone = Math.min(this.def(b).stone, b.stone + p.load.n);
           delete p.load;
           delete p.site;
           p.task = 'idle';
@@ -694,14 +756,19 @@ export class Towns {
       if (--p.wait > 0) return true;
       const t = p.target;
       delete p.target;
+      // A builder takes one load to their site; a woodcutter or quarryman gathers a few before going to the store.
+      const add = (kind: 'wood' | 'stone', n: number) => {
+        if (p.load && p.load.kind === kind && p.site === undefined) p.load.n += n;
+        else p.load = { kind, n };
+      };
       if (t !== undefined && p.task === 'chop' && this.trees[t] > 0) {
         this.setTrees(t, this.trees[t] - 1);
-        p.load = { kind: 'wood', n: WOOD_PER_TREE };
+        add('wood', WOOD_PER_TREE);
       } else if (t !== undefined && p.task === 'quarry' && w.stock[t] > 0) {
         const n = Math.min(STONE_PER_TRIP, w.stock[t]);
         w.stock[t] -= n;
         if (w.stock[t] === 0) w.tileChange(t, TileField.Empty, 1);
-        p.load = { kind: 'stone', n };
+        add('stone', n);
       } else {
         // Someone else took the last of it.
         delete p.site;
@@ -716,13 +783,15 @@ export class Towns {
         this.dropWork(p);
         return true;
       }
+      const stepBefore = Math.floor(b.progress * 10);
       b.progress += 1 / this.def(b).work;
       if (b.progress >= 1) {
         this.finished(b);
         this.dropWork(p);
         return true;
       }
-      if ((w.state.tick + p.id) % 25 === 0) this.buildingsChanged = true;
+      // Only send buildings again when the drawing changes (it shows tenths of the work).
+      if (Math.floor(b.progress * 10) !== stepBefore) this.buildingsChanged = true;
       if (--p.wait <= 0) this.dropWork(p);
       return true;
     }
@@ -745,14 +814,15 @@ export class Towns {
     if (p.home === undefined) return -1;
     const b = this.bById.get(p.home);
     if (!b || b.progress < 1) return -1;
-    return this.dist2(b.tile, this.w.tileOf(p)) <= HOME_RANGE * HOME_RANGE ? b.tile : -1;
+    const door = this.economy.doorTile(b);
+    return this.dist2(door, this.w.tileOf(p)) <= HOME_RANGE * HOME_RANGE ? door : -1;
   }
 
   /** Where settled people stay near when they have nothing to do: home, or the settlement's fire. */
   anchorTile(p: Person): number {
     if (p.home !== undefined) {
       const b = this.bById.get(p.home);
-      if (b) return b.tile;
+      if (b) return this.economy.doorTile(b);
     }
     if (p.settlement !== undefined) {
       const s = this.sById.get(p.settlement);
@@ -768,7 +838,7 @@ export class Towns {
     if (kind === BuildingKind.Campfire) return this.buildable(center) && this.found(center, []) !== null;
     const { w, d } = footprint(kind, rot);
     const anchor = anchorFor(kind, rot, center, this.w.size);
-    if (!this.areaFree(anchor, w, d)) return false;
+    if (!this.areaFree(anchor, w, d, undefined, false, false, kind)) return false;
     let owner = this.territory[center] || undefined;
     if (owner === undefined) {
       let bestD = 15 * 15;
@@ -816,6 +886,7 @@ export class Towns {
         delete p.site;
         delete p.load;
       }
+      if (p.job === b.id) this.economy.quit(p);
     }
     this.buildingsChanged = true;
   }
@@ -829,7 +900,7 @@ export class Towns {
         // The tile clicked is the building's middle; it must be on the settlement's land or nobody's.
         const { w: fw, d: fd } = footprint(o.building, o.rot);
         const anchor = anchorFor(o.building, o.rot, o.tile, w.size);
-        if (!this.areaFree(anchor, fw, fd, s.id, true)) return;
+        if (!this.areaFree(anchor, fw, fd, s.id, true, false, o.building)) return;
         this.claim(s, Math.max(fw, fd), o.tile);
         s.queue.push({ kind: o.building, tile: anchor, rot: o.rot });
         // Start it now rather than at the next monthly look.
@@ -859,6 +930,7 @@ export class Towns {
           delete p.settlement;
           delete p.home;
           delete p.indoors;
+          this.economy.quit(p);
           p.settleAt = o.tile;
           delete p.order;
           w.goTo(p, o.tile, 'settle');
@@ -884,6 +956,7 @@ export class Towns {
       if (p.indoors) {
         delete p.indoors;
       }
+      this.economy.quit(p);
       this.dropWork(p);
     }
     for (let t = 0; t < this.territory.length; t++) {
@@ -943,13 +1016,19 @@ export class Towns {
       focus: s.focus,
       queue: s.queue.length,
       abandoned: !!s.abandoned,
+      stock: { ...this.economy.stockOf(s) },
+      ...(() => {
+        const j = this.economy.jobCounts(s);
+        return { jobsFilled: j.filled, jobsOffered: j.offered, jobless: j.jobless, lightJobs: j.light };
+      })(),
     };
   }
 
   buildingViews(): BuildingView[] {
     return this.buildings.map((b) => {
       const { w, d } = footprint(b.kind, b.rot);
-      return { id: b.id, kind: b.kind, tile: b.tile, w, d, rot: b.rot ?? 0, settlement: b.settlement ?? 0, progress: b.progress };
+      const look = b.kind === BuildingKind.Farm ? this.economy.cropLook(b) : 0;
+      return { id: b.id, kind: b.kind, tile: b.tile, w, d, rot: b.rot ?? 0, settlement: b.settlement ?? 0, progress: b.progress, look };
     });
   }
 

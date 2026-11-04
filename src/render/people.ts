@@ -1,6 +1,7 @@
 import { CLOTHES, HAIRS, SKINS, unpackLook } from '../sim/look';
 import type { SimClient } from '../sim/client';
 import { AgeLook, Pose, type BuildingView } from '../sim/types';
+import { BUILDINGS } from '../sim/buildings';
 import { drawBuilding } from './buildings';
 import { STEP, isoX, isoY } from './iso';
 import type { IsoView } from './IsoView';
@@ -30,12 +31,12 @@ interface Sprite {
 
 const sprites = new Map<string, Sprite>();
 
-function sprite(look: number, male: boolean, pose: number, frame: number, px: number, elder: boolean): Sprite {
-  const key = `${look}|${male ? 1 : 0}|${pose}|${frame}|${px}|${elder ? 1 : 0}`;
+function sprite(look: number, male: boolean, pose: number, frame: number, px: number, elder: boolean, carrying = false): Sprite {
+  const key = `${look}|${male ? 1 : 0}|${pose}|${frame}|${px}|${elder ? 1 : 0}|${carrying ? 1 : 0}`;
   const hit = sprites.get(key);
   if (hit) return hit;
   if (sprites.size > 4000) sprites.clear();
-  const s = pose === Pose.Sleep ? drawSleeping(look, male, px, elder) : drawStanding(look, male, pose, frame, px, elder);
+  const s = pose === Pose.Sleep ? drawSleeping(look, male, px, elder) : drawStanding(look, male, pose, frame, px, elder, carrying);
   sprites.set(key, s);
   return s;
 }
@@ -125,7 +126,7 @@ function drawSleeping(look: number, male: boolean, px: number, elder: boolean): 
   return { canvas, ax, ay };
 }
 
-function drawStanding(look: number, male: boolean, pose: number, frame: number, px: number, elder: boolean): Sprite {
+function drawStanding(look: number, male: boolean, pose: number, frame: number, px: number, elder: boolean, carrying: boolean): Sprite {
   const H = px;
   const lw = Math.max(1.2, H * 0.08);
   const w = Math.ceil(H * 0.7 + lw * 2);
@@ -194,6 +195,16 @@ function drawStanding(look: number, male: boolean, pose: number, frame: number, 
     skinC,
     limbW,
   );
+  // A sack on the back when carrying goods (SPEC 8: goods are carried by individuals).
+  if (carrying) {
+    ctx.beginPath();
+    ctx.ellipse(0.13 * H, -0.62 * H, 0.1 * H, 0.12 * H, -0.3, 0, Math.PI * 2);
+    ctx.fillStyle = '#c8a26a';
+    ctx.fill();
+    ctx.strokeStyle = NAVY;
+    ctx.lineWidth = lw;
+    ctx.stroke();
+  }
   // Tunic, or a long dress.
   ctx.beginPath();
   ctx.moveTo(-0.1 * H, -0.68 * H);
@@ -307,6 +318,13 @@ export function drawPeople(
   const idx = Array.from(order.subarray(0, count)).sort((a, b) => buf[a * 6 + 2] - buf[b * 6 + 2]);
 
   const dpr = view.dpr;
+  // Flat buildings (fields) lie on the ground: drawn first, under everyone.
+  for (const k of idx) {
+    const o = k * 6;
+    if (buf[o + 3] >= 0) continue;
+    const b = buildings[buf[o + 5]];
+    if (BUILDINGS[b.kind].flat) drawBuilding(ctx, b, buf[o], buf[o + 1], z, dpr, now, 0, STEP);
+  }
   const figurePx = Math.round(HEIGHT * z * dpr);
   const t = Math.floor(now / 140);
   for (const k of idx) {
@@ -318,6 +336,7 @@ export function drawPeople(
     const id = buf[o + 5];
     if (look < 0) {
       const b = buildings[id];
+      if (BUILDINGS[b.kind].flat) continue;
       if (b.kind === 0 && b.settlement === selectedSettlement && selectedSettlement !== null) drawSelection(ctx, sx, sy, z * 1.6);
       drawBuilding(ctx, b, sx, sy, z, dpr, now, flags, STEP);
       continue;
@@ -338,7 +357,7 @@ export function drawPeople(
     }
     const pose = (flags >> 3) & 3;
     const frame = flags & 1 ? (t + id) % 4 : pose === Pose.Work ? Math.floor((t + id) / 2) % 2 : 0;
-    const sp = sprite(look, (flags & 4) !== 0, pose, frame, Math.max(6, Math.min(px, 90)), ageLook === AgeLook.Elder);
+    const sp = sprite(look, (flags & 4) !== 0, pose, frame, Math.max(6, Math.min(px, 90)), ageLook === AgeLook.Elder, (flags & 256) !== 0);
     const scale = px > 90 ? px / 90 : 1;
     ctx.drawImage(sp.canvas, sx - (sp.ax * scale) / dpr, sy - (sp.ay * scale) / dpr, (sp.canvas.width * scale) / dpr, (sp.canvas.height * scale) / dpr);
   }

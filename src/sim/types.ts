@@ -10,13 +10,13 @@ export const TICKS_PER_YEAR = TICKS_PER_MONTH * MONTHS_PER_YEAR;
 /** 0 = paused. Fast-forward is a modest speed-up (SPEC 2). */
 export type Speed = 0 | 1 | 2 | 3;
 
-import type { BuildingKind, SettlementStage } from './buildings';
+import type { BuildingKind, Good, JobKind, SettlementStage } from './buildings';
 
 /** What a person is doing right now. */
-export type Task = 'idle' | 'walk' | 'gather' | 'eat' | 'sleep' | 'chop' | 'quarry' | 'build';
+export type Task = 'idle' | 'walk' | 'gather' | 'eat' | 'sleep' | 'chop' | 'quarry' | 'build' | 'farm' | 'harvest' | 'mine' | 'fish';
 
 /** Why a person is walking. */
-export type Purpose = 'stroll' | 'food' | 'order' | 'home' | 'wood' | 'stone' | 'site' | 'settle';
+export type Purpose = 'stroll' | 'food' | 'order' | 'home' | 'wood' | 'stone' | 'site' | 'settle' | 'job' | 'deliver' | 'fetch' | 'store';
 
 /** An imperative given to a unit by the player (SPEC 4). */
 export interface Order {
@@ -67,8 +67,12 @@ export interface Person {
   /** The settlement they live in, and the building that is their home. */
   settlement?: number;
   home?: number;
-  /** Building materials they are carrying to a construction site. */
-  load?: { kind: 'wood' | 'stone'; n: number };
+  /** Goods they are carrying: materials for a construction site, or what they made at work for the store. */
+  load?: { kind: Good; n: number };
+  /** Their workplace (a building), if they have a job. */
+  job?: number;
+  /** What they are doing for their job, while walking to it. */
+  jobStep?: 'tend' | 'harvest' | 'collect' | 'gather' | 'fetch-wood' | 'fetch-stone';
   /** The construction site they are working for. */
   site?: number;
   /** Where they are going to found a settlement (sent as settlers). */
@@ -92,6 +96,8 @@ export interface Settlement {
   /** Buildings it has been ordered to build, in order, not yet started. */
   queue: { kind: BuildingKind; tile: number; rot: 0 | 1 }[];
   abandoned?: boolean;
+  /** What is in its store. */
+  stock?: Partial<Record<Good, number>>;
 }
 
 export interface Building {
@@ -108,6 +114,10 @@ export interface Building {
   /** Materials brought so far, while it is being built. */
   wood: number;
   stone: number;
+  /** A farm's crop, 0 (just sown) to 1 (ripe). */
+  growth?: number;
+  /** Goods made here waiting to be carried to the store (a farm's harvest). */
+  output?: number;
 }
 
 /** Automatic behaviors the player can turn off (SPEC 10). More are added as their systems are built. */
@@ -159,6 +169,12 @@ export interface SettlementDetails {
   homes: number;
   buildings: { kind: BuildingKind; done: number; building: number }[];
   focus: Focus;
+  stock: Record<Good, number>;
+  /** Jobs filled and offered, adults with no job, and children in light jobs. */
+  jobsFilled: number;
+  jobsOffered: number;
+  jobless: number;
+  lightJobs: number;
   queue: number;
   abandoned: boolean;
 }
@@ -174,6 +190,8 @@ export interface BuildingView {
   rot: 0 | 1;
   settlement: number;
   progress: number;
+  /** How it looks now: a farm's crop (0 bare, 1 shoots, 2 green, 3 ripe), plus 4 with sheaves waiting. */
+  look: number;
 }
 
 /** A settlement, as listed for the app. */
@@ -207,11 +225,16 @@ export interface PersonDetails {
   pregnant: boolean;
   settlement?: string;
   hasHome: boolean;
-  load?: { kind: 'wood' | 'stone'; n: number };
+  load?: { kind: Good; n: number };
+  /** Their job, if any: what it is, whether it is a child's light job, and where. */
+  job?: { kind: JobKind; light: boolean; at: string };
+  /** Whether a job is one of their needs here (adults in a village or bigger), and whether it is met. */
+  jobNeed: 'met' | 'unmet' | 'none';
 }
 
 /** Changes the player can make to a person by hand (SPEC 1: everything can be modified). */
 export interface PersonEdit {
+  leaveJob?: boolean;
   health?: number;
   food?: number;
   rest?: number;
@@ -257,8 +280,8 @@ export interface Snapshot {
   /** x, y per person, in tiles. */
   pos: Float32Array;
   look: Uint16Array;
-  /** Bit 0: walking. Bit 1: facing left. Bit 2: male. Bits 3-4: pose (see Pose). Bits 5-6: age (see AgeLook). Bit 7: indoors (not drawn). */
-  flags: Uint8Array;
+  /** Bit 0: walking. Bit 1: facing left. Bit 2: male. Bits 3-4: pose (see Pose). Bits 5-6: age (see AgeLook). Bit 7: indoors (not drawn). Bit 8: carrying something. */
+  flags: Uint16Array;
   /** Tiles whose drawing changed since the last snapshot, as triples: tile, what (TileField), new value. */
   tileChanges: Int32Array;
   /** The buildings, when they changed since the last snapshot. */

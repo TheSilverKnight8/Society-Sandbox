@@ -338,7 +338,7 @@ export function deposit(ctx: Ctx, d: number, px: number, py: number, s0: number,
 /** `empty`: used up for now: fished-out water shows nothing, a picked bush shows no berries. */
 function drawDeposit(ctx: Ctx, d: number, px: number, py: number, s: number, lw: number, empty: boolean) {
   // Fished-out water and quarried-out stone show nothing until (for fish) they come back.
-  if (empty && (d === Deposit.Fish || d === Deposit.Stone)) return;
+  if (empty && (d === Deposit.Fish || d === Deposit.Stone || d === Deposit.Iron || d === Deposit.Gold)) return;
   switch (d) {
     case Deposit.Stone:
     case Deposit.Iron:

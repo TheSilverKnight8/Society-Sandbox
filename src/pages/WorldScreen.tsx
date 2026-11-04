@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router';
-import { Apple, Eraser, Flag, Flame, Footprints, Hammer, Hand, House, ListChecks, LogOut, Maximize, Minus, Moon, Pause, Pencil, Play, Plus, RotateCcw, Save, Tent, User, Users, Warehouse, X } from 'lucide-react';
+import { Apple, Axe, Blocks, Eraser, Fish, Flag, Flame, Footprints, Hammer, Hand, House, ListChecks, LogOut, Maximize, Minus, Moon, Pause, Pencil, Pickaxe, Play, Plus, RotateCcw, Save, Tent, User, Users, Warehouse, Wheat, X } from 'lucide-react';
 import { ButtonLink, Button, IconButton, Input, Segmented, Spinner, cx } from '../components/ui';
 import { alertDialog, confirmDialog, notify, promptDialog } from '../components/dialogs';
 import { useApp } from '../lib/store';
@@ -10,7 +10,7 @@ import { SimClient } from '../sim/client';
 import { CLOTHES, SKINS, unpackLook } from '../sim/look';
 import { ADULT_AGE, DEFAULT_TOGGLES, ELDER_AGE, MONTHS_PER_YEAR, TICKS_PER_MONTH, TICKS_PER_YEAR, type PersonDetails, type PersonEdit, type Speed, type Toggles } from '../sim/types';
 import { Deposit, Terrain } from '../map/terrain';
-import { BUILDINGS, BuildingKind, STAGE_NAME, anchorFor, footprint } from '../sim/buildings';
+import { BUILDINGS, BuildingKind, GOODS, GOOD_NAME, JOB_NAME, LIGHT_JOB_NAME, STAGE_NAME, anchorFor, footprint, kindAllowsTerrain, needsShore } from '../sim/buildings';
 import { maxTrees } from '../sim/towns';
 import { TileField, type BuildingView, type Focus, type SettlementDetails, type SettlementView } from '../sim/types';
 import { STEP } from '../render/iso';
@@ -64,7 +64,8 @@ function emptyFlags(doc: WorldDoc): Uint8Array {
   const stoneKept = !!doc.state.trees;
   for (let i = 0; i < n; i++) {
     const d = doc.deposit[i];
-    if ((d === Deposit.Berries || d === Deposit.Fish || (stoneKept && d === Deposit.Stone)) && stock[i] === 0) out[i] = 1;
+    const kept = stoneKept && (d === Deposit.Stone || d === Deposit.Iron || d === Deposit.Gold);
+    if ((d === Deposit.Berries || d === Deposit.Fish || kept) && stock[i] === 0) out[i] = 1;
   }
   return out;
 }
@@ -88,8 +89,19 @@ type SettlementOrderKind = 'build' | 'focus' | 'settlers' | 'abandon';
 type PendingSettlement = { kind: SettlementOrderKind; stage: 'which' | 'where'; building?: BuildingKind; focus?: Focus } | null;
 
 const FOCUS_LABEL: Record<Focus, string> = { balanced: 'Balanced', food: 'Food', housing: 'Housing', goods: 'Goods' };
-const BUILD_ORDER_KINDS = [BuildingKind.Hut, BuildingKind.House, BuildingKind.Storehouse] as const;
-const BUILDING_ICON: Record<number, typeof House> = { [BuildingKind.Campfire]: Flame, [BuildingKind.Hut]: Tent, [BuildingKind.House]: House, [BuildingKind.Storehouse]: Warehouse };
+const BUILD_ORDER_KINDS = BUILDINGS.filter((b) => b.buildable).map((b) => b.kind);
+const PLACE_KINDS = BUILDINGS.map((b) => b.kind);
+const BUILDING_ICON: Record<number, typeof House> = {
+  [BuildingKind.Campfire]: Flame,
+  [BuildingKind.Hut]: Tent,
+  [BuildingKind.House]: House,
+  [BuildingKind.Storehouse]: Warehouse,
+  [BuildingKind.Farm]: Wheat,
+  [BuildingKind.Woodcutter]: Axe,
+  [BuildingKind.Quarry]: Blocks,
+  [BuildingKind.Mine]: Pickaxe,
+  [BuildingKind.FishingHut]: Fish,
+};
 
 type OrderKind = 'move' | 'gather' | 'rest' | 'stop';
 /** An imperative being given: waiting for who it is for, or for where (SPEC 4: either order works). */
@@ -233,6 +245,7 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
     // The panels only need to change when the month does (or when time first moves), so
     // the interface is not redrawn for every step.
     let shownMonth = -1;
+    let lastPopAt = 0;
     let shownAtStart = true;
     client.onSnapshot = (s) => {
       const month = Math.floor(s.tick / TICKS_PER_MONTH);
@@ -243,7 +256,12 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
         setTick(s.tick);
       }
       if (!atStartNow) setWorldUnsaved(true);
-      setPopulation(s.ids.length);
+      // The panel's head count is refreshed a few times a second at most (each refresh redraws the panels).
+      const nowMs = performance.now();
+      if (nowMs - lastPopAt > 300 || s.ids.length === 0) {
+        lastPopAt = nowMs;
+        setPopulation(s.ids.length);
+      }
       const tc = s.tileChanges;
       for (let k = 0; k < tc.length; k += 3) {
         const t = tc[k];
@@ -266,13 +284,19 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
         buildingAt.current = at;
         // Tiles newly covered or uncovered are redrawn without (or with) their drawings.
         const cov = covered.current;
-        for (let t = 0; t < cov.length; t++) {
-          const now = at.has(t) ? 1 : 0;
-          if (cov[t] !== now) {
-            cov[t] = now;
+        for (const t of coveredTiles) {
+          if (!at.has(t)) {
+            cov[t] = 0;
             stockDirty.add(t);
           }
         }
+        for (const t of at.keys()) {
+          if (!cov[t]) {
+            cov[t] = 1;
+            stockDirty.add(t);
+          }
+        }
+        coveredTiles = new Set(at.keys());
       }
       if (s.settlements) {
         settlementsRef.current = s.settlements;
@@ -284,6 +308,7 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
     // Bushes being picked, trees cut and land claimed are redrawn together about once a
     // second, not on every step, since each redraw of the terrain costs far more than drawing people.
     const stockDirty = new Set<number>();
+    let coveredTiles = new Set<number>();
     const stockTimer = window.setInterval(() => {
       if (!stockDirty.size) return;
       view.tilesChanged(stockDirty);
@@ -460,13 +485,29 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
               const t = y * doc.size + x;
               v.traceTile(ctx, x, y);
               const ter = doc.terrain[t];
-              const ok = ter === Terrain.Grassland || ter === Terrain.Sand || ter === Terrain.Desert || ter === Terrain.Hills || (ter === Terrain.Forest && trees.current[t] === 0);
+              const ok = kindAllowsTerrain(placing, ter, trees.current[t] === 0);
               if (!ok || buildingAt.current.has(t)) fits = false;
               lo = Math.min(lo, doc.elevation[t]);
               hi = Math.max(hi, doc.elevation[t]);
             }
           }
           if (hi - lo > 1) fits = false;
+          if (needsShore(placing)) {
+            // One of its tiles must be beside water.
+            let shore = false;
+            for (let y = ay - 1; y <= ay + d && !shore; y++) {
+              for (let x = ax - 1; x <= ax + w; x++) {
+                if (x < 0 || y < 0 || x >= doc.size || y >= doc.size) continue;
+                if (x >= ax && x < ax + w && y >= ay && y < ay + d) continue;
+                const ter = doc.terrain[y * doc.size + x];
+                if (ter === Terrain.DeepWater || ter === Terrain.ShallowWater) {
+                  shore = true;
+                  break;
+                }
+              }
+            }
+            if (!shore) fits = false;
+          }
         } else {
           const r = tab === 'units' && tool === 'remove' ? radius - 0.5 : 0.5;
           for (const [x, y] of brushTiles(h.x, h.y, r, doc.size)) v.traceTile(ctx, x, y);
@@ -787,12 +828,12 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
           )}
 
           {tab === 'units' && (
-            <div className="flex items-stretch gap-3 p-2">
+            <div className="flex max-w-[calc(100vw-2rem)] items-stretch gap-3 overflow-x-auto p-2 scrollbar-thin">
               <div className="flex gap-1">
                 <ToolButton active={tool === 'person'} label="Person" onClick={() => setTool('person')}>
                   <User className="size-5" />
                 </ToolButton>
-                {[BuildingKind.Campfire, BuildingKind.Hut, BuildingKind.House, BuildingKind.Storehouse].map((k) => {
+                {PLACE_KINDS.map((k) => {
                   const Icon = BUILDING_ICON[k];
                   return (
                     <ToolButton key={k} active={tool === k} label={BUILDINGS[k].name} onClick={() => setTool(k)}>
@@ -829,7 +870,7 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
                     ? 'Removes everyone and every building inside the brush. Removing a campfire abandons its settlement.'
                     : tool === BuildingKind.Campfire
                       ? 'A campfire founds a camp; unsettled people nearby join it.'
-                      : `Placed buildings appear finished (${footprint(tool, rot).w} by ${footprint(tool, rot).d} tiles; R turns it). They belong to the settlement whose land they are on, or the nearest within 15 tiles.`}
+                      : `${BUILDINGS[tool].name}: ${footprint(tool, rot).w} by ${footprint(tool, rot).d} tiles, R turns it. ${tool === BuildingKind.Farm ? 'Needs grassland or hills. ' : needsShore(tool) ? 'Must stand by water. ' : ''}Placed buildings appear finished and belong to the settlement whose land they are on, or the nearest within 15 tiles.`}
               </p>
             </div>
           )}
@@ -932,6 +973,10 @@ const TASK_TEXT: Record<string, string> = {
   gather: 'Gathering food',
   eat: 'Eating',
   chop: 'Cutting down a tree',
+  farm: 'Tending the field',
+  harvest: 'Harvesting',
+  mine: 'Mining ore',
+  fish: 'Fishing',
   quarry: 'Breaking stone',
   build: 'Building',
 };
@@ -944,6 +989,10 @@ const WALK_TEXT: Record<string, string> = {
   stone: 'Going for stone',
   site: 'Going to a building site',
   settle: 'Going to found a settlement',
+  job: 'Going to work',
+  deliver: 'Taking goods to the store',
+  fetch: 'Fetching materials from the store',
+  store: 'Going to the store for food',
 };
 
 function doingText(d: PersonDetails) {
@@ -995,6 +1044,7 @@ function InspectPanel({
     if (d.food < 45) needs.push(d.food === 0 ? 'Starving' : 'Hungry');
     if (d.rest < 25) needs.push('Tired');
     if (!d.hasHome) needs.push('Shelter');
+    if (d.jobNeed === 'unmet') needs.push('Job');
   }
   return (
     <div className="absolute right-3 top-16 max-h-[calc(100%-12rem)] w-72 overflow-y-auto rounded-xl border border-line bg-surface/97 p-3.5 text-sm shadow-pop scrollbar-thin">
@@ -1028,7 +1078,18 @@ function InspectPanel({
               <Bar value={d.health} warn={d.health < 40} />
             </dd>
             <dt className="text-muted">Job</dt>
-            <dd className="text-muted">None (jobs come in step 3b)</dd>
+            <dd>
+              {d.job ? (
+                <>
+                  {d.job.light ? (LIGHT_JOB_NAME[d.job.kind] ?? JOB_NAME[d.job.kind]) : `Tradesman: ${JOB_NAME[d.job.kind].toLowerCase()}`}
+                  <span className="text-muted"> ({d.job.at})</span>
+                </>
+              ) : (
+                <span className={d.jobNeed === 'unmet' ? 'text-warn' : 'text-muted'}>
+                  {d.jobNeed === 'unmet' ? 'None (no work free)' : !d.settlement ? 'None' : d.ageYears < 14 ? 'None (child)' : 'None (camps have no formal jobs)'}
+                </span>
+              )}
+            </dd>
             <dt className="text-muted">Culture</dt>
             <dd className="text-muted">None</dd>
             <dt className="text-muted">Pair</dt>
@@ -1150,11 +1211,18 @@ function EditPerson({ details, onEdit, onUnpair }: { details: PersonDetails; onE
           }}
         />
       </label>
-      {details.pair !== undefined && (
-        <Button size="xs" variant="secondary" onClick={onUnpair}>
-          End pair
-        </Button>
-      )}
+      <div className="flex flex-wrap gap-1.5">
+        {details.pair !== undefined && (
+          <Button size="xs" variant="secondary" onClick={onUnpair}>
+            End pair
+          </Button>
+        )}
+        {details.job && (
+          <Button size="xs" variant="secondary" onClick={() => onEdit({ leaveJob: true })}>
+            Leave job
+          </Button>
+        )}
+      </div>
     </div>
   );
 }
@@ -1257,7 +1325,28 @@ function SettlementPanel({ details, onClose, onOrder }: { details: SettlementDet
             </dd>
             <dt className="text-muted">Focus</dt>
             <dd>{FOCUS_LABEL[d.focus]}</dd>
+            <dt className="text-muted">Jobs</dt>
+            <dd>
+              {d.stage === 'camp' ? (
+                <span className="text-muted">None yet (camps have no formal jobs)</span>
+              ) : (
+                <>
+                  {d.jobsFilled} of {d.jobsOffered} filled
+                  {d.jobless > 0 && <span className="text-warn">, {d.jobless} without work</span>}
+                  {d.lightJobs > 0 && <span className="text-muted">, {d.lightJobs} children helping</span>}
+                </>
+              )}
+            </dd>
           </dl>
+          <p className="label-caps mt-3 text-muted">Store</p>
+          <ul className="mt-1 grid grid-cols-2 gap-x-4 gap-y-0.5">
+            {GOODS.map((g) => (
+              <li key={g} className="flex justify-between">
+                <span>{GOOD_NAME[g]}</span>
+                <span className={d.stock[g] ? '' : 'text-muted'}>{d.stock[g]}</span>
+              </li>
+            ))}
+          </ul>
           <p className="label-caps mt-3 text-muted">Buildings</p>
           <ul className="mt-1 space-y-0.5">
             {d.buildings.map((b) => (

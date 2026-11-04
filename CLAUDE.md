@@ -12,6 +12,7 @@
 - A map is fixed once a setup is made from it (SPEC 3): the setup keeps its own copy of the terrain, and nothing in a run changes terrain or elevation.
 - Setups and saved runs carry a format version too: changing what is saved means raising `WORLD_FORMAT_VERSION` in `src/world/format.ts` and teaching `upgradeWorld()` to bring older ones forward.
 - The simulation runs in a Web Worker (`src/sim/worker.ts`, `src/sim/world.ts`) and owns the running world. The app talks to it only through `SimClient` (`src/sim/client.ts`) with the messages in `src/sim/types.ts`. Every individual is simulated in full each step, on screen or not (SPEC 2).
+- Settlements and building work are in `src/sim/towns.ts`; jobs, workplaces, the store and what villages build are in `src/sim/economy.ts`; building kinds, sizes, goods and jobs are defined in `src/sim/buildings.ts`.
 - Measure simulation step time and frame rate at 2,000+ people at the end of each step of a stage, and record it in `docs/decisions.md`.
 - The renderer (`src/render/`) reads tiles through `TileSource`; Map mode and the main screen both provide one.
 - Look (Caleb's direction): the environment uses only cream, navy and red and blends of them; objects (trees, deposits, people, buildings) have natural colors; everything has a navy outline (`src/render/style.ts`).

@@ -3,6 +3,7 @@ import { randomLook } from './look';
 import { PathFinder } from './path';
 import { packLook, unpackLook } from './look';
 import { Towns } from './towns';
+import { BUILDINGS } from './buildings';
 import {
   ADULT_AGE,
   AgeLook,
@@ -177,11 +178,11 @@ export class World {
     this.foodTiles = [];
     const fresh = !state.stock || state.stock.length !== n;
     this.stock = fresh ? new Uint8Array(n) : state.stock!;
-    // Stone deposits got a stock in Stage 3a; a world saved before then starts them full.
+    // Stone deposits got a stock in Stage 3a (ore in 3b); a world saved before then starts them full.
     const freshStone = fresh || !state.trees;
     for (let i = 0; i < n; i++) {
       const d = deposit[i];
-      if (d === Deposit.Stone) {
+      if (d === Deposit.Stone || d === Deposit.Iron || d === Deposit.Gold) {
         if (freshStone) this.stock[i] = Towns.stoneStock();
         continue;
       }
@@ -209,6 +210,11 @@ export class World {
   /** Records that a tile's drawing changed (deposit used up or back, trees, land). */
   tileChange(t: number, field: number, value: number) {
     this.tileChanges.push(t, field, value);
+  }
+
+  /** A deposit has been used up (drawn without its goods). */
+  tileEmptied(t: number) {
+    this.tileChange(t, TileField.Empty, 1);
   }
 
   private cellOf(t: number) {
@@ -474,7 +480,7 @@ export class World {
         if (--p.wait <= 0) this.decide(p);
         return;
       default:
-        this.towns.tick(p);
+        if (!this.towns.tick(p)) this.towns.economy.tick(p);
         return;
     }
   }
@@ -517,6 +523,9 @@ export class World {
           }
         }
       }
+      // Settled people eat from their settlement's store when it has food.
+      const store = this.towns.economy.foodStore(p);
+      if (store >= 0) return this.goTo(p, store, 'store');
       // Look close first; only the very hungry look far (far searches cost the most). Children stay closer.
       for (const r of child ? (p.food < 20 ? [14, 40] : [14]) : p.food < 20 ? [14, 40, 90] : [14, 40]) {
         const t = this.findFood(p, this.tileOf(p), r);
@@ -529,8 +538,11 @@ export class World {
       const t = this.findFood(p, this.tileOf(p), 10);
       if (t >= 0) return this.headFor(p, t);
     }
-    // Settled adults build for their settlement.
+    // Their job first (now and then they help with building instead), then building work.
+    const eco = this.towns.economy;
+    if (p.job !== undefined && (p.load || this.rand.next() < 0.85) && eco.work(p)) return;
     if (!child && this.towns.work(p)) return;
+    if (eco.deliver(p)) return;
     // Settled people keep near home (or the settlement's fire) when nothing needs doing.
     const homeTile = this.towns.anchorTile(p);
     if (homeTile >= 0 && !child) {
@@ -645,7 +657,7 @@ export class World {
     const purpose = p.purpose;
     delete p.purpose;
     p.task = 'idle';
-    if (this.towns.arrive(p, purpose)) return;
+    if (this.towns.arrive(p, purpose) || this.towns.economy.arrive(p, purpose)) return;
     if (purpose === 'food' && p.target !== undefined) {
       if (this.stock[p.target] > 0) {
         p.task = 'gather';
@@ -721,7 +733,7 @@ export class World {
   }
 
   /** Where to stand to gather from a tile: the tile itself, or a walkable tile beside it (fish in deep water). */
-  private approach(tile: number): number {
+  approach(tile: number): number {
     if (this.finder.walkable(tile)) return tile;
     const size = this.size;
     const x = tile % size;
@@ -842,6 +854,7 @@ export class World {
     const p = this.byId.get(id);
     if (!p) return;
     const clamp = (v: number) => Math.max(0, Math.min(100, v));
+    if (e.leaveJob) this.towns.economy.quit(p);
     if (e.health !== undefined) p.health = Math.max(1, clamp(e.health));
     if (e.food !== undefined) p.food = clamp(e.food);
     if (e.rest !== undefined) p.rest = clamp(e.rest);
@@ -906,7 +919,20 @@ export class World {
       settlement: this.towns.settlementName(p.settlement),
       hasHome: p.home !== undefined,
       load: p.load ? { ...p.load } : undefined,
+      ...this.jobDetails(p),
     };
+  }
+
+  private jobDetails(p: Person): Pick<PersonDetails, 'job' | 'jobNeed'> {
+    const t = this.towns;
+    const b = p.job !== undefined ? t.byBuildingId(p.job) : undefined;
+    const kind = t.economy.jobOf(p);
+    const child = this.ageOf(p) < ADULT_AGE;
+    const s = p.settlement !== undefined ? t.byId(p.settlement) : undefined;
+    const job = b && kind ? { kind, light: child, at: BUILDINGS[b.kind].name } : undefined;
+    // A job is a need for adults in a village or bigger (camps have no formal jobs).
+    const jobNeed = child || !s || s.stage === 'camp' ? 'none' : job ? 'met' : 'unmet';
+    return { job, jobNeed };
   }
 
   snapshot(stepMs: number): Snapshot {
@@ -915,17 +941,17 @@ export class World {
     const ids = new Int32Array(n);
     const pos = new Float32Array(n * 2);
     const look = new Uint16Array(n);
-    const flags = new Uint8Array(n);
+    const flags = new Uint16Array(n);
     for (let k = 0; k < n; k++) {
       const p = people[k];
       ids[k] = p.id;
       pos[k * 2] = p.x;
       pos[k * 2 + 1] = p.y;
       look[k] = p.look;
-      const pose = p.task === 'sleep' ? Pose.Sleep : p.task === 'gather' || p.task === 'eat' || p.task === 'chop' || p.task === 'quarry' || p.task === 'build' ? Pose.Work : Pose.Stand;
+      const pose = p.task === 'sleep' ? Pose.Sleep : p.task === 'walk' || p.task === 'idle' ? Pose.Stand : Pose.Work;
       const age = (this.state.tick - p.born) / TICKS_PER_YEAR;
       const ageLook = age < 7 ? AgeLook.Young : age < ADULT_AGE ? AgeLook.Child : age >= ELDER_AGE ? AgeLook.Elder : AgeLook.Adult;
-      let f = (p.task === 'walk' ? 1 : 0) | (p.sex === 1 ? 4 : 0) | (pose << 3) | (ageLook << 5) | (p.indoors ? 128 : 0);
+      let f = (p.task === 'walk' ? 1 : 0) | (p.sex === 1 ? 4 : 0) | (pose << 3) | (ageLook << 5) | (p.indoors ? 128 : 0) | (p.load ? 256 : 0);
       const r = p.task === 'walk' ? this.routes.get(p.id) : undefined;
       if (r && r.step < r.tiles.length) {
         // Facing left on screen when heading toward smaller (x - y).

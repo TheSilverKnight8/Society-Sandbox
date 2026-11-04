@@ -31,6 +31,21 @@ const C = {
   log: '#8b5a2b',
   flame: '#f08a24',
   flameHot: '#ffd23f',
+  logWall: '#94653a',
+  logLine: '#6e4626',
+  soil: '#a77b4f',
+  furrow: '#86603a',
+  sprout: '#7fb24f',
+  crop: '#5f9f47',
+  wheat: '#e2bb4c',
+  wheatDark: '#c39a32',
+  fence: '#8b5a2b',
+  net: '#d8cdb4',
+  hull: '#7a5232',
+  ore: '#a5583c',
+  rock: '#9a948b',
+  rockDark: '#7d776f',
+  mineDark: '#2b2622',
 };
 
 /** Shapes, in tile widths. `wall` and `roof` are heights; the walls stand `inset` in from the footprint's edge. */
@@ -49,6 +64,9 @@ const SHAPES: Partial<Record<BuildingKind, Shape>> = {
   [BuildingKind.Hut]: { wall: 0.34, roof: 0.62, inset: 0.22, roofKind: 'pyramid', wallColor: C.wattle, roofColor: C.thatch, roofShade: C.thatchDark, roofLine: C.thatchLine },
   [BuildingKind.House]: { wall: 0.58, roof: 0.62, inset: 0.18, roofKind: 'gable', wallColor: C.plaster, roofColor: C.thatch, roofShade: C.thatchDark, roofLine: C.thatchLine },
   [BuildingKind.Storehouse]: { wall: 0.72, roof: 0.6, inset: 0.16, roofKind: 'gable', wallColor: C.plank, roofColor: C.shingle, roofShade: C.shingleDark, roofLine: C.shingleDark },
+  [BuildingKind.Woodcutter]: { wall: 0.42, roof: 0.42, inset: 0.26, roofKind: 'gable', wallColor: C.logWall, roofColor: C.shingle, roofShade: C.shingleDark, roofLine: C.shingleDark },
+  [BuildingKind.Quarry]: { wall: 0.38, roof: 0.3, inset: 0.24, roofKind: 'gable', wallColor: C.stone, roofColor: C.shingle, roofShade: C.shingleDark, roofLine: C.shingleDark },
+  [BuildingKind.FishingHut]: { wall: 0.36, roof: 0.5, inset: 0.3, roofKind: 'pyramid', wallColor: '#a8784a', roofColor: C.thatch, roofShade: C.thatchDark, roofLine: C.thatchLine },
 };
 
 type P = [number, number];
@@ -149,6 +167,32 @@ function drawHouseLike(ctx: CanvasRenderingContext2D, kind: BuildingKind, sh: Sh
         const h = (wall * k) / 5;
         line(ctx, left(0.02, h), left(0.98, h), C.plankLine, 0.8);
         line(ctx, right(0.02, h), right(0.98, h), C.plankLine, 0.8);
+      }
+    } else if (kind === BuildingKind.Woodcutter) {
+      // Stacked logs.
+      for (let k = 1; k < 4; k++) {
+        const h = (wall * k) / 4;
+        line(ctx, left(0.0, h), left(1, h), C.logLine, 1.1);
+        line(ctx, right(0.0, h), right(1, h), C.logLine, 1.1);
+      }
+    } else if (kind === BuildingKind.Quarry) {
+      // Cut stone blocks, staggered.
+      for (let k = 1; k < 3; k++) {
+        const h = (wall * k) / 3;
+        line(ctx, left(0.02, h), left(0.98, h), C.stoneDark, 0.9);
+        line(ctx, right(0.02, h), right(0.98, h), C.stoneDark, 0.9);
+      }
+      for (let r = 0; r < 3; r++) {
+        for (const t of r % 2 ? [0.25, 0.75] : [0.5]) {
+          line(ctx, left(t, (wall * r) / 3), left(t, (wall * (r + 1)) / 3), C.stoneDark, 0.9);
+          line(ctx, right(t, (wall * r) / 3), right(t, (wall * (r + 1)) / 3), C.stoneDark, 0.9);
+        }
+      }
+    } else if (kind === BuildingKind.FishingHut) {
+      for (let k = 1; k < 4; k++) {
+        const h = (wall * k) / 4;
+        line(ctx, left(0.03, h), left(0.97, h), C.plankLine, 0.8);
+        line(ctx, right(0.03, h), right(0.97, h), C.plankLine, 0.8);
       }
     } else if (kind === BuildingKind.House && rise >= 1) {
       // Timber framing: posts, a rail and braces.
@@ -276,6 +320,233 @@ function chimney(ctx: CanvasRenderingContext2D, base: P, rh: number) {
   );
 }
 
+/** Props beside a finished workplace that say what it is. Drawn in front of its walls. */
+function drawProps(ctx: CanvasRenderingContext2D, kind: BuildingKind, w: number, d: number) {
+  const a = w / 2;
+  const b = d / 2;
+  if (kind === BuildingKind.Woodcutter) {
+    // A pile of logs (ends showing) by the right wall, and a chopping block with an axe.
+    const base = pt(a - 0.1, b - 0.55);
+    for (const [dx, dy] of [
+      [0, 0],
+      [0.1, 0.05],
+      [0.2, 0.1],
+      [0.05, -0.08],
+      [0.15, -0.03],
+    ]) {
+      ctx.beginPath();
+      ctx.ellipse(base[0] + dx, base[1] + dy, 0.05, 0.05, 0, 0, Math.PI * 2);
+      ctx.fillStyle = '#c99a62';
+      ctx.fill();
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(base[0] + dx, base[1] + dy, 0.018, 0, Math.PI * 2);
+      ctx.strokeStyle = C.logLine;
+      ctx.stroke();
+      ctx.strokeStyle = NAVY;
+    }
+    const blk = pt(-a + 0.3, b - 0.05);
+    poly(ctx, [[blk[0] - 0.06, blk[1]], [blk[0] + 0.06, blk[1]], [blk[0] + 0.06, blk[1] - 0.07], [blk[0] - 0.06, blk[1] - 0.07]], C.log);
+    ctx.beginPath();
+    ctx.ellipse(blk[0], blk[1] - 0.07, 0.06, 0.025, 0, 0, Math.PI * 2);
+    ctx.fillStyle = '#c99a62';
+    ctx.fill();
+    ctx.stroke();
+    beam(ctx, [blk[0] - 0.01, blk[1] - 0.08], [blk[0] + 0.1, blk[1] - 0.22], C.log, 1.2);
+    poly(ctx, [[blk[0] - 0.03, blk[1] - 0.07], [blk[0] + 0.03, blk[1] - 0.1], [blk[0] + 0.01, blk[1] - 0.04]], '#b8bcc4');
+  } else if (kind === BuildingKind.Quarry) {
+    // Cut blocks stacked in front.
+    const base = pt(a - 0.15, b - 0.2);
+    const cube = (x: number, y: number, s: number) => {
+      poly(ctx, [[x - s, y], [x, y + s / 2], [x, y + s / 2 - s * 0.8], [x - s, y - s * 0.8]], C.stone);
+      poly(ctx, [[x, y + s / 2], [x + s, y], [x + s, y - s * 0.8], [x, y + s / 2 - s * 0.8]], C.stoneDark);
+      poly(ctx, [[x - s, y - s * 0.8], [x, y + s / 2 - s * 0.8], [x + s, y - s * 0.8], [x, y - s / 2 - s * 0.8]], '#cfcac1');
+    };
+    cube(base[0] - 0.08, base[1], 0.08);
+    cube(base[0] + 0.1, base[1] + 0.06, 0.08);
+    cube(base[0] + 0.01, base[1] - 0.06, 0.08);
+  } else if (kind === BuildingKind.FishingHut) {
+    // A drying rack with a net, and a small boat pulled up.
+    const r0 = pt(a - 0.05, -b + 0.35);
+    const r1 = pt(a - 0.05, b - 0.35);
+    beam(ctx, r0, [r0[0], r0[1] - 0.32], C.log, 1.2);
+    beam(ctx, r1, [r1[0], r1[1] - 0.32], C.log, 1.2);
+    poly(ctx, [[r0[0], r0[1] - 0.3], [r1[0], r1[1] - 0.3], [r1[0], r1[1] - 0.08], [r0[0], r0[1] - 0.08]], C.net);
+    ctx.beginPath();
+    for (let k = 1; k < 4; k++) {
+      const t = k / 4;
+      ctx.moveTo(r0[0] + (r1[0] - r0[0]) * t, r0[1] - 0.3 + (r1[1] - r0[1]) * t);
+      ctx.lineTo(r0[0] + (r1[0] - r0[0]) * t, r0[1] - 0.08 + (r1[1] - r0[1]) * t);
+    }
+    ctx.moveTo(r0[0], r0[1] - 0.19);
+    ctx.lineTo(r1[0], r1[1] - 0.19);
+    ctx.strokeStyle = '#a8a08a';
+    ctx.stroke();
+    ctx.strokeStyle = NAVY;
+    beam(ctx, [r0[0], r0[1] - 0.31], [r1[0], r1[1] - 0.31], C.log, 1.2);
+    const bt = pt(-a + 0.25, b + 0.05);
+    ctx.beginPath();
+    ctx.moveTo(bt[0] - 0.22, bt[1] - 0.06);
+    ctx.quadraticCurveTo(bt[0], bt[1] + 0.1, bt[0] + 0.22, bt[1] - 0.06);
+    ctx.lineTo(bt[0] - 0.22, bt[1] - 0.06);
+    ctx.closePath();
+    ctx.fillStyle = C.hull;
+    ctx.fill();
+    ctx.stroke();
+  }
+}
+
+/** A mine: a rocky mound with a timbered entrance and a cart of ore. */
+function drawMine(ctx: CanvasRenderingContext2D, w: number, d: number, progress: number) {
+  const a = w / 2 - 0.12;
+  const b = d / 2 - 0.12;
+  const h = 0.55 * Math.min(1, 0.4 + progress);
+  // The mound: a low pyramid of rock with a rounded top.
+  const L = pt(-a, b);
+  const B = pt(a, b);
+  const R = pt(a, -b);
+  const top = pt(-0.1, -0.1, h);
+  poly(ctx, [L, B, [top[0] + 0.04, top[1] + 0.02], [top[0] - 0.08, top[1]]], C.rock);
+  poly(ctx, [B, R, [top[0] + 0.06, top[1] - 0.02], [top[0] + 0.04, top[1] + 0.02]], C.rockDark);
+  // Rocks on it.
+  for (const [u, v, s] of [
+    [-0.2, 0.25, 0.06],
+    [0.25, 0.1, 0.05],
+    [0.05, -0.3, 0.05],
+  ]) {
+    const p = pt(u, v, h * 0.35);
+    ctx.beginPath();
+    ctx.ellipse(p[0], p[1], s, s * 0.6, 0, 0, Math.PI * 2);
+    ctx.fillStyle = C.stone;
+    ctx.fill();
+    ctx.stroke();
+  }
+  if (progress < 0.6) return;
+  // Entrance on the front-left face.
+  const e = pt(-0.05, b - 0.02);
+  const ew = 0.13;
+  const eh = 0.3;
+  poly(ctx, [[e[0] - ew, e[1] - ew / 2], [e[0] + ew, e[1] + ew / 2], [e[0] + ew, e[1] + ew / 2 - eh], [e[0] - ew, e[1] - ew / 2 - eh]], C.mineDark);
+  beam(ctx, [e[0] - ew, e[1] - ew / 2], [e[0] - ew, e[1] - ew / 2 - eh], C.timber, 1.8);
+  beam(ctx, [e[0] + ew, e[1] + ew / 2], [e[0] + ew, e[1] + ew / 2 - eh], C.timber, 1.8);
+  beam(ctx, [e[0] - ew - 0.03, e[1] - ew / 2 - eh], [e[0] + ew + 0.03, e[1] + ew / 2 - eh], C.timber, 1.8);
+  if (progress < 1) return;
+  // Rails and a cart of ore.
+  const c0 = pt(-0.05, b + 0.1);
+  beam(ctx, [c0[0] - 0.05, c0[1] - 0.02], [c0[0] - 0.2, c0[1] + 0.06], '#777', 0.8);
+  beam(ctx, [c0[0] + 0.05, c0[1] + 0.02], [c0[0] - 0.1, c0[1] + 0.1], '#777', 0.8);
+  const cx = c0[0] - 0.1;
+  const cy = c0[1] + 0.03;
+  poly(ctx, [[cx - 0.1, cy - 0.12], [cx + 0.1, cy - 0.12], [cx + 0.07, cy - 0.02], [cx - 0.07, cy - 0.02]], C.plank);
+  for (const [dx, dy] of [
+    [-0.05, -0.14],
+    [0.02, -0.16],
+    [0.06, -0.13],
+  ]) {
+    ctx.beginPath();
+    ctx.arc(cx + dx, cy + dy, 0.03, 0, Math.PI * 2);
+    ctx.fillStyle = C.ore;
+    ctx.fill();
+    ctx.stroke();
+  }
+  for (const dx of [-0.05, 0.05]) {
+    ctx.beginPath();
+    ctx.arc(cx + dx, cy, 0.025, 0, Math.PI * 2);
+    ctx.fillStyle = '#555';
+    ctx.fill();
+    ctx.stroke();
+  }
+}
+
+/** A farm: a fenced field of tilled soil whose crop grows and ripens; sheaves wait at its corner after a harvest. */
+function drawFarm(ctx: CanvasRenderingContext2D, w: number, d: number, look: number, progress: number) {
+  const a = w / 2 - 0.05;
+  const b = d / 2 - 0.05;
+  poly(ctx, [pt(-a, b), pt(a, b), pt(a, -b), pt(-a, -b)], C.soil);
+  // Furrows along the longer side.
+  const along = w >= d;
+  const n = Math.round((along ? d : w) * 3);
+  ctx.beginPath();
+  for (let k = 1; k < n; k++) {
+    const f = -1 + (2 * k) / n;
+    const p0 = along ? pt(-a + 0.05, f * b) : pt(f * a, -b + 0.05);
+    const p1 = along ? pt(a - 0.05, f * b) : pt(f * a, b - 0.05);
+    ctx.moveTo(p0[0], p0[1]);
+    ctx.lineTo(p1[0], p1[1]);
+  }
+  ctx.strokeStyle = C.furrow;
+  ctx.stroke();
+  ctx.strokeStyle = NAVY;
+  const crop = progress < 1 ? 0 : look & 3;
+  if (crop > 0) {
+    // Plants along each furrow.
+    const per = Math.round((along ? w : d) * 4);
+    for (let k = 1; k < n; k++) {
+      const f = -1 + (2 * k) / n;
+      for (let j = 0; j < per; j++) {
+        const g = -1 + (2 * (j + 0.5)) / per;
+        const p = along ? pt(g * (a - 0.08), f * b) : pt(f * a, g * (b - 0.08));
+        if (crop === 1) {
+          line(ctx, [p[0], p[1]], [p[0], p[1] - 0.05], C.sprout, 1.1);
+        } else {
+          const tall = crop === 3 ? 0.13 : 0.09;
+          const col = crop === 3 ? C.wheat : C.crop;
+          ctx.beginPath();
+          ctx.moveTo(p[0] - 0.03, p[1]);
+          ctx.lineTo(p[0] - 0.035, p[1] - tall * 0.8);
+          ctx.moveTo(p[0], p[1]);
+          ctx.lineTo(p[0], p[1] - tall);
+          ctx.moveTo(p[0] + 0.03, p[1]);
+          ctx.lineTo(p[0] + 0.035, p[1] - tall * 0.8);
+          ctx.strokeStyle = col;
+          const w0 = ctx.lineWidth;
+          ctx.lineWidth = w0 * 1.2;
+          ctx.stroke();
+          ctx.lineWidth = w0;
+          ctx.strokeStyle = NAVY;
+          if (crop === 3) {
+            ctx.beginPath();
+            ctx.ellipse(p[0], p[1] - tall, 0.014, 0.03, 0, 0, Math.PI * 2);
+            ctx.fillStyle = C.wheatDark;
+            ctx.fill();
+          }
+        }
+      }
+    }
+  }
+  // A low fence of posts and two rails around the field (going up side by side while it is being built).
+  const corners: P[] = [pt(-a, -b), pt(a, -b), pt(a, b), pt(-a, b)];
+  const fenceH = 0.12;
+  const sides = progress >= 1 ? 4 : Math.floor(progress * 4);
+  if (progress < 1) drawPiles(ctx, w, d);
+  for (let k = 0; k < sides; k++) {
+    const p0 = corners[k];
+    const p1 = corners[(k + 1) % 4];
+    const len = k % 2 === 0 ? w : d;
+    const posts = Math.max(2, Math.round(len * 1.5));
+    for (let j = 0; j <= posts; j++) {
+      const t = j / posts;
+      const p: P = [p0[0] + (p1[0] - p0[0]) * t, p0[1] + (p1[1] - p0[1]) * t];
+      beam(ctx, p, [p[0], p[1] - fenceH], C.fence, 0.9);
+    }
+    for (const hh of [fenceH * 0.45, fenceH * 0.9]) beam(ctx, [p0[0], p0[1] - hh], [p1[0], p1[1] - hh], C.fence, 0.7);
+  }
+  // Sheaves waiting to be carried to the store.
+  if (look & 4) {
+    const c = pt(a - 0.35, b - 0.25);
+    for (const [dx, dy] of [
+      [0, 0],
+      [0.13, 0.05],
+      [-0.1, 0.06],
+    ]) {
+      const x = c[0] + dx;
+      const y = c[1] + dy;
+      poly(ctx, [[x - 0.05, y], [x + 0.05, y], [x + 0.025, y - 0.16], [x - 0.025, y - 0.16]], C.wheat);
+      line(ctx, [x - 0.035, y - 0.07], [x + 0.035, y - 0.07], C.wheatDark, 1.2);
+    }
+  }
+}
+
 function drawCampfire(ctx: CanvasRenderingContext2D, frame: number) {
   // Stones in a ring.
   for (let k = 0; k < 8; k++) {
@@ -339,7 +610,7 @@ let cachePixels = 0;
 const CACHE_PIXELS = 30_000_000;
 
 function sprite(b: BuildingView, step: number, frame: number, px: number, plinth: number): Sprite {
-  const key = `${b.kind}|${b.w}x${b.d}|${step}|${frame}|${px}|${plinth}`;
+  const key = `${b.kind}|${b.w}x${b.d}|${step}|${frame}|${px}|${plinth}|${b.look}`;
   const hit = cache.get(key);
   if (hit) return hit;
   if (cachePixels > CACHE_PIXELS) {
@@ -348,7 +619,7 @@ function sprite(b: BuildingView, step: number, frame: number, px: number, plinth
   }
   const { w, d } = b;
   const sh = SHAPES[b.kind];
-  const tall = sh ? sh.wall + sh.roof : 0.4;
+  const tall = sh ? sh.wall + sh.roof : b.kind === BuildingKind.Mine ? 0.7 : 0.4;
   const halfW = (w + d) / 4 + 0.3;
   const up = (w + d) / 8 + tall + 0.3;
   const down = (w + d) / 8 + plinth + 0.25;
@@ -365,11 +636,17 @@ function sprite(b: BuildingView, step: number, frame: number, px: number, plinth
   ctx.lineCap = 'round';
   ctx.lineWidth = Math.max(1, px * 0.03) / px;
   ctx.strokeStyle = NAVY;
-  if (b.kind === BuildingKind.Campfire || !sh) drawCampfire(ctx, frame);
+  if (b.kind === BuildingKind.Farm) drawFarm(ctx, w, d, b.look, step / 10);
+  else if (b.kind === BuildingKind.Mine) {
+    drawMine(ctx, w, d, step / 10);
+    if (step < 10) drawPiles(ctx, w, d);
+  } else if (b.kind === BuildingKind.Campfire || !sh) drawCampfire(ctx, frame);
   else {
     const progress = step / 10;
-    if (progress >= 1) drawHouseLike(ctx, b.kind, sh, w, d, 1, 1, plinth);
-    else {
+    if (progress >= 1) {
+      drawHouseLike(ctx, b.kind, sh, w, d, 1, 1, plinth);
+      drawProps(ctx, b.kind, w, d);
+    } else {
       // Being built: posts at the corners and along the walls, walls rising, then the roof.
       const rise = Math.min(1, progress / 0.7);
       const roofUp = progress < 0.7 ? 0 : (progress - 0.7) / 0.3;

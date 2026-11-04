@@ -12,8 +12,8 @@ Macro to micro, with a test checkpoint at the end of each stage. Each system's t
    - 2b. Needs (food, shelter, rest, safety, job) and survival: gathering from tiles, death from unmet needs or injury, the inspect panel showing needs and the current task, editing a person by hand, and the first imperatives (orders to units). **(done)**
    - 2c. The life cycle: aging, pairing, births and children, natural death, with their toggles (SPEC 10). **(done)**
 3. **Settlements, buildings and economy**, in three steps:
-   - 3a. Settlements founded by people and growing through stages; land with borders; trees and stone as materials; building huts, houses and a storehouse; homes meeting the shelter need; placing buildings; the settlement panel and settlement imperatives; the settlement founding rule. **(this step)**
-   - 3b. Jobs and production: farms, woodcutters, quarries, mines, fishing and the like; hauling to the storehouse; children's light jobs; the job need.
+   - 3a. Settlements founded by people and growing through stages; land with borders; trees and stone as materials; building huts, houses and a storehouse; homes meeting the shelter need; placing buildings; the settlement panel and settlement imperatives; the settlement founding rule. **(done; buildings made bigger afterwards at Caleb's request)**
+   - 3b. Jobs and production: farms, woodcutters, quarries, mines, fishing and the like; hauling to the storehouse; children's light jobs; the job need. **(this step)**
    - 3c. Goods, coins and trade: workshops, traders between settlements, wages, wealth and inheritance; the town and city stages; fences and gates for towns and above.
 4. **Cultures, nations and technology:** culture formation and breaks, research, nations (placed and emerging), policies and culture support, technology, diplomacy, officials, influence, unique individuals, succession.
 5. **Military and war:** soldier types, weapons and equipment, armies and their leaders, battles with group orders and individual resolution, war declarations.
@@ -60,6 +60,12 @@ Macro to micro, with a test checkpoint at the end of each stage. Each system's t
 | SPEC 10 lists "Pairing, births, and aging (turning these off freezes the population)" as one item. One switch or three? | One switch, as the spec groups them. It can be split into three. |
 | Who pairs with whom? | One man and one woman, since pairs are what births come from (SPEC 6: "specific individuals pair up and have children"). Close relatives (parent and child, brothers and sisters, half-siblings) never pair. |
 | How do children get fed? | From what a parent nearby carries when there is any; otherwise they forage close by themselves. Households come with houses (Stage 3). |
+
+## Builder's additions in Stage 3b (not named in the spec; easy to remove)
+
+- **Leave job** in the inspect panel's Edit (SPEC 1: everything can be modified).
+- **A sack on the back** of anyone carrying goods, so hauling can be seen.
+- **Workers stop when the store is full** of what they make (see below), so forests are not cut down for nothing.
 
 ## Builder's additions in Stage 3a (not named in the spec; easy to remove)
 
@@ -224,11 +230,28 @@ A step has 33 ms at 3x, so there is plenty of room for now. People only walk in 
 | The rule (SPEC 10) | "Settlement founding by units" in Rules. Off: nobody founds a settlement by themselves; people still join settlements, and campfires and settlers still work. |
 | Saving | Settlements, buildings, land, trees standing and stone left are saved (world format version 4; version 5 adds which way a building is turned). Older setups and runs open with no settlements, every tree standing and every stone deposit full. Buildings saved before buildings grew keep their corner tile and take their new size from there. |
 
+## Jobs and production (Stage 3b)
+
+| Item | Choice |
+| --- | --- |
+| When jobs start | At the village stage (Caleb: camps have no formal jobs). A camp's people forage and build; once it is a village, its adults take jobs at its workplaces. |
+| Jobs (SPEC 6) | Every job is a tradesman's job at a building ("generic tradesman (works at various buildings)"): farmer at a farm, woodcutter at a woodcutter's lodge, quarryman at a quarry, miner at a mine, fisher at a fishing hut. Soldiers, traders and officials come with the stages that need them. Each month a village gives open jobs to adults without one, nearest workplace first. |
+| Children's light jobs (SPEC 6) | From age 8, children may take a light job: farm helper (tends at half speed) or fisher's helper (catches less). One light job per farm and per fishing hut. |
+| The job need (SPEC 6) | For adults in a village or bigger. The inspect panel shows the job, or "None (no work free)" in red, and lists Job among unmet needs. Like shelter before houses, an unmet job need does no harm yet; it will matter for wages and wealth (3c). |
+| Workplaces (SPEC 8) | Farm (3 by 3 field; 4 wood; 2 farmers and a helper; grassland or hills). Woodcutter's lodge (2 by 2; 8 wood; 2 woodcutters). Quarry (2 by 2; 6 wood, 4 stone; 2 quarrymen). Mine (2 by 2; 10 wood, 4 stone; 3 miners; iron or gold ore near). Fishing hut (2 by 2; 8 wood; 2 fishers and a helper; at the water's edge). |
+| Farming | Farmers tend their field from March to November; nothing grows in winter, so what is stored carries the village through it. With two farmers a field ripens about two and a half times a year and each harvest gives 10 food, left in sheaves at the field's corner until farmers carry it to the store. The field shows bare soil, shoots, green crop and ripe wheat. |
+| Gathering jobs | Woodcutters cut trees within 20 tiles of their lodge and carry 6 wood (two trees) at a time; quarrymen break stone within 28 tiles (4 at a time); miners dig iron or gold ore within 28 tiles (2 a dig, 4 at a time); fishers catch fish within 14 tiles (2 a catch). Iron and gold deposits now hold 20 ore each and are used up like stone. |
+| The store (SPEC 8: goods are carried by individuals) | Workers carry what they make to their settlement's store: its storehouse, or its campfire while it has none. It holds food, wood, stone, iron ore and gold ore, shown in the settlement panel. When it holds plenty of something (3 food per person plus 30; 80 wood; 60 stone; 40 iron or gold ore), workers who make it stop for now and help build or rest. |
+| Using the store | Hungry people in a settlement eat from its store (taking up to 3 food) when it has food and is within 40 tiles, and forage only when it has none. Builders take wood and stone from the store when it has some (up to 4 at a time), and fetch them from the land themselves when it has none. |
+| What villages build | After homes and a storehouse: farms (or a fishing hut where there is fish near) while their food does not keep up with their people (a farm feeds about 16, a fishing hut about 10), and a woodcutter's lodge, quarry and mine when there are trees, stone and ore near and they have none. A balanced village puts food first when its store is short of it; the food focus always puts food first; the goods focus puts materials first. If there is no room for one workplace, it tries the next. |
+| Doors | People go in and out of buildings at the tile in front of their door: to sleep at home, and to the storehouse. |
+| Saving | Jobs, stores, crops and ore left are saved (world format version 6). Worlds from 3a open with no jobs, empty stores and iron and gold deposits full. |
+
 ## Settlement imperatives (Stage 3a)
 
 | Order | What it does |
 | --- | --- |
-| Build (a hut, house or storehouse) | Click a settlement, then where (the building's middle; R turns it): on its land, or on unclaimed land beside it (it claims the spot). It goes first in what the settlement builds. |
+| Build (any building: homes, storehouse, workplaces) | Click a settlement, then where (the building's middle; R turns it): on its land, or on unclaimed land beside it (it claims the spot). It goes first in what the settlement builds. |
 | Focus | Balanced, food, housing or goods. In 3a housing lets it build one more home at a time and goods brings the storehouse forward; food and goods do more once jobs and workshops exist (3b, 3c). |
 | Send settlers | About a quarter of its people (whole families) leave and walk to the spot clicked, where the first to arrive founds a new settlement and the rest join it. |
 | Abandon | Asks first. Its people leave, its land is given up, its campfire and unfinished buildings go, and its finished buildings stand empty for anyone to take over. |
@@ -266,6 +289,10 @@ The life cycle adds a monthly check per person and a grid of people rebuilt ever
 ## Performance (Stage 3a)
 
 2,000 people placed in 40 groups across a Titanic map founded about 90 settlements in the first year; by year 6 there were 2,360 people, 66 villages, 590 buildings and 1,700 people housed. Simulation step: 2 to 2.7 ms on average, at most 9 ms (Node, same code as the worker). In headless Chrome at 3x, with all of that on screen: 57 frames a second for the whole map and 56 at mid zoom. With the bigger buildings: 2 to 4 ms a step (at most 14 ms in the first busy year) and 51 to 57 frames a second.
+
+## Performance (Stage 3b)
+
+With jobs, hauling and workplaces: 2,000 people placed in 40 groups grew to 2,340 by year 5 with 105 settlements and 54 villages. Simulation step 3 to 3.7 ms on average, at most 18 ms (Node). In headless Chrome at 3x: 52 frames a second for the whole map and 57 at mid zoom. Two fixes came out of measuring: buildings are sent from the simulation only when their drawing changes (not on every bit of building work), and the main screen works out which tiles lie under buildings from the buildings themselves rather than by going over every tile of the map.
 
 ## Look
 
