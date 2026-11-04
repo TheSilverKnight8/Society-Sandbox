@@ -1,14 +1,15 @@
 import type { MapData, MapMeta } from '../map/types';
+import type { WorldDoc, WorldMeta } from '../world/types';
 
 // The app's storage in this browser (IndexedDB). Nothing leaves the computer.
 //
-//   maps     MapMeta by map ID: the small list Home shows (name, size, dates, thumbnail)
-//   mapData  { id, version, map } by map ID: the whole map, tile arrays included
-//
-// Later stages add stores for setups and saved runs.
+//   maps       MapMeta by map ID: the small list Home shows (name, size, dates, thumbnail)
+//   mapData    { id, version, map } by map ID: the whole map, tile arrays included
+//   worlds     WorldMeta by ID: setups and saved runs, as Home lists them
+//   worldData  { id, version, doc } by ID: a whole setup or saved run
 
 const DB_NAME = 'society-sandbox';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 export interface StoredMap {
   id: string;
@@ -28,6 +29,8 @@ function open(): Promise<IDBDatabase> {
       const db = req.result;
       if (!db.objectStoreNames.contains('maps')) db.createObjectStore('maps', { keyPath: 'id' });
       if (!db.objectStoreNames.contains('mapData')) db.createObjectStore('mapData', { keyPath: 'id' });
+      if (!db.objectStoreNames.contains('worlds')) db.createObjectStore('worlds', { keyPath: 'id' });
+      if (!db.objectStoreNames.contains('worldData')) db.createObjectStore('worldData', { keyPath: 'id' });
     };
     req.onsuccess = () => {
       const db = req.result;
@@ -81,6 +84,39 @@ export async function deleteMapData(id: string): Promise<void> {
   const tx = db.transaction(['maps', 'mapData'], 'readwrite');
   tx.objectStore('maps').delete(id);
   tx.objectStore('mapData').delete(id);
+  return finished(tx);
+}
+
+export interface StoredWorld {
+  id: string;
+  /** The world format version it was saved in (see world/format.ts). */
+  version: number;
+  doc: WorldDoc;
+}
+
+export async function listWorlds(): Promise<WorldMeta[]> {
+  const db = await open();
+  return result(db.transaction('worlds').objectStore('worlds').getAll() as IDBRequest<WorldMeta[]>);
+}
+
+export async function readWorld(id: string): Promise<StoredWorld | undefined> {
+  const db = await open();
+  return result(db.transaction('worldData').objectStore('worldData').get(id) as IDBRequest<StoredWorld | undefined>);
+}
+
+export async function writeWorld(meta: WorldMeta, stored: StoredWorld): Promise<void> {
+  const db = await open();
+  const tx = db.transaction(['worlds', 'worldData'], 'readwrite');
+  tx.objectStore('worlds').put(meta);
+  tx.objectStore('worldData').put(stored);
+  return finished(tx);
+}
+
+export async function deleteWorldData(id: string): Promise<void> {
+  const db = await open();
+  const tx = db.transaction(['worlds', 'worldData'], 'readwrite');
+  tx.objectStore('worlds').delete(id);
+  tx.objectStore('worldData').delete(id);
   return finished(tx);
 }
 

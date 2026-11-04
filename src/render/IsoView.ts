@@ -21,6 +21,9 @@ export interface TilePointer {
   button: number;
   shift: boolean;
   alt: boolean;
+  /** The pointer's position on the canvas, in CSS pixels. */
+  sx: number;
+  sy: number;
 }
 
 export interface ViewHooks {
@@ -28,7 +31,9 @@ export interface ViewHooks {
   onPointerMove?(p: TilePointer): void;
   onPointerUp?(p: TilePointer): void;
   onHover?(tile: { x: number; y: number } | null): void;
-  /** Draws on top of the terrain, in screen pixels. */
+  /** Draws things standing on the terrain (people, later buildings), in screen pixels. */
+  objects?(ctx: CanvasRenderingContext2D, view: IsoView, now: number): void;
+  /** Draws on top of everything, in screen pixels. */
   overlay?(ctx: CanvasRenderingContext2D, view: IsoView): void;
 }
 
@@ -58,6 +63,12 @@ export class IsoView {
   private lastPointer: { x: number; y: number } | null = null;
   /** Milliseconds the last frame took to draw (for checking speed). */
   frameMs = 0;
+  /** Draw every frame (while things move), not only when something changed. */
+  animating = false;
+  /** The terrain as last drawn for this camera, so frames where only people move just copy it. */
+  private layer = document.createElement('canvas');
+  private layerKey = '';
+  private terrainDirty = true;
 
   constructor(canvas: HTMLCanvasElement, src: TileSource) {
     this.canvas = canvas;
@@ -113,12 +124,14 @@ export class IsoView {
   replaceTiles(src: TileSource) {
     this.src = src;
     this.chunks = new TerrainChunks(src);
+    this.terrainDirty = true;
     this.redraw();
   }
 
   /** Tells the view these tiles (indexes) changed. */
   tilesChanged(tiles: Iterable<number>) {
     this.chunks.invalidate(tiles);
+    this.terrainDirty = true;
     this.redraw();
   }
 
@@ -199,17 +212,38 @@ export class IsoView {
     const dt = Math.min(0.05, (now - this.lastFrame) / 1000);
     this.lastFrame = now;
     this.keyPan(dt);
-    if (this.dirty) {
+    if (this.dirty || this.animating) {
       this.dirty = false;
       const t0 = performance.now();
-      this.draw();
-      this.frameMs = performance.now() - t0;
+      this.draw(now);
+      this.frameMs = this.frameMs * 0.9 + (performance.now() - t0) * 0.1;
     }
     this.raf = requestAnimationFrame(this.frame);
   };
 
-  private draw() {
+  private draw(now: number) {
     const ctx = this.ctx;
+    const W = this.canvas.width;
+    const H = this.canvas.height;
+    const key = `${this.cam.x},${this.cam.y},${this.cam.zoom},${W},${H}`;
+    if (key !== this.layerKey || this.terrainDirty) {
+      if (this.layer.width !== W || this.layer.height !== H) {
+        this.layer.width = W;
+        this.layer.height = H;
+      }
+      this.terrainDirty = this.drawTerrain(this.layer.getContext('2d', { alpha: false })!);
+      this.layerKey = key;
+    }
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(this.layer, 0, 0);
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    this.hooks.objects?.(ctx, this, now);
+    this.hooks.overlay?.(ctx, this);
+    if (this.terrainDirty) this.dirty = true;
+  }
+
+  /** Draws the terrain for the current camera. Returns true if some chunks are still to be drawn. */
+  private drawTerrain(ctx: CanvasRenderingContext2D): boolean {
     const { zoom } = this.cam;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     ctx.fillStyle = BACKDROP;
@@ -240,9 +274,8 @@ export class IsoView {
       this.chunks.render(b, level);
       rendered++;
     }
-    const pending = rendered < todo.length;
 
-    // Then copy the pictures to the screen, back to front; a chunk not drawn yet shows another level's picture.
+    // Then copy the pictures, back to front; a chunk not drawn yet shows another level's picture.
     for (const b of visible) {
       const e = this.chunks.get(b.cx, b.cy, level) ?? this.chunks.fallback(b.cx, b.cy, level);
       if (!e) continue;
@@ -250,9 +283,7 @@ export class IsoView {
       const scale = zoom / e.level;
       ctx.drawImage(e.canvas, sx, sy, e.canvas.width * scale, e.canvas.height * scale);
     }
-
-    this.hooks.overlay?.(ctx, this);
-    if (pending) this.dirty = true;
+    return rendered < todo.length;
   }
 
   /** Traces the top face of a tile, in screen pixels, for overlays. */
@@ -271,7 +302,9 @@ export class IsoView {
 
   private pointerInfo(e: PointerEvent): TilePointer {
     const r = this.canvas.getBoundingClientRect();
-    return { tile: this.pick(e.clientX - r.left, e.clientY - r.top), button: e.button, shift: e.shiftKey, alt: e.altKey };
+    const sx = e.clientX - r.left;
+    const sy = e.clientY - r.top;
+    return { tile: this.pick(sx, sy), button: e.button, shift: e.shiftKey, alt: e.altKey, sx, sy };
   }
 
   private onWheel = (e: WheelEvent) => {

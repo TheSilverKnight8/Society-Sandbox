@@ -1,10 +1,12 @@
-import type { ReactNode } from 'react';
-import { NavLink, useLocation } from 'react-router';
-import { AlertTriangle, Check, Loader2, Map as MapIcon } from 'lucide-react';
+import type { MouseEvent, ReactNode } from 'react';
+import { NavLink, useLocation, useNavigate } from 'react-router';
+import { AlertTriangle, Castle, Check, Hourglass, Loader2, Map as MapIcon } from 'lucide-react';
 import { AppMark } from '../graphics/AppMark';
 import { CroswellLogo, CroswellMark } from '../graphics/Logo';
 import { APP_NAME } from '../config';
-import { flushSaves, useApp } from '../lib/store';
+import { flushSaves, getState, useApp } from '../lib/store';
+import { setWorldUnsaved } from '../lib/worlds';
+import { confirmDialog } from './dialogs';
 import { cx } from './ui';
 
 const navClass = ({ isActive }: { isActive: boolean }) =>
@@ -21,19 +23,37 @@ const navClass = ({ isActive }: { isActive: boolean }) =>
 export function AppShell({ children }: { children: ReactNode }) {
   const { pathname } = useLocation();
   const open = useApp((s) => s.open);
-  const isHome = !pathname.startsWith('/map/');
+  const world = useApp((s) => s.world);
+  const navigate = useNavigate();
+  const isHome = !pathname.startsWith('/map/') && !pathname.startsWith('/world/');
+
+  /** Leaving a world with unsaved changes asks first. */
+  const guard = (to: string) => async (e: MouseEvent) => {
+    if (!getState().worldUnsaved) return;
+    e.preventDefault();
+    const ok = await confirmDialog({ title: 'Leave without saving?', body: 'Changes since the last save are lost.', confirm: 'Leave', danger: true });
+    if (!ok) return;
+    setWorldUnsaved(false);
+    navigate(to);
+  };
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden">
       <header className="z-30 flex h-14 shrink-0 items-center gap-2 border-b border-line bg-surface px-4">
-        <NavLink to="/" className="mr-3 flex items-center gap-2.5">
+        <NavLink to="/" onClick={guard('/')} className="mr-3 flex items-center gap-2.5">
           <AppMark size={32} />
           <span className="font-display text-xl uppercase leading-none tracking-wide">{APP_NAME}</span>
         </NavLink>
         <nav className="flex min-w-0 items-center gap-1">
-          <NavLink to="/" end className={navClass}>
+          <NavLink to="/" end onClick={guard('/')} className={navClass}>
             Home
           </NavLink>
+          {world.kind === 'ready' && (
+            <NavLink to={`/world/${world.doc.id}`} className={navClass}>
+              {world.doc.kind === 'setup' ? <Castle className="size-4" /> : <Hourglass className="size-4" />}
+              <span className="max-w-64 truncate">{world.doc.name}</span>
+            </NavLink>
+          )}
           {open.kind === 'ready' && (
             <NavLink to={`/map/${open.map.id}`} className={navClass}>
               <MapIcon className="size-4" />
@@ -43,6 +63,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         </nav>
         <div className="flex-1" />
         {open.kind === 'ready' && <SaveIndicator />}
+        {world.kind === 'ready' && <WorldSaveState />}
       </header>
 
       {isHome ? (
@@ -72,6 +93,16 @@ export function AppShell({ children }: { children: ReactNode }) {
         </>
       )}
     </div>
+  );
+}
+
+function WorldSaveState() {
+  const unsaved = useApp((s) => s.worldUnsaved);
+  return (
+    <span className={cx('flex items-center gap-1.5 text-sm', unsaved ? 'text-warn' : 'text-muted')} aria-live="polite">
+      {unsaved ? <AlertTriangle className="size-4" /> : <Check className="size-4" />}
+      {unsaved ? 'Not saved' : 'Saved'}
+    </span>
   );
 }
 

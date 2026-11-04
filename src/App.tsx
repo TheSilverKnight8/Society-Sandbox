@@ -5,6 +5,7 @@ import { DialogHost } from './components/dialogs';
 import { flushSaves, hasUnsavedChanges, initApp } from './lib/store';
 import { Home } from './pages/Home';
 import { MapEditorPage } from './pages/MapEditor';
+import { WorldScreenPage } from './pages/WorldScreen';
 
 export default function App() {
   useEffect(() => {
@@ -33,6 +34,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/map/:id" element={<MapEditorPage />} />
+          <Route path="/world/:id" element={<WorldScreenPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </AppShell>

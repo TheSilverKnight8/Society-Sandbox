@@ -6,17 +6,18 @@
 
 It is an installable web app (PWA) for Chrome on a computer, hosted on GitHub Pages. Everything runs in the browser. Maps are saved in the browser on your computer and nowhere else.
 
-## What is in it (Stage 1)
+## What is in it (Stage 1 and Stage 2a)
 
 | Area | What it does |
 | --- | --- |
-| Home | Lists your maps with a picture of each. **New map** asks for a name, a size (Small 128, Medium 256, Large 384 or Titanic 512 tiles a side) and whether to start from a generated map or a blank sea. |
-| Map mode | The map in an angled isometric view. Paint terrain (10 types), raise, lower, flatten or smooth the ground, and place deposits (stone, iron ore, gold ore, clay, fish, berries). **Generate** makes a new map from a seed and settings (shape, land, mountains, forests, deserts, rivers, resources). Undo and redo. |
+| Home | Setups, saved runs and maps, each with a picture. **New map** asks for a name, a size (Small 128, Medium 256, Large 384 or Titanic 512 tiles a side) and whether to start from a generated map or a blank sea. **New setup** asks for a name and a map. |
+| Map mode | The map in an angled isometric view. Paint terrain (10 types), raise, lower, flatten or smooth the ground, and place deposits (stone, iron ore, gold ore, clay, fish, berries). **Generate** makes a new map from a seed and settings. Undo and redo. Saves by itself. |
+| Main screen | Opens a setup or saved run. The toolbar along the bottom: **Main** (Play/Pause, 1x 2x 3x, Save setup or Save run, Start again from setup) and **Units** (place people, remove people). Click a person in Main to inspect them. |
+| Setups and runs | A setup keeps its own copy of the map. Build it, **Save setup**, press Play; **Save run…** keeps a moment of a run as a saved run. |
 | Moving around | Wheel zooms toward the pointer. Right or middle drag moves the map; so do WASD and the arrow keys. **+** and **−** zoom; the corner button shows the whole map. |
-| Saving | Changes save by themselves a moment after the last edit, in the browser's storage (IndexedDB). The header shows Saving / Saved. |
-| Map files | The download button on a map saves it as one file (`<name>.map.json`). **Import map** adds a map from such a file. Files carry a format version, so files exported today still open after the app changes. |
+| Map files | The download button on a map saves it as one file (`<name>.map.json`). **Import map** adds a map from such a file. |
 
-Coming next (Stage 2, to be confirmed): the main screen, setups built on a map, and the first individuals.
+Coming next (Stage 2b): needs and survival.
 
 ## Run it on your computer
 
@@ -46,9 +47,11 @@ In Chrome's storage for the site's address, on this computer only. The published
 ```
 src/
   map/          map shape, terrain and deposit types, generator, painting tools, files and versions
-  render/       isometric projection, terrain chunk pictures, the view (camera, drawing, picking)
-  lib/          browser storage (IndexedDB), app state and autosave, noise and random numbers
-  pages/        Home (the map list), Map mode
+  sim/          the simulation (runs in a Web Worker): world, people, paths; the app's client for it
+  world/        setups and saved runs: their shape and format version
+  render/       isometric projection, terrain chunk pictures, people, the view (camera, drawing, picking)
+  lib/          browser storage (IndexedDB), app state, setups and runs, noise and random numbers
+  pages/        Home, Map mode, the main screen
   components/   app frame, dialogs, shared pieces
   graphics/     app icon, Croswell Industries logo
 docs/           the builder's decisions

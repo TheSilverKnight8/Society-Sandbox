@@ -2,12 +2,15 @@
 
 The spec leaves implementation to Claude Code (SPEC 12: "Implementation details beyond the platform ... are not specified", and specific content, names, numbers and balance are code's). Each choice is written down here so Caleb can read it, test it and change it. Anything about *what* the app does that is not here or in `SPEC.md` is asked first.
 
-## Build stages (proposed; to be agreed with Caleb at the Stage 1 checkpoint)
+## Build stages (proposed after Stage 1; Caleb said to move on with them)
 
 Macro to micro, with a test checkpoint at the end of each stage. Each system's toggles (SPEC 10) and imperatives (SPEC 4) are built in the stage that builds the system, not saved for the end.
 
-1. **Foundation and maps:** Home, Map mode (generate and paint by hand), the isometric view, saving maps in the browser, map files. **(this stage)**
-2. **The main screen and people:** setups made from a map; the main screen (the map with the WorldBox-style toolbar and time controls); placing units; individuals with needs (food, shelter, rest, safety), gathering from tiles, and the full life cycle (aging, pairing, births, death); inspecting an individual; saving setups and mid-run states. Ends with a performance check at 2,000+ individuals, which is the test for SPEC 2's Godot rule.
+1. **Foundation and maps:** Home, Map mode (generate and paint by hand), the isometric view, saving maps in the browser, map files. **(done)**
+2. **The main screen and people**, in three steps, each tested on its own:
+   - 2a. Setups and saved runs; the main screen (the map with the WorldBox-style toolbar and time controls); placing and removing people; inspecting a person; the simulation running in its own thread; a performance check at 2,000+ individuals, which is the test for SPEC 2's Godot rule. **(this step)**
+   - 2b. Needs (food, shelter, rest, safety, job) and survival: gathering from tiles, death from unmet needs or injury, the inspect panel showing needs and the current task, editing a person by hand.
+   - 2c. The life cycle: aging, pairing, births and children, natural death, with their toggles (SPEC 10).
 3. **Settlements, buildings and economy:** settlements founded by individuals, construction, buildings that consume, produce and employ, building placement, jobs (tradesman, trader), goods carried by hand, wealth.
 4. **Cultures, nations and technology:** culture formation and breaks, research, nations (placed and emerging), policies and culture support, technology, diplomacy, officials, influence, unique individuals, succession.
 5. **Military and war:** soldier types, weapons and equipment, armies and their leaders, battles with group orders and individual resolution, war declarations.
@@ -20,8 +23,7 @@ Macro to micro, with a test checkpoint at the end of each stage. Each system's t
 | --- | --- |
 | App name | "Society Sandbox", from the spec's working title. |
 | "Generated or painted by hand" (SPEC 3): either one, or both on the same map? | Both: a map can start generated or as a blank sea, and either can be painted over or regenerated. |
-| The build stages above | Proposed, not agreed. |
-| SPEC 4 asks for the main screen to be identical to WorldBox's, toolbar included. I could not find a reliable written description of WorldBox's current layout. | Not needed until Stage 2. A screenshot of the WorldBox screen as Caleb wants it copied would settle it. Map mode's toolbar (tabs above a row of tool buttons, along the bottom) is a stand-in in the same spirit. |
+| SPEC 4 asks for the main screen to be identical to WorldBox's, toolbar included. | What could be confirmed in writing (WorldBox wiki, Main tab page): powers are grouped in a row of tabs; the Main tab shows when no other tab is chosen and holds Pause and the speed control (1x, 2x, 3x, 5x). Where things sit on screen could not be confirmed. Stage 2a puts the toolbar along the bottom of the map with a Main tab holding the time controls, then Units, Disasters & effects and Imperatives. A screenshot of the WorldBox screen as Caleb wants it copied would settle the rest. |
 
 ## Builder's additions in Stage 1 (not named in the spec; easy to remove)
 
@@ -30,6 +32,13 @@ Macro to micro, with a test checkpoint at the end of each stage. Each system's t
 - **Map files** (export and import). The spec says saving covers setups and runs; files are the only copy that survives Chrome's site data being cleared.
 - **Height tools** (raise, lower, flatten, smooth). Elevation is part of how the isometric view shows the land (see Map), so painting needs a way to set it.
 - **One tab per map:** a map open in one tab cannot be opened in a second one (Web Locks API), because two copies would save over each other.
+
+## Builder's additions in Stage 2a (not named in the spec; easy to remove)
+
+- **Remove** tool in Units (a brush), and a **Remove** button on the inspect panel. SPEC 1 says everything can be modified by hand; editing a person's details comes in 2b.
+- **Start again from setup**: reloads the setup's saved starting point (asks first if there are unsaved changes).
+- **Leaving with unsaved changes asks first**, and the header shows Saved or Not saved.
+- **One tab per world**, as for maps.
 
 ## Platform
 
@@ -74,10 +83,68 @@ Macro to micro, with a test checkpoint at the end of each stage. Each system's t
 | Picking | The tile under the pointer is the frontmost tile whose column reaches the pointer, so pointing at a cliff face picks the tile on top of it. | |
 | Known limit | Things drawn on top of the terrain later (units, buildings) will be drawn after the terrain, so something standing just behind a tall cliff can show in front of it. Elevation steps are small, so this should be rare; it will be revisited in Stage 2 if it shows. | |
 
+## Setups and saved runs (Stage 2a)
+
+| Item | Choice |
+| --- | --- |
+| Setup | Made from a map on Home (New setup: a name and a map). It keeps its own copy of the map's tiles, so the map can still be edited in Map mode without changing setups already made from it (SPEC 3). |
+| Building a setup | Opening a setup shows its starting point, paused. Place people in Units, then **Save setup**. Saving is by hand, not automatic, because a setup is a deliberate starting point (SPEC 5: "build a starting setup, save it"). |
+| Running | **Play** starts time. From then on the button is **Save run…**: it asks for a name and keeps that moment as a saved run; the setup stays as it was. Saving again updates the same saved run. **Start again from setup** goes back to the setup's starting point. |
+| Saved runs | Listed on Home under Saved runs, each standing on its own (SPEC 5: runs are not stored for comparison). Opening one carries on from where it was saved. |
+| What is saved | The world's tiles (deposits included, since runs will use them up), the simulation's state (time, people, the random number generator's state), and a format version, so setups and runs saved today keep opening (`src/world/format.ts`). Paths people were walking are not saved; anyone walking starts again from standing. |
+| Storage | IndexedDB, stores `worlds` (Home's list) and `worldData` (the whole setup or run). A Titanic setup is a little under 1 MB plus its people. |
+
+## Time (Stage 2a)
+
+| Item | Choice | Why |
+| --- | --- | --- |
+| Steps | 10 simulation steps a second at 1x. | Smooth enough for walking and, later, fighting; cheap enough for thousands of people. |
+| Speeds | Paused, 1x, 2x, 3x (SPEC 2: fast-forward is a modest speed-up). Space pauses and plays; 1, 2 and 3 set the speed. | WorldBox's speed control goes to 5x; the spec asks for modest. |
+| Calendar | A month is 5 seconds at 1x and a year is 12 months, so a year passes in a minute at 1x (20 seconds at 3x). The date shows the month and year. | A lifetime of about 60 years then takes about an hour at 1x, so generations and kingdoms change within an evening. The numbers are easy to change once the life cycle (2c) shows how it feels. |
+
+## Simulation (Stage 2a)
+
+| Item | Choice | Why |
+| --- | --- | --- |
+| Where it runs | In a Web Worker (its own thread). The worker owns the world; the app sends it commands (place, remove, speed, save) and gets a snapshot of everyone's position after each batch of steps. The app draws people moving smoothly between the last two snapshots. | Drawing stays smooth however busy the world is, and every individual is simulated in full each step, on screen or not (SPEC 2). |
+| Falling behind | If a step ever takes longer than the time it has, the world slows down rather than trying to catch up all at once. | |
+| Paths | A* search over the tiles in 8 directions. Walking costs: grassland 1, sand 1.2, desert 1.3, forest 1.5, hills 1.6, swamp 2.5, shallow water and mountains 3, snow 4; deep water cannot be crossed; climbing a level costs 0.4 more. Searches share a budget of tiles looked at per step, so a crowd asking for paths at once waits a step or two instead of slowing the world. | |
+| Walking speed | 1.5 tiles a second on open ground at 1x, slower on costly ground. | |
+| What people do in 2a | Stand, then walk to a nearby spot, then stand again. This is a stand-in so movement and speed can be tested; needs and tasks replace it in 2b. | |
+| People placed by hand | Adults aged 16 to 36, either sex at random, with a random skin tone, hair color and clothing color. Not unique and not named (SPEC 6: most individuals are not unique). | |
+
+## Main screen (Stage 2a)
+
+| Item | Choice |
+| --- | --- |
+| Layout | The map fills the screen. Top left: the setup or run's name, the date, the number of people and whether time is running. Top right: zoom buttons. Along the bottom: the toolbar (see the WorldBox question above). Right side: the inspect panel when a person is chosen. |
+| Toolbar tabs | **Main** (shown first): Play/Pause, 1x 2x 3x, Save setup or Save run, Start again from setup. **Units**: Person (click or drag on land to place adults, one per tile) and Remove (a brush, 1 to 8). **Disasters & effects** and **Imperatives** are shown but cannot be chosen yet; they come in the stages that build what they act on. |
+| Inspecting | In the Main tab, clicking a person chooses them (a red ring at their feet) and opens the panel: number, sex, age, health, job, culture, pair and what they are doing (SPEC 4). Job, culture and pair read None until those systems exist. Esc closes it. |
+
+## People (Stage 2a)
+
+| Item | Choice |
+| --- | --- |
+| Look | Stick figures in Stickman Arena's style, as Caleb asked: a round head in one of 8 skin tones with hair in one of 6 colors, a tunic (men) or a long dress (women) in one of 10 dyed or undyed cloth colors (madder red, woad blue, green, undyed tan, purple, saffron, brown, grey, dark teal, rust), skin-colored arms and brown legs, all inside a navy outline. Walking people swing their arms and legs. |
+| Size | About 0.42 of a tile tall, a little taller than a tree, so they read on the busy ground. Zoomed far out, a person is a dot in their clothing color with a navy outline. |
+| Drawing | Each look, pose and size is drawn once into a small picture and reused. The terrain is kept as one picture of the screen while the camera is still, so frames where only people move just copy it. |
+| Known limit | People are drawn after the terrain, so someone just behind a tall cliff can show in front of it. |
+
+## Performance (Stage 2a)
+
+Measured on a 512 × 512 map at 3x speed, in headless Chrome without a graphics card (a slow case; a normal Chrome with a graphics card should do at least as well):
+
+| People | Simulation step | Frames a second (whole map / mid zoom / close) |
+| --- | --- | --- |
+| 2,000 | about 0.8 ms | 60 / 60 / 60 |
+| 5,000 | about 2 ms | 53 / 55 / 60 |
+
+A step has 33 ms at 3x, so there is plenty of room for now. People only walk in 2a; needs, jobs and buildings will cost more per step, so this is measured again at the end of each step of Stage 2. Nothing so far points toward the Godot rule (SPEC 2).
+
 ## Look
 
 - The portal's, Synth Studio's, Stickman Arena's and the Worldbuilding Sandbox's style: cream, navy and red; Norwester headings; Archivo body text; staggered stripes; flat cards. Light mode only.
 - The map follows Stickman Arena's look (Caleb's direction): the three colors for the environment, natural colors for objects, navy outlines on everything. See "Isometric view".
 - Map mode's tool buttons show a single tile drawn the same way, so each button looks like what it paints.
-- Logo: the full Croswell Industries logo on Home; the C mark in the gap left of the bottom stripes in Map mode.
+- Logo: the full Croswell Industries logo on Home; the C mark in the gap left of the bottom stripes in Map mode and on the main screen.
 - App icon: a cream castle keep flying a red pennant, on navy.

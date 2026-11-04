@@ -1,10 +1,11 @@
 import { useSyncExternalStore } from 'react';
-import { deleteMapData, listMaps, readMap, storageMessage, writeMap } from './db';
+import { deleteMapData, listMaps, listWorlds, readMap, storageMessage, writeMap } from './db';
 import { newId } from './ids';
 import { FORMAT_VERSION, download, fileName, fromFile, toFile, upgrade } from '../map/format';
 import { blankTiles, generateTiles } from '../map/generate';
 import { makeThumbnail } from '../map/thumbnail';
 import { metaOf, type GenSettings, type MapData, type MapMeta } from '../map/types';
+import type { WorldDoc, WorldMeta } from '../world/types';
 
 export interface SaveStatus {
   state: 'saved' | 'saving' | 'error';
@@ -21,6 +22,15 @@ export type OpenMap =
   | { kind: 'elsewhere'; id: string }
   | { kind: 'error'; id: string; message: string };
 
+/** The setup or saved run open on the main screen, if any. */
+export type OpenWorld =
+  | { kind: 'none' }
+  | { kind: 'loading'; id: string }
+  | { kind: 'ready'; doc: WorldDoc }
+  | { kind: 'missing'; id: string }
+  | { kind: 'elsewhere'; id: string }
+  | { kind: 'error'; id: string; message: string };
+
 export interface StorageInfo {
   /** Whether Chrome has agreed to keep this site's storage when the disk runs low. null: not known. */
   persisted: boolean | null;
@@ -33,6 +43,11 @@ export interface AppState {
   /** Oldest first. */
   maps: MapMeta[];
   open: OpenMap;
+  /** Setups and saved runs, oldest first. */
+  worlds: WorldMeta[];
+  world: OpenWorld;
+  /** The open world has changes that are not saved. */
+  worldUnsaved: boolean;
   save: SaveStatus;
   storage: StorageInfo;
 }
@@ -41,6 +56,9 @@ let state: AppState = {
   boot: { kind: 'loading' },
   maps: [],
   open: { kind: 'none' },
+  worlds: [],
+  world: { kind: 'none' },
+  worldUnsaved: false,
   save: { state: 'saved' },
   storage: { persisted: null, usage: null },
 };
@@ -58,6 +76,11 @@ function subscribe(fn: () => void) {
 }
 export function getState() {
   return state;
+}
+
+/** For the other app-state modules (worlds.ts). */
+export function patchState(patch: Partial<AppState>) {
+  set(patch);
 }
 
 /** Reads part of the app state and re-renders when it changes. The selector must return something already in the state (not a new object). */
@@ -78,8 +101,8 @@ export type Result<T = undefined> = { ok: true; value: T } | { ok: false; reason
 
 export async function initApp() {
   try {
-    const maps = await listMaps();
-    set({ boot: { kind: 'ready' }, maps: maps.sort(byCreated) });
+    const [maps, worlds] = await Promise.all([listMaps(), listWorlds()]);
+    set({ boot: { kind: 'ready' }, maps: maps.sort(byCreated), worlds: worlds.sort((a, b) => a.createdAt.localeCompare(b.createdAt)) });
   } catch (e) {
     set({ boot: { kind: 'error', message: storageMessage(e) } });
     return;
@@ -97,7 +120,7 @@ export async function refreshStorage() {
   if (!s) return;
   try {
     let persisted = s.persisted ? await s.persisted() : null;
-    if (!persisted && state.maps.length > 0 && s.persist) persisted = await s.persist();
+    if (!persisted && state.maps.length + state.worlds.length > 0 && s.persist) persisted = await s.persist();
     const estimate = s.estimate ? await s.estimate() : undefined;
     set({ storage: { persisted, usage: estimate?.usage ?? null } });
   } catch {
@@ -186,14 +209,16 @@ let releaseLock: (() => void) | null = null;
  * because a lock let go of a moment ago (leaving and reopening the same map) can take a
  * little while to become free.
  */
-function lockMap(id: string): Promise<(() => void) | null> {
+export function lockName(name: string): Promise<(() => void) | null> {
   if (!navigator.locks) return Promise.resolve(() => {});
   return new Promise((acquired) => {
     navigator.locks
-      .request(`map:${id}`, { signal: AbortSignal.timeout(1500) }, () => new Promise<void>((release) => acquired(release)))
+      .request(name, { signal: AbortSignal.timeout(1500) }, () => new Promise<void>((release) => acquired(release)))
       .catch(() => acquired(null));
   });
 }
+
+const lockMap = (id: string) => lockName(`map:${id}`);
 
 function unlock() {
   releaseLock?.();
@@ -260,7 +285,7 @@ export function mapChanged(map: MapData) {
 }
 
 export function hasUnsavedChanges() {
-  return pendingMap !== null || saving !== null;
+  return pendingMap !== null || saving !== null || state.worldUnsaved;
 }
 
 /** Saves any waiting change now. */
