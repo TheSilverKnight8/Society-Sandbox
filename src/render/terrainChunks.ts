@@ -2,7 +2,7 @@ import { hash2 } from '../lib/rng';
 import { Deposit, isWater } from '../map/terrain';
 import { CHUNK, STEP, isoX, isoY, type TileSource } from './iso';
 import { FACE_L, FACE_R, GROUND, NAVY } from './style';
-import { biomeDetail, biomeSparse, deposit as drawDepositMark } from './symbols';
+import { biomeDetail, biomeSparse, deposit as drawDepositMark, fence } from './symbols';
 
 // Draws the terrain in chunks of CHUNK x CHUNK tiles and keeps each drawn chunk as a
 // picture (an offscreen canvas). A frame then only copies pictures to the screen.
@@ -364,7 +364,13 @@ function drawChunkTiles(ctx: CanvasRenderingContext2D, src: TileSource, cx: numb
       // What the tile is: a line drawing on it.
       const cxp = X;
       const cyp = Y + 0.27;
-      if (src.covered?.[i]) {
+      const wall = src.walls ? src.walls[i] : 0;
+      if (wall === 2 || wall === 4) {
+        // A town's fence or gate (drawn at every zoom; it is part of the town's shape).
+        const W = src.walls!;
+        const built = (xx: number, yy: number) => xx >= 0 && yy >= 0 && xx < size && yy < size && (W[yy * size + xx] === 2 || W[yy * size + xx] === 4);
+        fence(ctx, X, Y, { nw: built(x - 1, y), ne: built(x, y - 1), se: built(x + 1, y), sw: built(x, y + 1) }, wall === 4, lw);
+      } else if (src.covered?.[i]) {
         // A building stands here.
       } else if (st.grid === 1) {
         biomeDetail(ctx, t, x, y, h, cxp, cyp, lw, src.trees ? src.trees[i] : undefined);

@@ -434,3 +434,54 @@ function drawDeposit(ctx: Ctx, d: number, px: number, py: number, s: number, lw:
     }
   }
 }
+
+/**
+ * A stretch of a town's fence on one tile: a wooden palisade of pointed stakes on a rail,
+ * running from the tile's middle toward each neighbouring fence or gate tile; a gate is two
+ * tall posts with a crossbar and the way between them open. Drawn back to front.
+ */
+export function fence(ctx: Ctx, X: number, Y: number, conn: { nw: boolean; ne: boolean; se: boolean; sw: boolean }, gate: boolean, lw: number) {
+  const c: [number, number] = [X, Y + 0.25];
+  const mid = {
+    nw: [X - 0.25, Y + 0.125] as [number, number],
+    ne: [X + 0.25, Y + 0.125] as [number, number],
+    se: [X + 0.25, Y + 0.375] as [number, number],
+    sw: [X - 0.25, Y + 0.375] as [number, number],
+  };
+  const H = 0.3;
+  const stake = (x: number, y: number, h: number, wd: number) => {
+    ctx.beginPath();
+    ctx.moveTo(x - wd, y);
+    ctx.lineTo(x + wd, y);
+    ctx.lineTo(x + wd, y - h + wd);
+    ctx.lineTo(x, y - h);
+    ctx.lineTo(x - wd, y - h + wd);
+    ctx.closePath();
+    fillStroke(ctx, OBJ.trunk);
+  };
+  const rail = (a: [number, number], b: [number, number], h: number) => {
+    ctx.beginPath();
+    ctx.moveTo(a[0], a[1] - h);
+    ctx.lineTo(b[0], b[1] - h);
+    limb(ctx, OBJ.trunk);
+  };
+  if (gate) {
+    const alongX = conn.nw || conn.se || !(conn.ne || conn.sw);
+    const p0 = alongX ? mid.nw : mid.ne;
+    const p1 = alongX ? mid.se : mid.sw;
+    stake(p0[0], p0[1], H * 1.35, 0.04);
+    stake(p1[0], p1[1], H * 1.35, 0.04);
+    rail(p0, p1, H * 1.25);
+    return;
+  }
+  const segment = (m: [number, number]) => {
+    rail(c, m, H * 0.5);
+    for (const t of [0.3, 0.65, 1]) stake(c[0] + (m[0] - c[0]) * t, c[1] + (m[1] - c[1]) * t, H, 0.026);
+  };
+  if (conn.nw) segment(mid.nw);
+  if (conn.ne) segment(mid.ne);
+  stake(c[0], c[1], H, 0.026);
+  if (conn.se) segment(mid.se);
+  if (conn.sw) segment(mid.sw);
+  void lw;
+}

@@ -46,6 +46,14 @@ const C = {
   rock: '#9a948b',
   rockDark: '#7d776f',
   mineDark: '#2b2622',
+  daub: '#d9b98c',
+  tile: '#9c4a36',
+  tileDark: '#7c3a2a',
+  brick: '#b5654a',
+  glow: '#ff9a3c',
+  awning: '#c8433a',
+  canvas: '#efe3c8',
+  coin: '#f2c230',
 };
 
 /** Shapes, in tile widths. `wall` and `roof` are heights; the walls stand `inset` in from the footprint's edge. */
@@ -67,6 +75,10 @@ const SHAPES: Partial<Record<BuildingKind, Shape>> = {
   [BuildingKind.Woodcutter]: { wall: 0.42, roof: 0.42, inset: 0.26, roofKind: 'gable', wallColor: C.logWall, roofColor: C.shingle, roofShade: C.shingleDark, roofLine: C.shingleDark },
   [BuildingKind.Quarry]: { wall: 0.38, roof: 0.3, inset: 0.24, roofKind: 'gable', wallColor: C.stone, roofColor: C.shingle, roofShade: C.shingleDark, roofLine: C.shingleDark },
   [BuildingKind.FishingHut]: { wall: 0.36, roof: 0.5, inset: 0.3, roofKind: 'pyramid', wallColor: '#a8784a', roofColor: C.thatch, roofShade: C.thatchDark, roofLine: C.thatchLine },
+  [BuildingKind.Smithy]: { wall: 0.42, roof: 0.36, inset: 0.24, roofKind: 'gable', wallColor: C.stone, roofColor: C.shingle, roofShade: C.shingleDark, roofLine: C.shingleDark },
+  [BuildingKind.Pottery]: { wall: 0.38, roof: 0.46, inset: 0.3, roofKind: 'pyramid', wallColor: C.daub, roofColor: C.thatch, roofShade: C.thatchDark, roofLine: C.thatchLine },
+  [BuildingKind.Mint]: { wall: 0.6, roof: 0.42, inset: 0.24, roofKind: 'gable', wallColor: C.stone, roofColor: C.tile, roofShade: C.tileDark, roofLine: C.tileDark },
+  [BuildingKind.Townhouse]: { wall: 0.92, roof: 0.66, inset: 0.16, roofKind: 'gable', wallColor: C.plaster, roofColor: C.tile, roofShade: C.tileDark, roofLine: C.tileDark },
 };
 
 type P = [number, number];
@@ -175,6 +187,29 @@ function drawHouseLike(ctx: CanvasRenderingContext2D, kind: BuildingKind, sh: Sh
         line(ctx, left(0.0, h), left(1, h), C.logLine, 1.1);
         line(ctx, right(0.0, h), right(1, h), C.logLine, 1.1);
       }
+    } else if (kind === BuildingKind.Townhouse) {
+      // A stone ground floor, a timber-framed upper floor.
+      const lower = wall * 0.45;
+      wallRect(ctx, left, 0, 1, 0, lower, C.stone);
+      wallRect(ctx, right, 0, 1, 0, lower, C.stoneDark);
+      for (const [on, len] of [
+        [left, lenL],
+        [right, lenR],
+      ] as const) {
+        const posts = Math.max(2, Math.round(len / 0.6));
+        if (rise >= 1) {
+          for (let k = 0; k <= posts; k++) beam(ctx, on(k / posts, lower), on(k / posts, wall), C.timber, 1.4);
+          beam(ctx, on(0, lower), on(1, lower), C.timber, 1.8);
+          beam(ctx, on(0, wall - 0.01), on(1, wall - 0.01), C.timber, 1.4);
+        }
+        for (const t of [0.33, 0.66]) line(ctx, on(0.02, lower * t), on(0.98, lower * t), C.stoneDark, 0.8);
+      }
+    } else if (kind === BuildingKind.Smithy || kind === BuildingKind.Mint) {
+      for (let k = 1; k < 4; k++) {
+        const h = (wall * k) / 4;
+        line(ctx, left(0.02, h), left(0.98, h), C.stoneDark, 0.8);
+        line(ctx, right(0.02, h), right(0.98, h), C.stoneDark, 0.8);
+      }
     } else if (kind === BuildingKind.Quarry) {
       // Cut stone blocks, staggered.
       for (let k = 1; k < 3; k++) {
@@ -215,6 +250,25 @@ function drawHouseLike(ctx: CanvasRenderingContext2D, kind: BuildingKind, sh: Sh
     const dt = 0.5 - doorW / lenL / 2;
     wallRect(ctx, left, dt, dt + doorW / lenL, 0, doorH, C.door);
     if (kind === BuildingKind.Storehouse) line(ctx, left(0.5, 0), left(0.5, doorH), NAVY, 1);
+    if (kind === BuildingKind.Smithy) {
+      // The forge's glow through an opening in the right wall.
+      wallRect(ctx, right, 0.3, 0.7, wall * 0.15, wall * 0.55, C.glow);
+    }
+    if (kind === BuildingKind.Townhouse || kind === BuildingKind.Mint) {
+      const rows = kind === BuildingKind.Townhouse ? [wall * 0.18, wall * 0.62] : [wall * 0.45];
+      for (const h0 of rows) {
+        for (const [on, len, ts] of [
+          [left, lenL, lenL > 1.2 ? [0.2, 0.82] : [0.82]],
+          [right, lenR, lenR > 1.4 ? [0.25, 0.5, 0.75] : [0.5]],
+        ] as const) {
+          for (const t of ts) {
+            if (on === left && Math.abs(t - 0.5) < 0.2 && h0 < wall * 0.3) continue; // the door
+            const ww = 0.13 / len;
+            wallRect(ctx, on, t - ww / 2, t + ww / 2, h0, h0 + 0.15, C.window);
+          }
+        }
+      }
+    }
     // Windows with shutters (not on a hut or a storehouse).
     if (kind === BuildingKind.House) {
       const win = (on: (t: number, h: number) => P, t: number, len: number) => {
@@ -267,7 +321,7 @@ function drawHouseLike(ctx: CanvasRenderingContext2D, kind: BuildingKind, sh: Sh
     for (const k of [0.33, 0.66]) {
       line(ctx, [eL[0] + (r0[0] - eL[0]) * k, eL[1] + (r0[1] - eL[1]) * k], [eB[0] + (r1[0] - eB[0]) * k, eB[1] + (r1[1] - eB[1]) * k], sh.roofLine, 0.8);
     }
-    if (kind === BuildingKind.House && roofUp >= 1) chimney(ctx, pt(-a * 0.55, -0.02, wall + rh * 0.55), rh);
+    if ((kind === BuildingKind.House || kind === BuildingKind.Townhouse || kind === BuildingKind.Smithy) && roofUp >= 1) chimney(ctx, pt(-a * 0.55, -0.02, wall + rh * 0.55), rh);
   } else {
     // Ridge along v: the front slope faces +u; the gable end is on the left (+v) wall.
     const r0 = pt(0, -b - o, wall + rh);
@@ -280,7 +334,7 @@ function drawHouseLike(ctx: CanvasRenderingContext2D, kind: BuildingKind, sh: Sh
     for (const k of [0.33, 0.66]) {
       line(ctx, [eB[0] + (r1[0] - eB[0]) * k, eB[1] + (r1[1] - eB[1]) * k], [eR[0] + (r0[0] - eR[0]) * k, eR[1] + (r0[1] - eR[1]) * k], sh.roofLine, 0.8);
     }
-    if (kind === BuildingKind.House && roofUp >= 1) chimney(ctx, pt(0.02, -b * 0.55, wall + rh * 0.55), rh);
+    if ((kind === BuildingKind.House || kind === BuildingKind.Townhouse || kind === BuildingKind.Smithy) && roofUp >= 1) chimney(ctx, pt(0.02, -b * 0.55, wall + rh * 0.55), rh);
   }
 }
 
@@ -365,6 +419,50 @@ function drawProps(ctx: CanvasRenderingContext2D, kind: BuildingKind, w: number,
     cube(base[0] - 0.08, base[1], 0.08);
     cube(base[0] + 0.1, base[1] + 0.06, 0.08);
     cube(base[0] + 0.01, base[1] - 0.06, 0.08);
+  } else if (kind === BuildingKind.Smithy) {
+    // An anvil on a block in front of the door.
+    const p0 = pt(-a + 0.35, b + 0.1);
+    poly(ctx, [[p0[0] - 0.05, p0[1]], [p0[0] + 0.05, p0[1]], [p0[0] + 0.05, p0[1] - 0.08], [p0[0] - 0.05, p0[1] - 0.08]], C.log);
+    poly(ctx, [[p0[0] - 0.1, p0[1] - 0.08], [p0[0] + 0.08, p0[1] - 0.08], [p0[0] + 0.06, p0[1] - 0.13], [p0[0] - 0.13, p0[1] - 0.13]], '#55585e');
+  } else if (kind === BuildingKind.Pottery) {
+    // A kiln beside it, and pots set out to dry.
+    const k0 = pt(a - 0.15, -b + 0.4);
+    ctx.beginPath();
+    ctx.moveTo(k0[0] - 0.16, k0[1]);
+    ctx.quadraticCurveTo(k0[0] - 0.16, k0[1] - 0.32, k0[0], k0[1] - 0.32);
+    ctx.quadraticCurveTo(k0[0] + 0.16, k0[1] - 0.32, k0[0] + 0.16, k0[1]);
+    ctx.closePath();
+    ctx.fillStyle = C.brick;
+    ctx.fill();
+    ctx.stroke();
+    poly(ctx, [[k0[0] - 0.05, k0[1]], [k0[0] + 0.05, k0[1]], [k0[0] + 0.05, k0[1] - 0.09], [k0[0] - 0.05, k0[1] - 0.09]], C.glow);
+    const pots = pt(-a + 0.4, b + 0.12);
+    for (const [dx, dy, col] of [
+      [0, 0, '#c9845a'],
+      [0.11, 0.04, '#b5654a'],
+      [-0.1, 0.05, '#d9a06c'],
+    ] as const) {
+      const x = pots[0] + dx;
+      const y = pots[1] + dy;
+      ctx.beginPath();
+      ctx.moveTo(x - 0.025, y - 0.1);
+      ctx.quadraticCurveTo(x - 0.07, y - 0.05, x - 0.035, y);
+      ctx.lineTo(x + 0.035, y);
+      ctx.quadraticCurveTo(x + 0.07, y - 0.05, x + 0.025, y - 0.1);
+      ctx.closePath();
+      ctx.fillStyle = col;
+      ctx.fill();
+      ctx.stroke();
+    }
+  } else if (kind === BuildingKind.Mint) {
+    // A sign with a gold coin by the door.
+    const s0 = onLeft(a - 0.24, b - 0.24, 0.22, 0.42);
+    beam(ctx, [s0[0], s0[1]], [s0[0] - 0.14, s0[1] + 0.03], C.timber, 1);
+    ctx.beginPath();
+    ctx.arc(s0[0] - 0.12, s0[1] + 0.1, 0.055, 0, Math.PI * 2);
+    ctx.fillStyle = C.coin;
+    ctx.fill();
+    ctx.stroke();
   } else if (kind === BuildingKind.FishingHut) {
     // A drying rack with a net, and a small boat pulled up.
     const r0 = pt(a - 0.05, -b + 0.35);
@@ -394,6 +492,50 @@ function drawProps(ctx: CanvasRenderingContext2D, kind: BuildingKind, w: number,
     ctx.fill();
     ctx.stroke();
   }
+}
+
+/** A market: stalls with striped awnings and goods set out, around an open square. */
+function drawMarket(ctx: CanvasRenderingContext2D, w: number, d: number, progress: number) {
+  const a = w / 2 - 0.1;
+  const b = d / 2 - 0.1;
+  // The square's paving.
+  poly(ctx, [pt(-a, b), pt(a, b), pt(a, -b), pt(-a, -b)], '#d8cfbf');
+  const stalls: [number, number][] = [
+    [-a * 0.55, -b * 0.55],
+    [a * 0.4, -b * 0.6],
+    [-a * 0.6, b * 0.35],
+    [a * 0.45, b * 0.4],
+  ];
+  const n = progress >= 1 ? 4 : Math.floor(progress * 4);
+  const goods = ['#e2bb4c', '#c9845a', '#7fb24f', '#b8b2a7'];
+  stalls.slice(0, n).forEach(([u, v], k) => {
+    const sw = 0.36;
+    const sd = 0.26;
+    const H = 0.34;
+    // Table.
+    poly(ctx, [pt(u - sw, v + sd, 0.12), pt(u + sw, v + sd, 0.12), pt(u + sw, v - sd, 0.12), pt(u - sw, v - sd, 0.12)], C.plank);
+    poly(ctx, [pt(u - sw, v + sd, 0), pt(u + sw, v + sd, 0), pt(u + sw, v + sd, 0.12), pt(u - sw, v + sd, 0.12)], C.plankLine);
+    // Goods on it.
+    for (let j = 0; j < 4; j++) {
+      const p0 = pt(u - sw * 0.6 + j * sw * 0.4, v, 0.15);
+      ctx.beginPath();
+      ctx.arc(p0[0], p0[1], 0.035, 0, Math.PI * 2);
+      ctx.fillStyle = goods[(j + k) % goods.length];
+      ctx.fill();
+      ctx.stroke();
+    }
+    // Posts and a striped awning.
+    for (const [du, dv] of [
+      [-sw, sd],
+      [sw, sd],
+    ]) beam(ctx, pt(u + du, v + dv, 0), pt(u + du, v + dv, H), C.timber, 1);
+    const stripes = 4;
+    for (let j = 0; j < stripes; j++) {
+      const u0 = u - sw + (2 * sw * j) / stripes;
+      const u1 = u - sw + (2 * sw * (j + 1)) / stripes;
+      poly(ctx, [pt(u0, v + sd, H), pt(u1, v + sd, H), pt(u1, v - sd, H + 0.12), pt(u0, v - sd, H + 0.12)], j % 2 ? C.canvas : C.awning);
+    }
+  });
 }
 
 /** A mine: a rocky mound with a timbered entrance and a cart of ore. */
@@ -619,7 +761,7 @@ function sprite(b: BuildingView, step: number, frame: number, px: number, plinth
   }
   const { w, d } = b;
   const sh = SHAPES[b.kind];
-  const tall = sh ? sh.wall + sh.roof : b.kind === BuildingKind.Mine ? 0.7 : 0.4;
+  const tall = sh ? sh.wall + sh.roof : b.kind === BuildingKind.Mine ? 0.7 : b.kind === BuildingKind.Market ? 0.6 : 0.4;
   const halfW = (w + d) / 4 + 0.3;
   const up = (w + d) / 8 + tall + 0.3;
   const down = (w + d) / 8 + plinth + 0.25;
@@ -637,6 +779,10 @@ function sprite(b: BuildingView, step: number, frame: number, px: number, plinth
   ctx.lineWidth = Math.max(1, px * 0.03) / px;
   ctx.strokeStyle = NAVY;
   if (b.kind === BuildingKind.Farm) drawFarm(ctx, w, d, b.look, step / 10);
+  else if (b.kind === BuildingKind.Market) {
+    drawMarket(ctx, w, d, step / 10);
+    if (step < 10) drawPiles(ctx, w, d);
+  }
   else if (b.kind === BuildingKind.Mine) {
     drawMine(ctx, w, d, step / 10);
     if (step < 10) drawPiles(ctx, w, d);

@@ -46,6 +46,8 @@ export class PathFinder {
   private heapSize = 0;
   /** Tiles looked at by searches since the counter was last reset (for the per-step budget). */
   expanded = 0;
+  /** Fences and gates (see Wall in types.ts): a built fence (2) cannot be walked through. */
+  walls?: Uint8Array;
 
   constructor(size: number, terrain: Uint8Array, elevation: Uint8Array) {
     this.size = size;
@@ -62,7 +64,7 @@ export class PathFinder {
   }
 
   walkable(i: number) {
-    return WALK_COST[this.terrain[i]] !== Infinity;
+    return WALK_COST[this.terrain[i]] !== Infinity && this.walls?.[i] !== 2;
   }
 
   cost(i: number) {
@@ -112,7 +114,7 @@ export class PathFinder {
         const ni = ny * size + nx;
         if (this.closed[ni] === run) continue;
         const c = WALK_COST[this.terrain[ni]];
-        if (c === Infinity) continue;
+        if (c === Infinity || this.walls?.[ni] === 2) continue;
         // No cutting corners past tiles that cannot be walked.
         if (len !== 1 && (!this.walkable(cy * size + nx) || !this.walkable(ny * size + cx))) continue;
         const climb = Math.max(0, this.elevation[ni] - ch) * CLIMB_COST;

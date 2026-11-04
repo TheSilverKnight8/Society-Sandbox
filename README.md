@@ -6,7 +6,7 @@
 
 It is an installable web app (PWA) for Chrome on a computer, hosted on GitHub Pages. Everything runs in the browser. Maps are saved in the browser on your computer and nowhere else.
 
-## What is in it (Stages 1, 2, 3a and 3b)
+## What is in it (Stages 1, 2 and 3)
 
 | Area | What it does |
 | --- | --- |
@@ -18,11 +18,13 @@ It is an installable web app (PWA) for Chrome on a computer, hosted on GitHub Pa
 | Imperatives | Orders to people: Move, Gather food, Rest, Stop. Choose people (click one, or drag a box) then the order, or the order then the people. |
 | Settlements | Pairs found camps; camps grow into villages. Each has land with a border and its name on the map. People cut trees and break stone, carry them, and build huts (2×2 tiles), houses (2×3) and a storehouse (3×3); families get homes and sleep in them. R turns a building while placing it. Click a building to see its settlement. **Units** places buildings (finished) and campfires; **Imperatives** orders a settlement to build, set a focus, send settlers or be abandoned. |
 | Jobs and production | Villages give their adults jobs as tradesmen: farmers, woodcutters, quarrymen, miners, fishers; children from 8 help at farms and fishing huts. Workers carry what they make to the store (storehouse or campfire); hungry people eat from it and builders take wood and stone from it. Fields grow from March to November and ripen to wheat. The settlement panel shows the store and jobs. |
+| Coins and trade | Each settlement has a treasury and sets its own prices (shown in its panel). Workers are paid for what they bring in; people buy food and pottery and pay rent for their homes. Smithies make tools from iron ore (tools make work faster), potteries make pottery from clay, and a town's mint strikes coins from gold ore. Traders from a market carry goods to whichever settlement nearby pays most. A person's coins and pottery go to their pair and children when they die. |
+| Towns and cities | A village with 60 people and 12 homes becomes a town; a town with 200 and 40 becomes a city. Towns build townhouses and put up a wooden fence with gates around their buildings. |
 | Life cycle | People age (children are drawn smaller, elders grey-haired) and can die of old age. Adults pair up, pairs have children, and children stay near their mother. Inspect shows the pair, parents and children. **Rules** (Main tab) turns pairing, births and aging off together, which freezes the population. |
 | Moving around | Wheel zooms toward the pointer. Right or middle drag moves the map; so do WASD and the arrow keys. **+** and **−** zoom; the corner button shows the whole map. |
 | Map files | The download button on a map saves it as one file (`<name>.map.json`). **Import map** adds a map from such a file. |
 
-Coming next (Stage 3c): goods, coins and trade; towns and cities; fences and gates.
+Coming next (Stage 4): cultures, nations and technology.
 
 ## Run it on your computer
 

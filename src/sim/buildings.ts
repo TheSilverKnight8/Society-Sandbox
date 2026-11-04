@@ -4,13 +4,26 @@
 // produce food and materials; workshops come in 3c.
 
 /** Goods a settlement keeps in its store (SPEC 8: goods are carried by individuals). */
-export type Good = 'food' | 'wood' | 'stone' | 'iron' | 'gold';
-export const GOODS: Good[] = ['food', 'wood', 'stone', 'iron', 'gold'];
-export const GOOD_NAME: Record<Good, string> = { food: 'Food', wood: 'Wood', stone: 'Stone', iron: 'Iron ore', gold: 'Gold ore' };
+export type Good = 'food' | 'wood' | 'stone' | 'iron' | 'gold' | 'tools' | 'pottery' | 'clay';
+/** Goods kept in a store (clay goes straight from the pit to the pottery). */
+export const GOODS: Good[] = ['food', 'wood', 'stone', 'iron', 'gold', 'tools', 'pottery'];
+export const GOOD_NAME: Record<Good, string> = { food: 'Food', wood: 'Wood', stone: 'Stone', iron: 'Iron ore', gold: 'Gold ore', tools: 'Tools', pottery: 'Pottery', clay: 'Clay' };
+/** What each good is worth in coins where it is neither scarce nor plentiful (Caleb: goods have prices). */
+export const BASE_PRICE: Record<Good, number> = { food: 2, wood: 1, stone: 1, iron: 3, gold: 6, tools: 10, pottery: 5, clay: 1 };
 
 /** The jobs a tradesman can hold (SPEC 6: "generic tradesman (works at various buildings)"). */
-export type JobKind = 'farmer' | 'woodcutter' | 'quarryman' | 'miner' | 'fisher';
-export const JOB_NAME: Record<JobKind, string> = { farmer: 'Farmer', woodcutter: 'Woodcutter', quarryman: 'Quarryman', miner: 'Miner', fisher: 'Fisher' };
+export type JobKind = 'farmer' | 'woodcutter' | 'quarryman' | 'miner' | 'fisher' | 'trader' | 'smith' | 'potter' | 'minter';
+export const JOB_NAME: Record<JobKind, string> = {
+  farmer: 'Farmer',
+  woodcutter: 'Woodcutter',
+  quarryman: 'Quarryman',
+  miner: 'Miner',
+  fisher: 'Fisher',
+  trader: 'Trader',
+  smith: 'Blacksmith',
+  potter: 'Potter',
+  minter: 'Minter',
+};
 /** Children's light jobs (SPEC 6: "children ... can hold light jobs"). */
 export const LIGHT_JOB_NAME: Partial<Record<JobKind, string>> = { farmer: 'Farm helper', fisher: "Fisher's helper" };
 
@@ -24,6 +37,11 @@ export const BuildingKind = {
   Quarry: 6,
   Mine: 7,
   FishingHut: 8,
+  Market: 9,
+  Smithy: 10,
+  Pottery: 11,
+  Mint: 12,
+  Townhouse: 13,
 } as const;
 export type BuildingKind = (typeof BuildingKind)[keyof typeof BuildingKind];
 
@@ -35,6 +53,8 @@ export interface BuildingDef {
   /** Materials it takes to build. */
   wood: number;
   stone: number;
+  /** Tools it takes to build (town buildings). */
+  tools?: number;
   /** Steps of building work once the materials are there (one builder; more builders are quicker). */
   work: number;
   /** People it houses (0 if not a home). */
@@ -64,13 +84,18 @@ export const BUILDINGS: BuildingDef[] = [
   { kind: BuildingKind.Quarry, name: 'Quarry', wood: 6, stone: 4, work: 200, homes: 0, stage: 'village', buildable: true, w: 2, d: 2, jobs: 2, lightJobs: 0, job: 'quarryman' },
   { kind: BuildingKind.Mine, name: 'Mine', wood: 10, stone: 4, work: 260, homes: 0, stage: 'village', buildable: true, w: 2, d: 2, jobs: 3, lightJobs: 0, job: 'miner' },
   { kind: BuildingKind.FishingHut, name: 'Fishing hut', wood: 8, stone: 0, work: 160, homes: 0, stage: 'village', buildable: true, w: 2, d: 2, jobs: 2, lightJobs: 1, job: 'fisher' },
+  { kind: BuildingKind.Market, name: 'Market', wood: 12, stone: 4, work: 220, homes: 0, stage: 'village', buildable: true, w: 3, d: 3, jobs: 2, lightJobs: 0, job: 'trader' },
+  { kind: BuildingKind.Smithy, name: 'Smithy', wood: 8, stone: 8, work: 260, homes: 0, stage: 'village', buildable: true, w: 2, d: 2, jobs: 2, lightJobs: 0, job: 'smith' },
+  { kind: BuildingKind.Pottery, name: 'Pottery', wood: 8, stone: 4, work: 200, homes: 0, stage: 'village', buildable: true, w: 2, d: 2, jobs: 2, lightJobs: 0, job: 'potter' },
+  { kind: BuildingKind.Mint, name: 'Mint', wood: 8, stone: 14, tools: 2, work: 320, homes: 0, stage: 'town', buildable: true, w: 2, d: 2, jobs: 1, lightJobs: 0, job: 'minter' },
+  { kind: BuildingKind.Townhouse, name: 'Townhouse', wood: 12, stone: 14, tools: 2, work: 360, homes: 10, stage: 'town', buildable: true, w: 2, d: 3, jobs: 0, lightJobs: 0 },
 ];
 
 /** Whether a building of this kind may stand on a tile of this terrain (fields need fertile ground). `cleared`: a forest tile with no trees left. */
 export function kindAllowsTerrain(kind: BuildingKind, terrain: number, cleared: boolean) {
   // Terrain numbers: see map/terrain.ts (2 sand, 3 grassland, 4 forest, 5 hills, 8 desert).
   if (kind === BuildingKind.Farm) return terrain === 3 || terrain === 5 || (terrain === 4 && cleared);
-  return terrain === 3 || terrain === 2 || terrain === 8 || terrain === 5 || (terrain === 4 && cleared);
+  return terrain === 3 || terrain === 2 || terrain === 8 || terrain === 5 || terrain === 4;
 }
 
 /** Buildings that must stand at the water's edge (one of their tiles beside water). */

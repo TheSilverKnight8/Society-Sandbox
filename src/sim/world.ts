@@ -140,7 +140,7 @@ export class World {
   readonly byId = new Map<number, Person>();
   private routes = new Map<number, Route>();
   /** People waiting for a path: where they want to go, and why. */
-  private queue: { id: number; goal: number; req: number }[] = [];
+  private queue: { id: number; goal: number; req: number; far?: boolean }[] = [];
   private queueHead = 0;
   /** Each person's latest path request; older ones still in the queue are skipped. */
   private latestReq = new Map<number, number>();
@@ -182,7 +182,7 @@ export class World {
     const freshStone = fresh || !state.trees;
     for (let i = 0; i < n; i++) {
       const d = deposit[i];
-      if (d === Deposit.Stone || d === Deposit.Iron || d === Deposit.Gold) {
+      if (d === Deposit.Stone || d === Deposit.Iron || d === Deposit.Gold || d === Deposit.Clay) {
         if (freshStone) this.stock[i] = Towns.stoneStock();
         continue;
       }
@@ -205,6 +205,7 @@ export class World {
       this.byId.set(p.id, p);
     }
     this.towns = new Towns(this);
+    this.finder.walls = this.towns.walls;
   }
 
   /** Records that a tile's drawing changed (deposit used up or back, trees, land). */
@@ -378,11 +379,12 @@ export class World {
 
   private servePaths() {
     while (this.queueHead < this.queue.length && this.finder.expanded < PATH_BUDGET) {
-      const { id, goal, req } = this.queue[this.queueHead++];
+      const { id, goal, req, far } = this.queue[this.queueHead++];
       const p = this.byId.get(id);
       if (!p || p.task !== 'idle' || this.latestReq.get(id) !== req) continue;
       this.latestReq.delete(id);
-      const tiles = this.finder.find(this.tileOf(p), goal, 8000);
+      // Long journeys (traders) may look much further.
+      const tiles = this.finder.find(this.tileOf(p), goal, far ? 60000 : 8000);
       if (tiles && tiles.length) {
         this.routes.set(id, { tiles, step: 0 });
         p.task = 'walk';
@@ -582,12 +584,12 @@ export class World {
     else this.goTo(p, goal, 'stroll');
   }
 
-  goTo(p: Person, goal: number, purpose: Person['purpose']) {
+  goTo(p: Person, goal: number, purpose: Person['purpose'], far = false) {
     p.purpose = purpose;
     p.wait = Infinity; // until the path search answers
     const req = ++this.reqCounter;
     this.latestReq.set(p.id, req);
-    this.queue.push({ id: p.id, goal, req });
+    this.queue.push({ id: p.id, goal, req, far });
   }
 
   /** Heads for a food tile, claiming a share of it. */
@@ -855,6 +857,7 @@ export class World {
     if (!p) return;
     const clamp = (v: number) => Math.max(0, Math.min(100, v));
     if (e.leaveJob) this.towns.economy.quit(p);
+    if (e.coins !== undefined) p.coins = Math.max(0, e.coins);
     if (e.health !== undefined) p.health = Math.max(1, clamp(e.health));
     if (e.food !== undefined) p.food = clamp(e.food);
     if (e.rest !== undefined) p.rest = clamp(e.rest);
@@ -920,6 +923,10 @@ export class World {
       hasHome: p.home !== undefined,
       load: p.load ? { ...p.load } : undefined,
       ...this.jobDetails(p),
+      coins: Math.floor(p.coins ?? 0),
+      goods: p.goods ?? 0,
+      wealth: Math.floor(this.towns.economy.wealthOf(p)),
+      tradingWith: p.tradeTo !== undefined ? this.towns.settlementName(p.tradeTo) : undefined,
     };
   }
 
@@ -981,6 +988,7 @@ export class World {
       toggles: { ...this.toggles },
       trees: this.towns.trees.slice(),
       territory: this.towns.territory.slice(),
+      walls: this.towns.walls.slice(),
       settlements: this.towns.settlements.map((s) => ({ ...s, queue: s.queue.map((q) => ({ ...q })) })),
       buildings: this.towns.buildings.map((b) => ({ ...b })),
       people: this.state.people.map((p) => {

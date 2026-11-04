@@ -13,8 +13,8 @@ Macro to micro, with a test checkpoint at the end of each stage. Each system's t
    - 2c. The life cycle: aging, pairing, births and children, natural death, with their toggles (SPEC 10). **(done)**
 3. **Settlements, buildings and economy**, in three steps:
    - 3a. Settlements founded by people and growing through stages; land with borders; trees and stone as materials; building huts, houses and a storehouse; homes meeting the shelter need; placing buildings; the settlement panel and settlement imperatives; the settlement founding rule. **(done; buildings made bigger afterwards at Caleb's request)**
-   - 3b. Jobs and production: farms, woodcutters, quarries, mines, fishing and the like; hauling to the storehouse; children's light jobs; the job need. **(this step)**
-   - 3c. Goods, coins and trade: workshops, traders between settlements, wages, wealth and inheritance; the town and city stages; fences and gates for towns and above.
+   - 3b. Jobs and production: farms, woodcutters, quarries, mines, fishing and the like; hauling to the storehouse; children's light jobs; the job need. **(done)**
+   - 3c. Goods, coins and trade: workshops, traders between settlements, wages, wealth and inheritance; the town and city stages; fences and gates for towns and above. **(this step)**
 4. **Cultures, nations and technology:** culture formation and breaks, research, nations (placed and emerging), policies and culture support, technology, diplomacy, officials, influence, unique individuals, succession.
 5. **Military and war:** soldier types, weapons and equipment, armies and their leaders, battles with group orders and individual resolution, war declarations.
 6. **Disasters, effects, beasts and criminals;** scenario events (player- and sim-triggered) and the record of events.
@@ -49,9 +49,21 @@ Macro to micro, with a test checkpoint at the end of each stage. Each system's t
 | Question | Answer |
 | --- | --- |
 | How settlements start and grow | Named stages: a pair or family founds a camp (no formal jobs; everyone forages and builds); it becomes a village (houses, storehouse; jobs begin), then a town, then a city. |
-| Settlement imperatives | Build here, Set a focus, Send settlers, Abandon, and "something else" (what that is was not given; asked at the 3a checkpoint). |
+| Settlement imperatives | Build here, Set a focus, Send settlers, Abandon. A fifth choice, "something else", was set aside by Caleb after 3b: "I'm not sure what I meant either, so you can just disregard it." |
 | Wealth | Coins: goods have prices; people are paid for work and earn by trade. (Step 3c.) |
 | Land | Each settlement has land shown with a border; towns and above also get fencing with gates. (Fencing in step 3c, with the town stage.) |
+
+## Questions settled by the builder in Stage 3c (Caleb can change them)
+
+| Question | What 3c does |
+| --- | --- |
+| Where do coins come from? | Each settlement has a treasury. A camp has none; when it becomes a village it is given a purse (50 coins plus 3 per person), standing for coins brought in from outside. After that coins only move between people and treasuries, except at a town's mint, which strikes new coins from gold ore. |
+| How are people paid? | From their settlement's treasury: workers get 60% of what they bring to the store is worth at its price, builders 1 coin per spell of building work, minters 2 coins per gold ore. When the treasury is empty, nobody is paid until it fills again. |
+| How do coins go back to the settlement? | People buy food from the store and pottery for their homes, and adults with a home pay 1 coin a month in rent. Without rent, treasuries emptied within a few years in testing. |
+| What do people buy? | Food, when hungry, at the store's price; anyone very hungry (food under 25) who cannot pay is given one. Pottery, the one household good for now: an adult with at least 15 coins more than its price buys one a month, up to 6. Coins and pottery together are a person's wealth. |
+| Inheritance (SPEC 6, a [Claude's call] item) | Coins and pottery are shared equally among the pair (if living) and the children. Someone with neither leaves them to their settlement. |
+| What does a town have that a village does not? | A mint (gold ore into coins), townhouses (2 by 3, 10 beds, built with stone and tools) and a fence with gates. A city (200 people and 40 homes) has the same for now; nations, officials and armies come in Stages 4 and 5. |
+| Fences and gates (Caleb: for towns and above) | A wooden palisade around the town's buildings, planned once a year (see below). People cannot walk through a built fence; gates are open to all. Nothing yet comes to keep out: beasts, criminals and armies come in Stages 5 and 6. |
 
 ## Questions settled by the builder in Stage 2c (Caleb can change them)
 
@@ -60,6 +72,12 @@ Macro to micro, with a test checkpoint at the end of each stage. Each system's t
 | SPEC 10 lists "Pairing, births, and aging (turning these off freezes the population)" as one item. One switch or three? | One switch, as the spec groups them. It can be split into three. |
 | Who pairs with whom? | One man and one woman, since pairs are what births come from (SPEC 6: "specific individuals pair up and have children"). Close relatives (parent and child, brothers and sisters, half-siblings) never pair. |
 | How do children get fed? | From what a parent nearby carries when there is any; otherwise they forage close by themselves. Households come with houses (Stage 3). |
+
+## Builder's additions in Stage 3c (not named in the spec; easy to remove)
+
+- **Coins** in the inspect panel's Edit (SPEC 1: everything can be modified).
+- **Prices** beside each good in the settlement panel's store.
+- **Where a trader is going** in the inspect panel ("Taking goods to sell in …", "Bringing goods home").
 
 ## Builder's additions in Stage 3b (not named in the spec; easy to remove)
 
@@ -247,6 +265,29 @@ A step has 33 ms at 3x, so there is plenty of room for now. People only walk in 
 | Doors | People go in and out of buildings at the tile in front of their door: to sleep at home, and to the storehouse. |
 | Saving | Jobs, stores, crops and ore left are saved (world format version 6). Worlds from 3a open with no jobs, empty stores and iron and gold deposits full. |
 
+## Goods, coins and trade (Stage 3c)
+
+| Item | Choice |
+| --- | --- |
+| Goods (SPEC 8) | Food, wood, stone, iron ore, gold ore, tools and pottery, kept in each settlement's store. Clay is dug by potters and fired straight into pottery, so it is never stored. Every good is carried by a person (SPEC 8). |
+| Prices (Caleb: goods have prices) | Each settlement sets its own. A good's usual price (food 2, wood 1, stone 1, iron ore 3, gold ore 6, tools 10, pottery 5) is multiplied by how far its stock is from what the settlement wants to keep (food: 2 per person plus 10; wood 40; stone 30; iron ore 16; gold ore 8; tools a quarter of its people, at least 4; pottery half its people, at least 4), from half when it has plenty to three times when it has none. The settlement panel shows each price. |
+| Workshops | **Smithy** (2 by 2; 8 wood, 8 stone; 2 blacksmiths): takes 2 iron ore from the store and makes a tool. **Pottery** (2 by 2; 8 wood, 4 stone; 2 potters; clay within 22 tiles): potters dig clay (a clay deposit holds 20) and fire one pot from each lump. **Mint** (2 by 2; 8 wood, 14 stone, 2 tools; 1 minter; towns): takes 1 gold ore and strikes 12 coins into the treasury. A piece of work takes about 10 seconds at 1x. |
+| Tools | While the store has tools, all its settlement's workers work 1.5 times as fast (farmers tend faster; gatherers and workshops take less time), and each piece of work has a 1 in 30 chance of wearing one out. Mints and townhouses need 2 tools to build. |
+| Traders (SPEC 6: "travels and sells goods") | A **market** (3 by 3, with stalls; 12 wood, 4 stone; 2 traders) is built once a village has 25 people and another village or bigger within 90 tiles. A trader picks the run that pays best for the distance: up to 10 of something home has more of than it wants, to the settlement within 90 tiles that pays most more for it. There they sell at its price, buy up to 10 of something it has spare that home pays more for, and on coming home sell that to the store and pay home what the first load cost at home's price. They keep what is left over. |
+| Wages and wealth | See the questions above. The inspect panel shows a person's coins and pottery, and their wealth; the settlement panel shows the treasury. |
+| What settlements build | Smithies once they have a mine or iron ore in the store; potteries at 20 people with clay near; markets as above; a mint once a town has gold ore stored or near. When at least 4 adults have no work (counting jobs at workplaces already being built), a settlement adds more of what it has: woodcutter's lodges, quarries and mines up to one per 40 people (plus one), smithies and potteries up to one per 80 (plus one), and farms while its food store is not full. |
+| Saving | Coins, household goods, prices' stocks, traders' runs, fences and clay left are saved (world format version 7). Older worlds open with every clay deposit full and each village or bigger given the purse a new village gets. |
+
+## Towns, fences and gates (Stage 3c)
+
+| Item | Choice |
+| --- | --- |
+| Town and city | As set in 3a: a town needs 60 people and 12 homes, a city 200 and 40. In testing, settlements of 60 to 140 people became towns within 6 to 10 years. A town builds townhouses instead of houses once its store has 2 tools and there is stone near. |
+| Where the fence goes | Once a year (and when a settlement becomes a town), the town marks its core: every building except farms, mines, quarries, fishing huts and woodcutter's lodges, with 2 tiles around each. Groups of buildings closer than about 6 tiles are joined, holes are filled, and any building the area touches is taken in whole (so the fence never cuts through a field). The fence runs along the edge of that area, on the town's own land, never on water, and along a river or lake only where it leads out of town. Old stretches no longer on the edge are taken down. |
+| Gates | Where the fence crosses the lines straight out and diagonally out from the campfire. Any loop of fence that would have no gate gets one at its point nearest the campfire, so nobody is shut in. |
+| Building it | In a town, builders put up the fence between building sites: 1 wood a stretch, 3 a gate, from the store or from trees they cut themselves. Trees where a stretch goes are felled, and their wood goes to the store. A builder is paid 1 coin a stretch. The settlement panel shows how many stretches are built. |
+| What it looks like | A palisade of pointed navy-outlined stakes with rails, joined to the stretches beside it; gates are two posts with a crossbar. |
+
 ## Settlement imperatives (Stage 3a)
 
 | Order | What it does |
@@ -293,6 +334,10 @@ The life cycle adds a monthly check per person and a grid of people rebuilt ever
 ## Performance (Stage 3b)
 
 With jobs, hauling and workplaces: 2,000 people placed in 40 groups grew to 2,340 by year 5 with 105 settlements and 54 villages. Simulation step 3 to 3.7 ms on average, at most 18 ms (Node). In headless Chrome at 3x: 52 frames a second for the whole map and 57 at mid zoom. Two fixes came out of measuring: buildings are sent from the simulation only when their drawing changes (not on every bit of building work), and the main screen works out which tiles lie under buildings from the buildings themselves rather than by going over every tile of the map.
+
+## Performance (Stage 3c)
+
+With coins, workshops, traders and fences: 2,000 people placed in 40 groups across a Titanic map; 2,050 by year 5, with 95 settlements, 59 villages and 818 buildings. Simulation step 2.9 to 4.9 ms on average, at most 15 ms in the first busy year (Node, the same code as the worker). In headless Chrome at 3x with about 1,960 people: 47 frames a second for the whole map and 57 at mid zoom. One fix came out of measuring: the settlement bookkeeping that was being redone several times a step is done once, and housing families no longer compares every person with every other (the slowest step fell from 33 ms to 12 ms).
 
 ## Look
 

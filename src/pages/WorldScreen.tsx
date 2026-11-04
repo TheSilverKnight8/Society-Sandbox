@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router';
-import { Apple, Axe, Blocks, Eraser, Fish, Flag, Flame, Footprints, Hammer, Hand, House, ListChecks, LogOut, Maximize, Minus, Moon, Pause, Pencil, Pickaxe, Play, Plus, RotateCcw, Save, Tent, User, Users, Warehouse, Wheat, X } from 'lucide-react';
+import { Amphora, Anvil, Apple, Axe, Blocks, Building, Coins, Eraser, Fish, Flag, Flame, Footprints, Hammer, Hand, House, ListChecks, LogOut, Maximize, Minus, Moon, Pause, Pencil, Pickaxe, Play, Plus, RotateCcw, Save, Store, Tent, User, Users, Warehouse, Wheat, X } from 'lucide-react';
 import { ButtonLink, Button, IconButton, Input, Segmented, Spinner, cx } from '../components/ui';
 import { alertDialog, confirmDialog, notify, promptDialog } from '../components/dialogs';
 import { useApp } from '../lib/store';
@@ -79,6 +79,11 @@ function treeCounts(doc: WorldDoc): Uint8Array {
   return out;
 }
 
+function wallsOf(doc: WorldDoc): Uint8Array {
+  const n = doc.size * doc.size;
+  return doc.state.walls && doc.state.walls.length === n ? doc.state.walls.slice() : new Uint8Array(n);
+}
+
 function territoryOf(doc: WorldDoc): Uint16Array {
   const n = doc.size * doc.size;
   return doc.state.territory && doc.state.territory.length === n ? doc.state.territory.slice() : new Uint16Array(n);
@@ -101,6 +106,11 @@ const BUILDING_ICON: Record<number, typeof House> = {
   [BuildingKind.Quarry]: Blocks,
   [BuildingKind.Mine]: Pickaxe,
   [BuildingKind.FishingHut]: Fish,
+  [BuildingKind.Market]: Store,
+  [BuildingKind.Smithy]: Anvil,
+  [BuildingKind.Pottery]: Amphora,
+  [BuildingKind.Mint]: Coins,
+  [BuildingKind.Townhouse]: Building,
 };
 
 type OrderKind = 'move' | 'gather' | 'rest' | 'stop';
@@ -141,6 +151,7 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
   const trees = useRef(treeCounts(doc));
   const territory = useRef(territoryOf(doc));
   const covered = useRef(new Uint8Array(doc.size * doc.size));
+  const walls = useRef(wallsOf(doc));
   const buildingsRef = useRef<BuildingView[]>([]);
   const buildingAt = useRef(new Map<number, BuildingView>());
   const settlementsRef = useRef<SettlementView[]>([]);
@@ -237,7 +248,7 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
   // Start the simulation and the view once, when the screen opens.
   useEffect(() => {
     const canvas = canvasRef.current!;
-    const view = new IsoView(canvas, { size: doc.size, terrain: doc.terrain, elevation: doc.elevation, deposit: doc.deposit, empty: empty.current, trees: trees.current, territory: territory.current, covered: covered.current });
+    const view = new IsoView(canvas, { size: doc.size, terrain: doc.terrain, elevation: doc.elevation, deposit: doc.deposit, empty: empty.current, trees: trees.current, territory: territory.current, covered: covered.current, walls: walls.current });
     const client = new SimClient();
     viewRef.current = view;
     clientRef.current = client;
@@ -269,6 +280,7 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
         const v = tc[k + 2];
         if (f === TileField.Empty) empty.current[t] = v;
         else if (f === TileField.Trees) trees.current[t] = v;
+        else if (f === TileField.Walls) walls.current[t] = v;
         else territory.current[t] = v;
         stockDirty.add(t);
       }
@@ -485,8 +497,8 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
               const t = y * doc.size + x;
               v.traceTile(ctx, x, y);
               const ter = doc.terrain[t];
-              const ok = kindAllowsTerrain(placing, ter, trees.current[t] === 0);
-              if (!ok || buildingAt.current.has(t)) fits = false;
+              const ok = kindAllowsTerrain(placing, ter, true);
+              if (!ok || buildingAt.current.has(t) || walls.current[t] !== 0) fits = false;
               lo = Math.min(lo, doc.elevation[t]);
               hi = Math.max(hi, doc.elevation[t]);
             }
@@ -648,9 +660,10 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
     trees.current.set(treeCounts(setup));
     territory.current.set(territoryOf(setup));
     covered.current.fill(0);
+    walls.current.set(wallsOf(setup));
     buildingsRef.current = [];
     buildingAt.current = new Map();
-    viewRef.current?.replaceTiles({ size: setup.size, terrain: doc.terrain, elevation: doc.elevation, deposit: doc.deposit, empty: empty.current, trees: trees.current, territory: territory.current, covered: covered.current });
+    viewRef.current?.replaceTiles({ size: setup.size, terrain: doc.terrain, elevation: doc.elevation, deposit: doc.deposit, empty: empty.current, trees: trees.current, territory: territory.current, covered: covered.current, walls: walls.current });
     choose([]);
     chooseSettlement(null);
     setSavedTick(setup.state.tick);
@@ -977,6 +990,9 @@ const TASK_TEXT: Record<string, string> = {
   harvest: 'Harvesting',
   mine: 'Mining ore',
   fish: 'Fishing',
+  dig: 'Digging clay',
+  craft: 'Working at the workshop',
+  trade: 'Trading',
   quarry: 'Breaking stone',
   build: 'Building',
 };
@@ -989,6 +1005,9 @@ const WALK_TEXT: Record<string, string> = {
   stone: 'Going for stone',
   site: 'Going to a building site',
   settle: 'Going to found a settlement',
+  trade: 'Taking goods to sell',
+  tradeHome: 'Bringing goods home',
+  fence: 'Putting up the fence',
   job: 'Going to work',
   deliver: 'Taking goods to the store',
   fetch: 'Fetching materials from the store',
@@ -996,6 +1015,7 @@ const WALK_TEXT: Record<string, string> = {
 };
 
 function doingText(d: PersonDetails) {
+  if (d.task === 'walk' && d.purpose === 'trade' && d.tradingWith) return `Taking goods to sell in ${d.tradingWith}`;
   if (d.task === 'walk') return (d.purpose && WALK_TEXT[d.purpose]) || 'Walking';
   if (d.task === 'sleep') return d.hasHome ? 'Sleeping' : 'Sleeping out in the open';
   return TASK_TEXT[d.task] ?? d.task;
@@ -1047,7 +1067,7 @@ function InspectPanel({
     if (d.jobNeed === 'unmet') needs.push('Job');
   }
   return (
-    <div className="absolute right-3 top-16 max-h-[calc(100%-12rem)] w-72 overflow-y-auto rounded-xl border border-line bg-surface/97 p-3.5 text-sm shadow-pop scrollbar-thin">
+    <div className="absolute right-3 top-16 max-h-[calc(100%-14.5rem)] w-72 overflow-y-auto rounded-xl border border-line bg-surface/97 p-3.5 text-sm shadow-pop scrollbar-thin">
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-2.5">
           {d && (
@@ -1136,6 +1156,16 @@ function InspectPanel({
             <dd>{doingText(d)}</dd>
             <dt className="text-muted">Unmet needs</dt>
             <dd>{needs.length ? needs.join(', ') : 'None'}</dd>
+            <dt className="text-muted">Coins</dt>
+            <dd>
+              {d.coins}
+              {d.goods > 0 && (
+                <span className="text-muted">
+                  {' '}
+                  + {d.goods} pottery (wealth {d.wealth})
+                </span>
+              )}
+            </dd>
             <dt className="text-muted">Lives in</dt>
             <dd>{d.settlement ?? <span className="text-muted">No settlement</span>}</dd>
             <dt className="text-muted">Carrying</dt>
@@ -1223,6 +1253,19 @@ function EditPerson({ details, onEdit, onUnpair }: { details: PersonDetails; onE
           </Button>
         )}
       </div>
+      <label className="flex items-center gap-2">
+        <span className="w-10 text-xs text-muted">Coins</span>
+        <Input
+          className="h-8 w-24 text-sm"
+          inputMode="numeric"
+          defaultValue={String(details.coins)}
+          key={details.id}
+          onBlur={(e) => onEdit({ coins: Number(e.target.value.replace(/\D/g, '')) || 0 })}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') onEdit({ coins: Number((e.target as HTMLInputElement).value.replace(/\D/g, '')) || 0 });
+          }}
+        />
+      </label>
     </div>
   );
 }
@@ -1302,8 +1345,8 @@ function OrderMenu({ active, label, icon, options }: { active: boolean; label: s
 function SettlementPanel({ details, onClose, onOrder }: { details: SettlementDetails | null; onClose: () => void; onOrder: (ps: NonNullable<PendingSettlement>) => void }) {
   const d = details;
   return (
-    <div className="absolute right-3 top-16 w-72 rounded-xl border border-line bg-surface/97 p-3.5 text-sm shadow-pop">
-      <div className="flex items-start justify-between gap-2">
+    <div className="absolute right-3 top-16 flex max-h-[calc(100%-14.5rem)] w-72 flex-col rounded-xl border border-line bg-surface/97 p-3.5 text-sm shadow-pop">
+      <div className="flex shrink-0 items-start justify-between gap-2">
         <div>
           <p className="label-caps text-muted">{d ? (d.abandoned ? 'Abandoned settlement' : STAGE_NAME[d.stage]) : 'Settlement'}</p>
           <p className="font-display text-lg uppercase leading-tight">{d ? d.name : '…'}</p>
@@ -1314,54 +1357,73 @@ function SettlementPanel({ details, onClose, onOrder }: { details: SettlementDet
       </div>
       {d && (
         <>
-          <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
-            <dt className="text-muted">Founded</dt>
-            <dd>Year {d.foundedYear}</dd>
-            <dt className="text-muted">People</dt>
-            <dd>{d.people}</dd>
-            <dt className="text-muted">Homes</dt>
-            <dd>
-              {d.housed} housed, room for {d.homes}
-            </dd>
-            <dt className="text-muted">Focus</dt>
-            <dd>{FOCUS_LABEL[d.focus]}</dd>
-            <dt className="text-muted">Jobs</dt>
-            <dd>
-              {d.stage === 'camp' ? (
-                <span className="text-muted">None yet (camps have no formal jobs)</span>
-              ) : (
+          <div className="-mr-2 mt-3 min-h-0 flex-1 overflow-y-auto pr-2 scrollbar-thin">
+            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+              <dt className="text-muted">Founded</dt>
+              <dd>Year {d.foundedYear}</dd>
+              <dt className="text-muted">People</dt>
+              <dd>{d.people}</dd>
+              <dt className="text-muted">Homes</dt>
+              <dd>
+                {d.housed} housed, room for {d.homes}
+              </dd>
+              <dt className="text-muted">Focus</dt>
+              <dd>{FOCUS_LABEL[d.focus]}</dd>
+              <dt className="text-muted">Jobs</dt>
+              <dd>
+                {d.stage === 'camp' ? (
+                  <span className="text-muted">None yet (camps have no formal jobs)</span>
+                ) : (
+                  <>
+                    {d.jobsFilled} of {d.jobsOffered} filled
+                    {d.jobless > 0 && <span className="text-warn">, {d.jobless} without work</span>}
+                    {d.lightJobs > 0 && <span className="text-muted">, {d.lightJobs} children helping</span>}
+                  </>
+                )}
+              </dd>
+            </dl>
+            <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+              <dt className="text-muted">Treasury</dt>
+              <dd>{d.coins} coins</dd>
+              {(d.stage === 'town' || d.stage === 'city') && (
                 <>
-                  {d.jobsFilled} of {d.jobsOffered} filled
-                  {d.jobless > 0 && <span className="text-warn">, {d.jobless} without work</span>}
-                  {d.lightJobs > 0 && <span className="text-muted">, {d.lightJobs} children helping</span>}
+                  <dt className="text-muted">Fence</dt>
+                  <dd>
+                    {d.fenceBuilt} of {d.fenceBuilt + d.fencePlanned} stretches built
+                  </dd>
                 </>
               )}
-            </dd>
-          </dl>
-          <p className="label-caps mt-3 text-muted">Store</p>
-          <ul className="mt-1 grid grid-cols-2 gap-x-4 gap-y-0.5">
-            {GOODS.map((g) => (
-              <li key={g} className="flex justify-between">
-                <span>{GOOD_NAME[g]}</span>
-                <span className={d.stock[g] ? '' : 'text-muted'}>{d.stock[g]}</span>
-              </li>
-            ))}
-          </ul>
-          <p className="label-caps mt-3 text-muted">Buildings</p>
-          <ul className="mt-1 space-y-0.5">
-            {d.buildings.map((b) => (
-              <li key={b.kind} className="flex justify-between">
-                <span>{BUILDINGS[b.kind].name}</span>
-                <span className="text-muted">
-                  {b.done}
-                  {b.building ? ` (+${b.building} being built)` : ''}
-                </span>
-              </li>
-            ))}
-          </ul>
-          {d.queue > 0 && <p className="mt-1 text-xs text-muted">{d.queue} ordered, not started yet</p>}
+            </dl>
+            <p className="label-caps mt-3 flex justify-between text-muted">
+              <span>Store</span>
+              <span>price</span>
+            </p>
+            <ul className="mt-1 space-y-0.5">
+              {GOODS.map((g) => (
+                <li key={g} className="flex justify-between">
+                  <span>{GOOD_NAME[g]}</span>
+                  <span className={d.stock[g] ? '' : 'text-muted'}>
+                    {d.stock[g]} <span className="text-[0.6875rem] text-muted">· {d.prices[g]}</span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <p className="label-caps mt-3 text-muted">Buildings</p>
+            <ul className="mt-1 space-y-0.5">
+              {d.buildings.map((b) => (
+                <li key={b.kind} className="flex justify-between">
+                  <span>{BUILDINGS[b.kind].name}</span>
+                  <span className="text-muted">
+                    {b.done}
+                    {b.building ? ` (+${b.building} being built)` : ''}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            {d.queue > 0 && <p className="mt-1 text-xs text-muted">{d.queue} ordered, not started yet</p>}
+          </div>
           {!d.abandoned && (
-            <div className="mt-3 flex flex-wrap gap-1.5">
+            <div className="mt-3 flex shrink-0 flex-wrap gap-1.5">
               <Button size="xs" onClick={() => onOrder({ kind: 'build', stage: 'which', building: BuildingKind.Hut })}>
                 Build…
               </Button>
@@ -1373,7 +1435,7 @@ function SettlementPanel({ details, onClose, onOrder }: { details: SettlementDet
               </Button>
             </div>
           )}
-          <p className="mt-2 text-xs text-muted">More orders (focus, other buildings) are in the Imperatives tab.</p>
+          <p className="mt-2 shrink-0 text-xs text-muted">More orders (focus, other buildings) are in the Imperatives tab.</p>
         </>
       )}
     </div>

@@ -13,10 +13,10 @@ export type Speed = 0 | 1 | 2 | 3;
 import type { BuildingKind, Good, JobKind, SettlementStage } from './buildings';
 
 /** What a person is doing right now. */
-export type Task = 'idle' | 'walk' | 'gather' | 'eat' | 'sleep' | 'chop' | 'quarry' | 'build' | 'farm' | 'harvest' | 'mine' | 'fish';
+export type Task = 'idle' | 'walk' | 'gather' | 'eat' | 'sleep' | 'chop' | 'quarry' | 'build' | 'farm' | 'harvest' | 'mine' | 'fish' | 'dig' | 'craft' | 'trade';
 
 /** Why a person is walking. */
-export type Purpose = 'stroll' | 'food' | 'order' | 'home' | 'wood' | 'stone' | 'site' | 'settle' | 'job' | 'deliver' | 'fetch' | 'store';
+export type Purpose = 'stroll' | 'food' | 'order' | 'home' | 'wood' | 'stone' | 'site' | 'settle' | 'job' | 'deliver' | 'fetch' | 'store' | 'trade' | 'tradeHome' | 'fence';
 
 /** An imperative given to a unit by the player (SPEC 4). */
 export interface Order {
@@ -72,7 +72,16 @@ export interface Person {
   /** Their workplace (a building), if they have a job. */
   job?: number;
   /** What they are doing for their job, while walking to it. */
-  jobStep?: 'tend' | 'harvest' | 'collect' | 'gather' | 'fetch-wood' | 'fetch-stone';
+  jobStep?: 'tend' | 'harvest' | 'collect' | 'gather' | 'fetch-wood' | 'fetch-stone' | 'fetch-tools' | 'fetch-input' | 'craft' | 'fetch-fence' | 'trade-load';
+  /** Their own coins (Caleb: coins; SPEC 6: wealth earned from jobs and trade). */
+  coins?: number;
+  /** Household goods they own (pottery). Wealth is coins plus what they own. */
+  goods?: number;
+  /** A trader's run: where they are taking goods, and what they paid at home for them. */
+  tradeTo?: number;
+  tradeOwed?: number;
+  /** The fence tile a builder is putting up. */
+  fenceTile?: number;
   /** The construction site they are working for. */
   site?: number;
   /** Where they are going to found a settlement (sent as settlers). */
@@ -98,6 +107,10 @@ export interface Settlement {
   abandoned?: boolean;
   /** What is in its store. */
   stock?: Partial<Record<Good, number>>;
+  /** Its treasury: the coins it pays wages from and takes for goods. */
+  coins?: number;
+  /** Fence tiles it plans to put up (towns and cities). */
+  fencePlan?: number[];
 }
 
 export interface Building {
@@ -114,6 +127,7 @@ export interface Building {
   /** Materials brought so far, while it is being built. */
   wood: number;
   stone: number;
+  tools?: number;
   /** A farm's crop, 0 (just sown) to 1 (ripe). */
   growth?: number;
   /** Goods made here waiting to be carried to the store (a farm's harvest). */
@@ -152,7 +166,12 @@ export interface SimState {
   buildings?: Building[];
   nextSettlementId?: number;
   nextBuildingId?: number;
+  /** Fences and gates on each tile (see Wall). */
+  walls?: Uint8Array;
 }
+
+/** What stands on a tile as a settlement's fence. Built fences cannot be walked through; gates can. */
+export const Wall = { None: 0, PlannedFence: 1, Fence: 2, PlannedGate: 3, Gate: 4 } as const;
 
 export function emptyState(seed: number): SimState {
   return { tick: 0, nextId: 1, rng: seed >>> 0, people: [], toggles: { ...DEFAULT_TOGGLES }, settlements: [], buildings: [], nextSettlementId: 1, nextBuildingId: 1 };
@@ -170,6 +189,12 @@ export interface SettlementDetails {
   buildings: { kind: BuildingKind; done: number; building: number }[];
   focus: Focus;
   stock: Record<Good, number>;
+  coins: number;
+  /** What each good costs there now. */
+  prices: Record<Good, number>;
+  /** Fence tiles built and planned (towns and cities). */
+  fenceBuilt: number;
+  fencePlanned: number;
   /** Jobs filled and offered, adults with no job, and children in light jobs. */
   jobsFilled: number;
   jobsOffered: number;
@@ -230,11 +255,18 @@ export interface PersonDetails {
   job?: { kind: JobKind; light: boolean; at: string };
   /** Whether a job is one of their needs here (adults in a village or bigger), and whether it is met. */
   jobNeed: 'met' | 'unmet' | 'none';
+  coins: number;
+  goods: number;
+  /** Coins plus household goods at their usual price. */
+  wealth: number;
+  /** Where a trader is taking goods, if on a run. */
+  tradingWith?: string;
 }
 
 /** Changes the player can make to a person by hand (SPEC 1: everything can be modified). */
 export interface PersonEdit {
   leaveJob?: boolean;
+  coins?: number;
   health?: number;
   food?: number;
   rest?: number;
@@ -266,7 +298,7 @@ export type ToSim =
   | { type: 'spawnTest'; n: number; x: number; y: number };
 
 /** What a tile change is about. */
-export const TileField = { Empty: 0, Trees: 1, Territory: 2 } as const;
+export const TileField = { Empty: 0, Trees: 1, Territory: 2, Walls: 3 } as const;
 
 /** Poses for drawing. */
 export const Pose = { Stand: 0, Sleep: 1, Work: 2 } as const;

@@ -13,8 +13,10 @@ import type { WorldDoc } from './types';
 //   5  Buildings span several tiles and can be turned (Building.rot). Buildings saved in 4 keep
 //      their corner tile and take their new size from there (nothing to change in the data).
 //   6  Stage 3b: jobs, settlement stores, farm crops; iron and gold deposits hold ore.
+//   7  Stage 3c: coins (people and treasuries), household goods, traders' runs, tools and
+//      pottery, clay deposits hold clay, fences and gates.
 
-export const WORLD_FORMAT_VERSION = 6;
+export const WORLD_FORMAT_VERSION = 7;
 
 export function upgradeWorld(version: number, doc: WorldDoc): WorldDoc {
   if (version > WORLD_FORMAT_VERSION) throw new Error('This was saved by a newer version of the app. Reload the app to update it, then try again.');
@@ -36,6 +38,23 @@ export function upgradeWorld(version: number, doc: WorldDoc): WorldDoc {
     const stock = doc.state.stock.slice();
     for (let i = 0; i < stock.length; i++) if (doc.deposit[i] === Deposit.Iron || doc.deposit[i] === Deposit.Gold) stock[i] = 20;
     doc = { ...doc, state: { ...doc.state, stock } };
+  }
+  if (version < 7) {
+    let state = doc.state;
+    if (state.stock && state.trees) {
+      // Clay deposits start full.
+      const stock = state.stock.slice();
+      for (let i = 0; i < stock.length; i++) if (doc.deposit[i] === Deposit.Clay) stock[i] = 20;
+      state = { ...state, stock };
+    }
+    // Settlements that were already villages or bigger get the purse a new village gets.
+    const counts = new Map<number, number>();
+    for (const p of state.people) if (p.settlement !== undefined) counts.set(p.settlement, (counts.get(p.settlement) ?? 0) + 1);
+    state = {
+      ...state,
+      settlements: (state.settlements ?? []).map((s) => (s.stage === 'camp' || s.coins !== undefined ? s : { ...s, coins: 50 + 3 * (counts.get(s.id) ?? 0) })),
+    };
+    doc = { ...doc, state };
   }
   return doc;
 }

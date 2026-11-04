@@ -29,4 +29,6 @@ export interface TileSource {
   territory?: Uint16Array;
   /** 1 where a building stands: the tile's drawings (grass, hills, deposits) are left off. */
   covered?: Uint8Array;
+  /** Fences and gates (see Wall in sim/types.ts): 2 a built fence, 4 a built gate. */
+  walls?: Uint8Array;
 }
