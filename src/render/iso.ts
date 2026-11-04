@@ -31,4 +31,6 @@ export interface TileSource {
   covered?: Uint8Array;
   /** Fences and gates (see Wall in sim/types.ts): 2 a built fence, 4 a built gate. */
   walls?: Uint8Array;
+  /** On a colored map view (cultures, later nations): each settlement's land tint, by settlement ID. Unset: the plain red tint. */
+  landColors?: Map<number, string>;
 }

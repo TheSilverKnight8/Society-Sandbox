@@ -823,7 +823,9 @@ export class Economy {
     const farms = count(BuildingKind.Farm);
     const fishing = count(BuildingKind.FishingHut);
     // What its farms and fishing huts feed, reckoned low (farmers also build, and nothing grows in winter), with a margin.
-    const fed = farms * 12 + fishing * 8;
+    // An agrarian culture reckons lower still, so it keeps more fields (Stage 4a).
+    const traits = this.w.cultures?.traitsOf(s);
+    const fed = farms * (traits?.livelihood === 'agrarian' ? 10 : 12) + fishing * 8;
     const st = this.stockOf(s);
     const food = st.food;
     const wantFood = (fed < people * 1.2 && food < people * 2) || food < people;
@@ -849,7 +851,8 @@ export class Economy {
       if (!count(BuildingKind.Smithy) && (st.iron >= 4 || count(BuildingKind.Mine))) options.push({ kind: BuildingKind.Smithy, test: any });
       if (!count(BuildingKind.Pottery) && people >= 20 && near(this.clayTiles, 28)) options.push({ kind: BuildingKind.Pottery, test: (a) => this.nearList(this.clayTiles, a, 22) });
       const neighbor = this.t.settlements.some((o) => o !== s && !o.abandoned && o.stage !== 'camp' && this.t.dist2(o.center, center) <= TRADE_RANGE * TRADE_RANGE);
-      if (!count(BuildingKind.Market) && people >= 25 && neighbor) options.push({ kind: BuildingKind.Market, test: any });
+      // A mercantile culture builds its market sooner (Stage 4a).
+      if (!count(BuildingKind.Market) && people >= (traits?.livelihood === 'mercantile' ? 15 : 25) && neighbor) options.push({ kind: BuildingKind.Market, test: any });
       if ((s.stage === 'town' || s.stage === 'city') && !count(BuildingKind.Mint) && (st.gold >= 3 || near(this.goldTiles, 30))) options.push({ kind: BuildingKind.Mint, test: any });
     };
     // When many adults have no work, a growing settlement adds more of the workplaces it already has.

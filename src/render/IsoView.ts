@@ -128,6 +128,15 @@ export class IsoView {
     this.redraw();
   }
 
+  /** Colors settlements' land for a map view (cultures, nations), or back to plain (null). Redraws the terrain. */
+  setLandColors(colors: Map<number, string> | null) {
+    if (colors) this.src.landColors = colors;
+    else delete this.src.landColors;
+    this.chunks.clear();
+    this.terrainDirty = true;
+    this.redraw();
+  }
+
   /** Tells the view these tiles (indexes) changed. */
   tilesChanged(tiles: Iterable<number>) {
     this.chunks.invalidate(tiles);

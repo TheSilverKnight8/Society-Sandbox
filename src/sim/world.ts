@@ -3,6 +3,7 @@ import { randomLook } from './look';
 import { PathFinder } from './path';
 import { packLook, unpackLook } from './look';
 import { Towns } from './towns';
+import { Cultures } from './cultures';
 import { BUILDINGS } from './buildings';
 import {
   ADULT_AGE,
@@ -162,6 +163,7 @@ export class World {
   private grid = new Map<number, Person[]>();
   readonly toggles: Toggles;
   readonly towns: Towns;
+  readonly cultures: Cultures;
   /** Why people died recently (for the inspect panel); cleared as it is read. */
   readonly deaths = new Map<number, string>();
 
@@ -208,6 +210,7 @@ export class World {
     }
     this.towns = new Towns(this);
     this.finder.walls = this.towns.walls;
+    this.cultures = new Cultures(this);
   }
 
   /** Records that a tile's drawing changed (deposit used up or back, trees, land). */
@@ -247,6 +250,7 @@ export class World {
     this.servePaths();
     this.regrow();
     this.towns.step();
+    if (st.tick % TICKS_PER_MONTH === 13) this.cultures.monthly();
     if (this.toggles.lifeCycle) {
       if (st.tick % 25 === 0) this.buildGrid();
     } else {
@@ -377,6 +381,7 @@ export class World {
     };
     st.people.push(child);
     this.byId.set(child.id, child);
+    this.cultures.onBirth(child, mother, father);
     delete mother.pregnant;
     mother.lastBirth = st.tick;
   }
@@ -460,8 +465,9 @@ export class World {
         }
         return;
       case 'walk':
-        // A stroll gives way to hunger or tiredness.
-        if (p.purpose === 'stroll' && (p.food < HUNGRY || p.rest < TIRED) && (this.state.tick + p.id) % 10 === 0) {
+        // A stroll gives way to hunger or tiredness; settlers on the road stop to eat when they must.
+        const settlerStops = p.purpose === 'settle' && (p.food < STARVING || (p.food < HUNGRY && p.carry > 0));
+        if (((p.purpose === 'stroll' && (p.food < HUNGRY || p.rest < TIRED)) || settlerStops) && (this.state.tick + p.id) % 10 === 0) {
           this.stop(p);
           p.wait = 0;
           return;
@@ -512,7 +518,6 @@ export class World {
         }
       }
     }
-    if (p.settleAt !== undefined) return this.goTo(p, p.settleAt, 'settle');
     // Someone hungry with food in hand eats before anything else; someone starving looks for food
     // before lying down, unless they cannot stay awake.
     if (p.food < HUNGRY && p.carry > 0) return this.eat(p);
@@ -546,9 +551,12 @@ export class World {
         const t = this.findFood(p, this.tileOf(p), r);
         if (t >= 0) return this.headFor(p, t);
       }
-      // No food anywhere near: wander further and look again.
+      // No food anywhere near: settlers press on; others wander further and look again.
+      if (p.settleAt !== undefined) return this.goTo(p, p.settleAt, 'settle', true);
       return this.stroll(p, 25);
     }
+    // Settlers on their way to found a settlement keep going once fed and rested.
+    if (p.settleAt !== undefined) return this.goTo(p, p.settleAt, 'settle', true);
     if (p.carry < CARRY_MAX - 1 && p.food < PECKISH) {
       const t = this.findFood(p, this.tileOf(p), 10);
       if (t >= 0) return this.headFor(p, t);
@@ -851,6 +859,7 @@ export class World {
         this.avoid.delete(p.id);
         this.latestReq.delete(p.id);
         this.towns.leave(p);
+        this.cultures?.onGone(p);
       } else keep.push(p);
     }
     this.state.people = keep;
@@ -880,6 +889,7 @@ export class World {
     if (e.food !== undefined) p.food = clamp(e.food);
     if (e.rest !== undefined) p.rest = clamp(e.rest);
     if (e.sex !== undefined) p.sex = e.sex;
+    if (e.culture !== undefined) this.cultures.setPersonCulture(p, e.culture);
     if (e.ageYears !== undefined) p.born = this.state.tick - Math.floor(Math.max(0, e.ageYears) * TICKS_PER_YEAR) - (this.state.tick - p.born) % TICKS_PER_YEAR;
   }
 
@@ -945,6 +955,7 @@ export class World {
       goods: p.goods ?? 0,
       wealth: Math.floor(this.towns.economy.wealthOf(p)),
       tradingWith: p.tradeTo !== undefined ? this.towns.settlementName(p.tradeTo) : undefined,
+      culture: p.culture,
     };
   }
 
@@ -992,9 +1003,11 @@ export class World {
     const t = this.towns;
     const buildings = t.buildingsChanged ? t.buildingViews() : undefined;
     const settlements = t.settlementsChanged ? t.settlementViews() : undefined;
+    const cultures = this.cultures.changed ? this.cultures.views() : undefined;
     t.buildingsChanged = false;
     t.settlementsChanged = false;
-    return { tick: this.state.tick, ids, pos, look, flags, tileChanges, buildings, settlements, stepMs };
+    this.cultures.changed = false;
+    return { tick: this.state.tick, ids, pos, look, flags, tileChanges, buildings, settlements, cultures, stepMs };
   }
 
   /** A copy of everything that is saved. */
@@ -1009,6 +1022,7 @@ export class World {
       walls: this.towns.walls.slice(),
       settlements: this.towns.settlements.map((s) => ({ ...s, queue: s.queue.map((q) => ({ ...q })) })),
       buildings: this.towns.buildings.map((b) => ({ ...b })),
+      cultures: this.cultures.list.map((c) => ({ ...c, traits: { ...c.traits } })),
       people: this.state.people.map((p) => {
         const q: Person = { ...p, wait: Number.isFinite(p.wait) ? Math.min(p.wait, 100) : 0 };
         // Routes and claims are not saved; anyone on the move starts again from standing.

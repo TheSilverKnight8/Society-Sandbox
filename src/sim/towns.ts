@@ -2,7 +2,7 @@ import { hash2 } from '../lib/rng';
 import { Deposit, Terrain, isWater } from '../map/terrain';
 import { BUILDINGS, BuildingKind, STAGES, STAGE_NEEDS, anchorFor, footprint, kindAllowsTerrain, needsShore, settlementName, type BuildingDef } from './buildings';
 import { Economy } from './economy';
-import { ADULT_AGE, TICKS_PER_MONTH, TICKS_PER_YEAR, TileField, Wall, type Building, type BuildingView, type Focus, type Person, type Settlement, type SettlementDetails, type SettlementView } from './types';
+import { ADULT_AGE, TICKS_PER_MONTH, TICKS_PER_YEAR, TileField, Wall, type Building, type BuildingView, type Person, type Settlement, type SettlementDetails, type SettlementOrder, type SettlementView } from './types';
 import type { World } from './world';
 
 // Settlements, buildings and building work (Stage 3a; SPEC 7 and 8).
@@ -1241,7 +1241,7 @@ export class Towns {
     this.buildingsChanged = true;
   }
 
-  order(id: number, o: { kind: 'build'; building: BuildingKind; tile: number; rot: 0 | 1 } | { kind: 'focus'; focus: Focus } | { kind: 'settlers'; tile: number } | { kind: 'abandon' }) {
+  order(id: number, o: SettlementOrder) {
     const s = this.sById.get(id);
     if (!s || s.abandoned) return;
     const w = this.w;
@@ -1274,7 +1274,14 @@ export class Towns {
           if (partner && partner.settlement === s.id) leaving.add(partner);
           for (const q of members) if (w.ageOf(q) < ADULT_AGE && (q.mother === p.id || q.father === p.id)) leaving.add(q);
         }
+        const store = this.economy.stockOf(s);
         for (const p of leaving) {
+          // Food for the road, from the store.
+          const food = Math.min(3 - p.carry, Math.floor(store.food));
+          if (food > 0) {
+            store.food -= food;
+            p.carry += food;
+          }
           w.stop(p);
           this.dropWork(p);
           delete p.settlement;
@@ -1283,13 +1290,16 @@ export class Towns {
           this.economy.quit(p);
           p.settleAt = o.tile;
           delete p.order;
-          w.goTo(p, o.tile, 'settle');
+          w.goTo(p, o.tile, 'settle', true);
         }
         this.recount();
         return;
       }
       case 'abandon':
         this.abandon(s);
+        return;
+      case 'breakCulture':
+        w.cultures.orderBreak(s.id);
         return;
     }
   }
@@ -1382,6 +1392,10 @@ export class Towns {
         const j = this.economy.jobCounts(s);
         return { jobsFilled: j.filled, jobsOffered: j.offered, jobless: j.jobless, lightJobs: j.light };
       })(),
+      ...(() => {
+        const c = this.w.cultures.ofSettlement(s.id);
+        return { culture: c.culture, otherCultures: c.others };
+      })(),
     };
   }
 
@@ -1394,6 +1408,6 @@ export class Towns {
   }
 
   settlementViews(): SettlementView[] {
-    return this.settlements.map((s) => ({ id: s.id, name: s.name, stage: s.stage, center: s.center, people: this.counts.get(s.id)?.people ?? 0, abandoned: !!s.abandoned }));
+    return this.settlements.map((s) => ({ id: s.id, name: s.name, stage: s.stage, center: s.center, people: this.counts.get(s.id)?.people ?? 0, abandoned: !!s.abandoned, culture: this.w.cultures?.dominant.get(s.id) }));
   }
 }

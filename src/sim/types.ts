@@ -88,6 +88,10 @@ export interface Person {
   settleAt?: number;
   /** Asleep in their home (not drawn; shelter met). */
   indoors?: boolean;
+  /** Their culture (SPEC 6: exactly one once a culture exists; they can start with none). */
+  culture?: number;
+  /** For someone with no settlement and no culture: since when (a culture forms among them after a while). */
+  cultureless?: number;
 }
 
 export type Focus = 'balanced' | 'food' | 'housing' | 'goods';
@@ -111,6 +115,33 @@ export interface Settlement {
   coins?: number;
   /** Fence tiles it plans to put up (towns and cities). */
   fencePlan?: number[];
+  /** Since when none of its people has had a culture (a culture forms after a while; SPEC 7). Unset: since it was founded. */
+  cultureless?: number;
+  /** Since when it has been far from every other settlement of its culture (it may break away; Caleb, Stage 4). */
+  farSince?: number;
+}
+
+/** A culture's traits: one side of each pair (SPEC 11: culture traits; the list is the builder's). */
+export interface CultureTraits {
+  temper: 'martial' | 'peaceful';
+  livelihood: 'mercantile' | 'agrarian';
+  outlook: 'traditional' | 'progressive';
+  order: 'hierarchical' | 'communal';
+}
+
+/** A culture (SPEC 7): it only emerges from people, and the player can edit it afterwards. */
+export interface Culture {
+  id: number;
+  name: string;
+  /** Its color on the culture map view (an index into CULTURE_COLORS). */
+  color: number;
+  founded: number;
+  /** The settlement it formed in, and the culture it broke away from, if any. */
+  origin?: number;
+  parent?: number;
+  traits: CultureTraits;
+  /** When its last member died or left it. */
+  extinct?: number;
 }
 
 export interface Building {
@@ -140,9 +171,11 @@ export interface Toggles {
   lifeCycle: boolean;
   /** People founding settlements by themselves (SPEC 10). */
   founding: boolean;
+  /** Cultures forming and breaking away by themselves (SPEC 10: culture formation). */
+  cultures: boolean;
 }
 
-export const DEFAULT_TOGGLES: Toggles = { lifeCycle: true, founding: true };
+export const DEFAULT_TOGGLES: Toggles = { lifeCycle: true, founding: true, cultures: true };
 
 /** Life stages, for drawing and the inspect panel. */
 export const ADULT_AGE = 14;
@@ -168,6 +201,8 @@ export interface SimState {
   nextBuildingId?: number;
   /** Fences and gates on each tile (see Wall). */
   walls?: Uint8Array;
+  cultures?: Culture[];
+  nextCultureId?: number;
 }
 
 /** What stands on a tile as a settlement's fence. Built fences cannot be walked through; gates can. */
@@ -202,6 +237,9 @@ export interface SettlementDetails {
   lightJobs: number;
   queue: number;
   abandoned: boolean;
+  /** Its culture (the one most of its people hold), and how many other cultures live there. */
+  culture?: number;
+  otherCultures: number;
 }
 
 /** A building, as drawn. */
@@ -227,6 +265,29 @@ export interface SettlementView {
   center: number;
   people: number;
   abandoned: boolean;
+  /** The culture most of its people hold. */
+  culture?: number;
+}
+
+/** A culture, as listed for the app. */
+export interface CultureView {
+  id: number;
+  name: string;
+  color: number;
+  foundedYear: number;
+  members: number;
+  settlements: number;
+  traits: CultureTraits;
+  origin?: string;
+  parent?: number;
+  extinctYear?: number;
+}
+
+/** Changes the player can make to a culture (SPEC 7: cultures can be edited after they emerge). */
+export interface CultureEdit {
+  name?: string;
+  color?: number;
+  traits?: Partial<CultureTraits>;
 }
 
 /** What the inspect panel shows about one person. */
@@ -261,6 +322,7 @@ export interface PersonDetails {
   wealth: number;
   /** Where a trader is taking goods, if on a run. */
   tradingWith?: string;
+  culture?: number;
 }
 
 /** Changes the player can make to a person by hand (SPEC 1: everything can be modified). */
@@ -272,6 +334,8 @@ export interface PersonEdit {
   rest?: number;
   sex?: 0 | 1;
   ageYears?: number;
+  /** A culture's ID, or null for none. */
+  culture?: number | null;
 }
 
 // ---------------------------------------------------------------- messages
@@ -291,11 +355,20 @@ export type ToSim =
   | { type: 'placeBuilding'; kind: BuildingKind; tile: number; rot: 0 | 1 }
   | { type: 'removeBuildings'; tiles: number[] }
   | { type: 'watchSettlement'; id: number | null }
-  | { type: 'settlementOrder'; id: number; order: { kind: 'build'; building: BuildingKind; tile: number; rot: 0 | 1 } | { kind: 'focus'; focus: Focus } | { kind: 'settlers'; tile: number } | { kind: 'abandon' } }
+  | { type: 'settlementOrder'; id: number; order: SettlementOrder }
+  | { type: 'cultureEdit'; id: number; edit: CultureEdit }
   | { type: 'unpair'; id: number }
   | { type: 'save'; req: number }
   /** Development only: adds n people on land near (x, y), for speed tests. */
   | { type: 'spawnTest'; n: number; x: number; y: number };
+
+export type SettlementOrder =
+  | { kind: 'build'; building: BuildingKind; tile: number; rot: 0 | 1 }
+  | { kind: 'focus'; focus: Focus }
+  | { kind: 'settlers'; tile: number }
+  | { kind: 'abandon' }
+  /** Its people of its culture break away and form a new culture (SPEC 7: the player can decide a break). */
+  | { kind: 'breakCulture' };
 
 /** What a tile change is about. */
 export const TileField = { Empty: 0, Trees: 1, Territory: 2, Walls: 3 } as const;
@@ -320,6 +393,8 @@ export interface Snapshot {
   buildings?: BuildingView[];
   /** The settlements, when they changed. */
   settlements?: SettlementView[];
+  /** The cultures, when they changed. */
+  cultures?: CultureView[];
   /** Average milliseconds per simulation step over the last second. */
   stepMs: number;
 }

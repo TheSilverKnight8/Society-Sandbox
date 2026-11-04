@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router';
-import { Amphora, Anvil, Apple, Axe, Blocks, Building, Coins, Eraser, Fish, Flag, Flame, Footprints, Hammer, Hand, House, ListChecks, LogOut, Maximize, Minus, Moon, Pause, Pencil, Pickaxe, Play, Plus, RotateCcw, Save, Store, Tent, User, Users, Warehouse, Wheat, X } from 'lucide-react';
+import { Amphora, Anvil, Apple, Axe, Blocks, Building, Coins, Eraser, Fish, Flag, Flame, Footprints, Hammer, Hand, House, ListChecks, LogOut, Maximize, Minus, Moon, Pause, Pencil, Pickaxe, Play, Plus, RotateCcw, Save, Split, Store, Tent, User, Users, Warehouse, Wheat, X } from 'lucide-react';
 import { ButtonLink, Button, IconButton, Input, Segmented, Spinner, cx } from '../components/ui';
 import { alertDialog, confirmDialog, notify, promptDialog } from '../components/dialogs';
 import { useApp } from '../lib/store';
@@ -12,7 +12,8 @@ import { ADULT_AGE, DEFAULT_TOGGLES, ELDER_AGE, MONTHS_PER_YEAR, TICKS_PER_MONTH
 import { Deposit, Terrain } from '../map/terrain';
 import { BUILDINGS, BuildingKind, GOODS, GOOD_NAME, JOB_NAME, LIGHT_JOB_NAME, STAGE_NAME, anchorFor, footprint, kindAllowsTerrain, needsShore } from '../sim/buildings';
 import { maxTrees } from '../sim/towns';
-import { TileField, type BuildingView, type Focus, type SettlementDetails, type SettlementView } from '../sim/types';
+import { TileField, type BuildingView, type CultureEdit, type CultureView, type Focus, type SettlementDetails, type SettlementView } from '../sim/types';
+import { CULTURE_COLORS, TRAIT_AXES } from '../sim/cultures';
 import { STEP } from '../render/iso';
 import { IsoView } from '../render/IsoView';
 import { drawPeople, pickPerson } from '../render/people';
@@ -89,7 +90,8 @@ function territoryOf(doc: WorldDoc): Uint16Array {
   return doc.state.territory && doc.state.territory.length === n ? doc.state.territory.slice() : new Uint16Array(n);
 }
 
-type SettlementOrderKind = 'build' | 'focus' | 'settlers' | 'abandon';
+type SettlementOrderKind = 'build' | 'focus' | 'settlers' | 'abandon' | 'breakCulture';
+type MapView = 'plain' | 'cultures';
 /** A settlement imperative being given: waiting for which settlement, then (build, settlers) where. */
 type PendingSettlement = { kind: SettlementOrderKind; stage: 'which' | 'where'; building?: BuildingKind; focus?: Focus } | null;
 
@@ -161,6 +163,40 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
   chosenSettlementRef.current = chosenSettlement;
   const [settlementDetails, setSettlementDetails] = useState<SettlementDetails | null>(null);
   const [pendingS, setPendingS] = useState<PendingSettlement>(null);
+  /** Cultures (Stage 4a), the one whose panel is open, and which map view is shown. */
+  const [cultures, setCultures] = useState<CultureView[]>([]);
+  const culturesRef = useRef<CultureView[]>([]);
+  const [chosenCulture, setChosenCulture] = useState<number | null>(null);
+  const [mapView, setMapView] = useState<MapView>('plain');
+  const mapViewRef = useRef<MapView>(mapView);
+  mapViewRef.current = mapView;
+  const landKey = useRef('plain');
+  /** Colors settlements' land for the map view chosen (redrawn only when the colors change). */
+  const applyLand = () => {
+    const view = viewRef.current;
+    if (!view) return;
+    if (mapViewRef.current === 'plain') {
+      if (landKey.current !== 'plain') {
+        landKey.current = 'plain';
+        view.setLandColors(null);
+      }
+      return;
+    }
+    const byId = new Map(culturesRef.current.map((c) => [c.id, c]));
+    const colors = new Map<number, string>();
+    for (const x of settlementsRef.current) {
+      if (x.abandoned) continue;
+      const c = x.culture !== undefined ? byId.get(x.culture) : undefined;
+      colors.set(x.id, c ? withAlpha(CULTURE_COLORS[c.color], 0.4) : 'rgba(0, 38, 87, 0.07)');
+    }
+    const key = [...colors].map(([k, v]) => `${k}:${v}`).join('|');
+    if (key === landKey.current) return;
+    landKey.current = key;
+    view.setLandColors(colors);
+  };
+  const applyLandRef = useRef(applyLand);
+  applyLandRef.current = applyLand;
+  useEffect(() => applyLandRef.current(), [mapView]);
 
   const selectedSet = useRef<Set<number>>(new Set());
   const live = useRef({ tab, tool, radius, pending, selection, pendingS, chosenSettlement, rot });
@@ -172,6 +208,7 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
   const inspected = selection.length === 1 ? selection[0] : null;
 
   const chooseSettlement = (id: number | null) => {
+    if (id !== null) setChosenCulture(null);
     setChosenSettlement(id);
     chosenSettlementRef.current = id;
     if (id === null) setSettlementDetails(null);
@@ -182,6 +219,7 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
   chooseSettlementRef.current = chooseSettlement;
 
   const choose = (ids: number[]) => {
+    if (ids.length) setChosenCulture(null);
     if (ids.length && chosenSettlementRef.current !== null) chooseSettlementRef.current(null);
     setSelection(ids);
     selectedSet.current = new Set(ids);
@@ -219,6 +257,15 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
     } else if (ps.kind === 'settlers' && tile !== undefined) {
       client.settlementOrder(id, { kind: 'settlers', tile });
       notify(`${name}: settlers are setting out.`);
+    } else if (ps.kind === 'breakCulture') {
+      const sv = settlementsRef.current.find((x) => x.id === id);
+      const culture = culturesRef.current.find((c) => c.id === sv?.culture);
+      if (!culture) {
+        notify(`${name} has no culture to break from yet.`, 'warn');
+        return;
+      }
+      client.settlementOrder(id, { kind: 'breakCulture' });
+      notify(`${name}: its ${culture.name} people break away and found a new culture.`);
     } else if (ps.kind === 'abandon') {
       void confirmDialog({ title: `Abandon ${name}?`, body: 'Its people leave and its land is given up. Its buildings stand empty for anyone to take over.', confirm: 'Abandon', danger: true }).then((ok) => {
         if (ok) {
@@ -314,6 +361,11 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
         settlementsRef.current = s.settlements;
         setSettlementCount(s.settlements.filter((x) => !x.abandoned).length);
       }
+      if (s.cultures) {
+        culturesRef.current = s.cultures;
+        setCultures(s.cultures);
+      }
+      if (s.settlements || s.cultures) applyLandRef.current();
       view.redraw();
     };
     client.onWatchedSettlement = (d) => setSettlementDetails(d);
@@ -697,8 +749,22 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
         </dl>
       </div>
 
+      {/* Top left, under the world: the cultures on the culture map view. */}
+      {mapView === 'cultures' && <CultureKey cultures={cultures} onOpen={(id) => setChosenCulture(id)} />}
+
       {/* Top right: view. */}
       <div className="absolute right-3 top-3 flex items-center gap-1 rounded-xl border border-line bg-surface/95 p-1 shadow-card">
+        <span className="pl-1.5 pr-0.5 text-xs text-muted">Map</span>
+        <Segmented
+          size="xs"
+          value={mapView}
+          onChange={(v) => setMapView(v)}
+          options={[
+            { value: 'plain', label: 'Plain', title: 'Settlements’ land in plain red' },
+            { value: 'cultures', label: 'Cultures', title: 'Each settlement’s land in its culture’s color' },
+          ]}
+        />
+        <span className="mx-0.5 h-5 w-px bg-line" />
         <IconButton label="Zoom out (-)" onClick={() => viewRef.current && viewRef.current.zoomAt(viewRef.current.width / 2, viewRef.current.height / 2, 0.8)}>
           <Minus className="size-4" />
         </IconButton>
@@ -710,11 +776,25 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
         </IconButton>
       </div>
 
-      {/* Right: the inspected person, or how many are chosen. */}
-      {inspected !== null && (
+      {/* Right: a culture, the inspected person, or how many are chosen. */}
+      {chosenCulture !== null && (
+        <CulturePanel
+          culture={cultures.find((c) => c.id === chosenCulture)}
+          cultures={cultures}
+          onOpen={(id) => setChosenCulture(id)}
+          onClose={() => setChosenCulture(null)}
+          onEdit={(e) => {
+            clientRef.current?.cultureEdit(chosenCulture, e);
+            setWorldUnsaved(true);
+          }}
+        />
+      )}
+      {chosenCulture === null && inspected !== null && (
         <InspectPanel
           details={details}
           died={died}
+          cultures={cultures}
+          onCulture={(id) => setChosenCulture(id)}
           onSelect={(id) => choose([id])}
           onUnpair={() => {
             clientRef.current?.unpair(inspected);
@@ -732,9 +812,11 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
           }}
         />
       )}
-      {chosenSettlement !== null && selection.length === 0 && (
+      {chosenCulture === null && chosenSettlement !== null && selection.length === 0 && (
         <SettlementPanel
           details={settlementDetails}
+          cultures={cultures}
+          onCulture={(id) => setChosenCulture(id)}
           onClose={() => chooseSettlement(null)}
           onOrder={(ps) => {
             setTab('imperatives');
@@ -742,7 +824,7 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
           }}
         />
       )}
-      {selection.length > 1 && (
+      {chosenCulture === null && selection.length > 1 && (
         <div className="absolute right-3 top-16 flex w-64 items-center justify-between rounded-xl border border-line bg-surface/97 px-3.5 py-2.5 text-sm shadow-pop">
           <span>
             <span className="font-display text-lg uppercase">{selection.length}</span> people chosen
@@ -892,7 +974,7 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
             <div className="flex items-stretch gap-3 p-2">
               <div className="flex flex-col justify-center gap-1 pr-1">
                 <span className="label-caps text-muted">Units</span>
-                <span className="text-[0.6875rem] text-muted">Settlements, nations and cultures come later</span>
+                <span className="text-[0.6875rem] text-muted">Nations come later</span>
               </div>
               <div className="flex gap-1">
                 {(['move', 'gather', 'rest', 'stop'] as const).map((k) => (
@@ -918,6 +1000,9 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
                   />
                   <ToolButton active={pendingS?.kind === 'settlers'} label="Settlers" onClick={() => onSettlementOrder({ kind: 'settlers', stage: 'which' })}>
                     <Users className="size-5" />
+                  </ToolButton>
+                  <ToolButton active={pendingS?.kind === 'breakCulture'} label="Break away" onClick={() => onSettlementOrder({ kind: 'breakCulture', stage: 'which' })}>
+                    <Split className="size-5" />
                   </ToolButton>
                   <ToolButton active={pendingS?.kind === 'abandon'} label="Abandon" onClick={() => onSettlementOrder({ kind: 'abandon', stage: 'which' })}>
                     <LogOut className="size-5" />
@@ -1043,6 +1128,8 @@ function PersonLink({ id, onSelect }: { id: number; onSelect: (id: number) => vo
 function InspectPanel({
   details,
   died,
+  cultures,
+  onCulture,
   onSelect,
   onUnpair,
   onClose,
@@ -1051,6 +1138,8 @@ function InspectPanel({
 }: {
   details: PersonDetails | null;
   died: string | null;
+  cultures: CultureView[];
+  onCulture: (id: number) => void;
   onSelect: (id: number) => void;
   onUnpair: () => void;
   onClose: () => void;
@@ -1111,7 +1200,9 @@ function InspectPanel({
               )}
             </dd>
             <dt className="text-muted">Culture</dt>
-            <dd className="text-muted">None</dd>
+            <dd>
+              <CultureLink culture={cultures.find((c) => c.id === d.culture)} onOpen={onCulture} />
+            </dd>
             <dt className="text-muted">Pair</dt>
             <dd>{d.pair !== undefined ? <PersonLink id={d.pair} onSelect={onSelect} /> : <span className="text-muted">None</span>}</dd>
             {(d.mother !== undefined || d.father !== undefined) && (
@@ -1182,7 +1273,7 @@ function InspectPanel({
               Remove
             </Button>
           </div>
-          {editing && <EditPerson details={d} onEdit={onEdit} onUnpair={onUnpair} />}
+          {editing && <EditPerson details={d} cultures={cultures} onEdit={onEdit} onUnpair={onUnpair} />}
         </>
       ) : (
         <p className="mt-3 text-muted">{died ? `This person died of ${died}.` : 'This person is no longer in the world.'}</p>
@@ -1192,7 +1283,7 @@ function InspectPanel({
 }
 
 /** Editing a person by hand (SPEC 1: everything can be modified). */
-function EditPerson({ details, onEdit, onUnpair }: { details: PersonDetails; onEdit: (e: PersonEdit) => void; onUnpair: () => void }) {
+function EditPerson({ details, cultures, onEdit, onUnpair }: { details: PersonDetails; cultures: CultureView[]; onEdit: (e: PersonEdit) => void; onUnpair: () => void }) {
   const [age, setAge] = useState(String(details.ageYears));
   const slider = (label: string, key: 'health' | 'food' | 'rest', value: number) => (
     <label className="block space-y-1">
@@ -1254,6 +1345,23 @@ function EditPerson({ details, onEdit, onUnpair }: { details: PersonDetails; onE
         )}
       </div>
       <label className="flex items-center gap-2">
+        <span className="w-10 text-xs text-muted">Culture</span>
+        <select
+          className="h-8 min-w-0 flex-1 rounded-lg border border-line bg-surface px-2 text-sm"
+          value={details.culture ?? ''}
+          onChange={(e) => onEdit({ culture: e.target.value === '' ? null : Number(e.target.value) })}
+        >
+          <option value="">None</option>
+          {cultures
+            .filter((c) => c.extinctYear === undefined || c.id === details.culture)
+            .map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+        </select>
+      </label>
+      <label className="flex items-center gap-2">
         <span className="w-10 text-xs text-muted">Coins</span>
         <Input
           className="h-8 w-24 text-sm"
@@ -1275,6 +1383,7 @@ function RulesPanel({ toggles, onChange, onClose }: { toggles: Toggles; onChange
   const rows: { key: keyof Toggles; label: string; note: string }[] = [
     { key: 'lifeCycle', label: 'Pairing, births and aging', note: 'Off freezes the population: nobody pairs up, is born, ages, or dies of old age.' },
     { key: 'founding', label: 'Settlement founding by units', note: 'Off: people no longer found settlements by themselves. They still join settlements, and you can still place campfires and send settlers.' },
+    { key: 'cultures', label: 'Culture formation', note: 'Off: no new cultures form, and none break away by themselves. Cultures that exist stay; newcomers still take up the culture they live among, and you can still order a settlement to break away.' },
   ];
   return (
     <div className="absolute bottom-36 left-1/2 w-[28rem] max-w-[calc(100%-1.5rem)] -translate-x-1/2 animate-rise rounded-2xl border border-line bg-surface p-4 text-sm shadow-pop">
@@ -1342,7 +1451,200 @@ function OrderMenu({ active, label, icon, options }: { active: boolean; label: s
   );
 }
 
-function SettlementPanel({ details, onClose, onOrder }: { details: SettlementDetails | null; onClose: () => void; onOrder: (ps: NonNullable<PendingSettlement>) => void }) {
+/** A color written as #rrggbb, made see-through. */
+function withAlpha(hex: string, a: number) {
+  const v = parseInt(hex.slice(1), 16);
+  return `rgba(${(v >> 16) & 255}, ${(v >> 8) & 255}, ${v & 255}, ${a})`;
+}
+
+function Swatch({ color }: { color: number }) {
+  return <span className="inline-block size-2.5 shrink-0 rounded-full border border-navy" style={{ background: CULTURE_COLORS[color] }} />;
+}
+
+/** A culture's name with its color, opening its panel. */
+function CultureLink({ culture, onOpen }: { culture?: CultureView; onOpen: (id: number) => void }) {
+  if (!culture) return <span className="text-muted">None</span>;
+  return (
+    <button className="inline-flex items-center gap-1.5 text-ink underline decoration-accent decoration-2 underline-offset-2 hover:text-accent" onClick={() => onOpen(culture.id)}>
+      <Swatch color={culture.color} />
+      {culture.name}
+    </button>
+  );
+}
+
+/** The key to the culture map view: each living culture, its color and its people. */
+function CultureKey({ cultures, onOpen }: { cultures: CultureView[]; onOpen: (id: number) => void }) {
+  const alive = cultures.filter((c) => c.extinctYear === undefined && c.members > 0).sort((a, b) => b.members - a.members);
+  return (
+    <div className="absolute left-3 top-[12.25rem] max-h-[calc(100%-26rem)] w-64 overflow-y-auto rounded-xl border border-line bg-surface/95 px-3.5 py-2.5 text-sm shadow-card scrollbar-thin">
+      <p className="label-caps text-muted">Cultures</p>
+      {alive.length ? (
+        <ul className="mt-1 space-y-0.5">
+          {alive.map((c) => (
+            <li key={c.id} className="flex items-center justify-between gap-2">
+              <CultureLink culture={c} onOpen={onOpen} />
+              <span className="text-xs text-muted">{c.members}</span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mt-1 text-xs text-muted">None yet. A culture forms where people have lived without one for a few years.</p>
+      )}
+    </div>
+  );
+}
+
+/** A culture (SPEC 7): what it is, and editing it (cultures only emerge, but can be edited afterwards). */
+function CulturePanel({
+  culture,
+  cultures,
+  onOpen,
+  onClose,
+  onEdit,
+}: {
+  culture?: CultureView;
+  cultures: CultureView[];
+  onOpen: (id: number) => void;
+  onClose: () => void;
+  onEdit: (e: CultureEdit) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const c = culture;
+  const parent = c?.parent !== undefined ? cultures.find((x) => x.id === c.parent) : undefined;
+  const children = c ? cultures.filter((x) => x.parent === c.id) : [];
+  return (
+    <div className="absolute right-3 top-16 max-h-[calc(100%-14.5rem)] w-72 overflow-y-auto rounded-xl border border-line bg-surface/97 p-3.5 text-sm shadow-pop scrollbar-thin">
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-center gap-2.5">
+          {c && <span className="block size-7 shrink-0 rounded-full border-2 border-navy" style={{ background: CULTURE_COLORS[c.color] }} />}
+          <div>
+            <p className="label-caps text-muted">{c?.extinctYear !== undefined ? 'Culture (extinct)' : 'Culture'}</p>
+            <p className="font-display text-lg uppercase leading-tight">{c ? c.name : 'Gone'}</p>
+          </div>
+        </div>
+        <IconButton label="Close" onClick={onClose}>
+          <X className="size-4" />
+        </IconButton>
+      </div>
+      {c && (
+        <>
+          <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+            <dt className="text-muted">Formed</dt>
+            <dd>
+              Year {c.foundedYear}
+              {c.origin && <span className="text-muted"> in {c.origin}</span>}
+            </dd>
+            {parent && (
+              <>
+                <dt className="text-muted">Broke from</dt>
+                <dd>
+                  <CultureLink culture={parent} onOpen={onOpen} />
+                </dd>
+              </>
+            )}
+            {children.length > 0 && (
+              <>
+                <dt className="text-muted">Gave rise to</dt>
+                <dd className="flex flex-wrap gap-x-2">
+                  {children.map((x) => (
+                    <CultureLink key={x.id} culture={x} onOpen={onOpen} />
+                  ))}
+                </dd>
+              </>
+            )}
+            <dt className="text-muted">People</dt>
+            <dd>{c.members}</dd>
+            <dt className="text-muted">Settlements</dt>
+            <dd>{c.settlements}</dd>
+            {c.extinctYear !== undefined && (
+              <>
+                <dt className="text-muted">Extinct</dt>
+                <dd>Year {c.extinctYear}</dd>
+              </>
+            )}
+          </dl>
+          <p className="label-caps mt-3 text-muted">Traits</p>
+          <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+            {TRAIT_AXES.map((a) => (
+              <div key={a.key} className="contents">
+                <dt className="text-muted">{a.label}</dt>
+                <dd>{a.names[a.poles.indexOf(c.traits[a.key])]}</dd>
+              </div>
+            ))}
+          </dl>
+          <div className="mt-3">
+            <Button size="xs" variant={editing ? 'navy' : 'secondary'} onClick={() => setEditing((e) => !e)}>
+              <Pencil className="size-3.5" />
+              Edit
+            </Button>
+          </div>
+          {editing && (
+            <div className="mt-3 space-y-2.5 rounded-lg border border-line bg-raised/50 p-2.5">
+              <label className="flex items-center gap-2">
+                <span className="w-16 text-xs text-muted">Name</span>
+                <Input
+                  className="h-8 min-w-0 flex-1 text-sm"
+                  maxLength={40}
+                  defaultValue={c.name}
+                  key={c.id}
+                  onBlur={(e) => e.target.value.trim() && onEdit({ name: e.target.value })}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') onEdit({ name: (e.target as HTMLInputElement).value });
+                  }}
+                />
+              </label>
+              <div className="flex items-start gap-2">
+                <span className="w-16 pt-1 text-xs text-muted">Color</span>
+                <div className="flex flex-1 flex-wrap gap-1">
+                  {CULTURE_COLORS.map((col, i) => (
+                    <button
+                      key={col}
+                      title={`Color ${i + 1}`}
+                      aria-pressed={c.color === i}
+                      onClick={() => onEdit({ color: i })}
+                      className={cx('size-5 rounded-full border-2', c.color === i ? 'border-navy ring-2 ring-accent' : 'border-navy/40')}
+                      style={{ background: col }}
+                    />
+                  ))}
+                </div>
+              </div>
+              {TRAIT_AXES.map((a) => (
+                <div key={a.key} className="flex items-center gap-2">
+                  <span className="w-16 text-xs text-muted">{a.label}</span>
+                  <Segmented
+                    size="xs"
+                    value={c.traits[a.key] as string}
+                    onChange={(v) => onEdit({ traits: { [a.key]: v } })}
+                    options={a.poles.map((pole, k) => ({ value: pole, label: a.names[k] }))}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+          <p className="mt-3 text-xs text-muted">
+            {TRAIT_NOTE}
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
+const TRAIT_NOTE = 'Mercantile cultures build markets sooner; agrarian ones keep more fields. Progressive cultures break away more readily when far from home than traditional ones. Temper and order matter once nations and wars exist.';
+
+function SettlementPanel({
+  details,
+  cultures,
+  onCulture,
+  onClose,
+  onOrder,
+}: {
+  details: SettlementDetails | null;
+  cultures: CultureView[];
+  onCulture: (id: number) => void;
+  onClose: () => void;
+  onOrder: (ps: NonNullable<PendingSettlement>) => void;
+}) {
   const d = details;
   return (
     <div className="absolute right-3 top-16 flex max-h-[calc(100%-14.5rem)] w-72 flex-col rounded-xl border border-line bg-surface/97 p-3.5 text-sm shadow-pop">
@@ -1366,6 +1668,17 @@ function SettlementPanel({ details, onClose, onOrder }: { details: SettlementDet
               <dt className="text-muted">Homes</dt>
               <dd>
                 {d.housed} housed, room for {d.homes}
+              </dd>
+              <dt className="text-muted">Culture</dt>
+              <dd>
+                {d.culture !== undefined ? (
+                  <>
+                    <CultureLink culture={cultures.find((c) => c.id === d.culture)} onOpen={onCulture} />
+                    {d.otherCultures > 0 && <span className="text-muted"> and {d.otherCultures} other{d.otherCultures > 1 ? 's' : ''}</span>}
+                  </>
+                ) : (
+                  <span className="text-muted">None yet</span>
+                )}
               </dd>
               <dt className="text-muted">Focus</dt>
               <dd>{FOCUS_LABEL[d.focus]}</dd>
@@ -1430,6 +1743,11 @@ function SettlementPanel({ details, onClose, onOrder }: { details: SettlementDet
               <Button size="xs" onClick={() => onOrder({ kind: 'settlers', stage: 'which' })}>
                 Send settlers
               </Button>
+              {d.culture !== undefined && (
+                <Button size="xs" onClick={() => onOrder({ kind: 'breakCulture', stage: 'which' })}>
+                  Break away
+                </Button>
+              )}
               <Button size="xs" variant="danger" onClick={() => onOrder({ kind: 'abandon', stage: 'which' })}>
                 Abandon
               </Button>

@@ -289,10 +289,10 @@ function drawChunkTiles(ctx: CanvasRenderingContext2D, src: TileSource, cx: numb
       ctx.lineTo(X - 0.5 - 2 * e, Y + 0.25);
       ctx.fill();
 
-      // A settlement's land: a light red tint, with a dashed border where it ends.
+      // A settlement's land: a light red tint (or its color on a map view), with a dashed border where it ends.
       const own = src.territory ? src.territory[i] : 0;
       if (own) {
-        ctx.fillStyle = 'rgba(252, 63, 63, 0.09)';
+        ctx.fillStyle = src.landColors?.get(own) ?? 'rgba(252, 63, 63, 0.09)';
         ctx.beginPath();
         ctx.moveTo(X, Y);
         ctx.lineTo(X + 0.5, Y + 0.25);

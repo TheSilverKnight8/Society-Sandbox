@@ -104,6 +104,10 @@ ctx.onmessage = (e: MessageEvent<ToSim>) => {
         world?.towns.order(m.id, m.order);
         sendSoon = true;
         break;
+      case 'cultureEdit':
+        world?.cultures.edit(m.id, m.edit);
+        sendSoon = true;
+        break;
       case 'spawnTest':
         world?.spawnTest(m.n, m.x, m.y);
         sendSoon = true;

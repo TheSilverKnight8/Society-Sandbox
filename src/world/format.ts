@@ -15,8 +15,10 @@ import type { WorldDoc } from './types';
 //   6  Stage 3b: jobs, settlement stores, farm crops; iron and gold deposits hold ore.
 //   7  Stage 3c: coins (people and treasuries), household goods, traders' runs, tools and
 //      pottery, clay deposits hold clay, fences and gates.
+//   8  Stage 4a: cultures; people's culture; how long a settlement has been without a culture
+//      or far from its culture; the culture formation rule.
 
-export const WORLD_FORMAT_VERSION = 7;
+export const WORLD_FORMAT_VERSION = 8;
 
 export function upgradeWorld(version: number, doc: WorldDoc): WorldDoc {
   if (version > WORLD_FORMAT_VERSION) throw new Error('This was saved by a newer version of the app. Reload the app to update it, then try again.');
@@ -55,6 +57,10 @@ export function upgradeWorld(version: number, doc: WorldDoc): WorldDoc {
       settlements: (state.settlements ?? []).map((s) => (s.stage === 'camp' || s.coins !== undefined ? s : { ...s, coins: 50 + 3 * (counts.get(s.id) ?? 0) })),
     };
     doc = { ...doc, state };
+  }
+  if (version < 8) {
+    // No cultures yet (they form as the run goes on); the new rule (culture formation) starts on.
+    doc = { ...doc, state: { ...doc.state, toggles: { ...DEFAULT_TOGGLES, ...doc.state.toggles }, cultures: [], nextCultureId: 1 } };
   }
   return doc;
 }

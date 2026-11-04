@@ -14,8 +14,11 @@ Macro to micro, with a test checkpoint at the end of each stage. Each system's t
 3. **Settlements, buildings and economy**, in three steps:
    - 3a. Settlements founded by people and growing through stages; land with borders; trees and stone as materials; building huts, houses and a storehouse; homes meeting the shelter need; placing buildings; the settlement panel and settlement imperatives; the settlement founding rule. **(done; buildings made bigger afterwards at Caleb's request)**
    - 3b. Jobs and production: farms, woodcutters, quarries, mines, fishing and the like; hauling to the storehouse; children's light jobs; the job need. **(done)**
-   - 3c. Goods, coins and trade: workshops, traders between settlements, wages, wealth and inheritance; the town and city stages; fences and gates for towns and above. **(this step)**
-4. **Cultures, nations and technology:** culture formation and breaks, research, nations (placed and emerging), policies and culture support, technology, diplomacy, officials, influence, unique individuals, succession.
+   - 3c. Goods, coins and trade: workshops, traders between settlements, wages, wealth and inheritance; the town and city stages; fences and gates for towns and above. **(done)**
+4. **Cultures, nations and technology**, in three steps:
+   - 4a. Cultures: formation, membership, traits, breaks from a culture far from home, editing cultures, the culture map view, the culture formation rule. **(this step)**
+   - 4b. Nations: influence, leaders claiming rule, placed nations, rulers and succession, unique individuals, officials and taxes, policies and culture support, breaks over policies, diplomacy, the nation map view, their rules.
+   - 4c. Technology and research: research by cultures at a research building with its own workers, the technologies and what they open up, nations' technology from their cultures, the research rule.
 5. **Military and war:** soldier types, weapons and equipment, armies and their leaders, battles with group orders and individual resolution, war declarations.
 6. **Disasters, effects, beasts and criminals;** scenario events (player- and sim-triggered) and the record of events.
 7. **Finishing:** a pass over every toggle and imperative against SPEC 10, tuning, and content additions Caleb asks for.
@@ -53,6 +56,15 @@ Macro to micro, with a test checkpoint at the end of each stage. Each system's t
 | Wealth | Coins: goods have prices; people are paid for work and earn by trade. (Step 3c.) |
 | Land | Each settlement has land shown with a border; towns and above also get fencing with gates. (Fencing in step 3c, with the town stage.) |
 
+## Caleb's answers for Stage 4
+
+| Question | Answer |
+| --- | --- |
+| When a nation emerges from settlements (SPEC 7) | A leader claims rule: an individual with high enough influence in a settlement outside any nation declares a nation, becomes its first ruler, and their settlement becomes the capital. (Step 4b.) |
+| What officials do (SPEC 6) | They collect taxes for the nation. Research gets its own building and a new kind of worker, separate from officials ("which can come now or later"; it comes with research in step 4c). |
+| How cultures and nations show on the map | Switchable views, as WorldBox has: nations (each in its color), cultures (each in its color), or plain. Nations is the default (from 4b, when nations exist). |
+| When units decide a break from their culture (SPEC 7) | When a settlement has lived far from the rest of its culture for many years (step 4a), and when a culture's people live under a nation whose policies their culture does not support (step 4b). |
+
 ## Questions settled by the builder in Stage 3c (Caleb can change them)
 
 | Question | What 3c does |
@@ -72,6 +84,22 @@ Macro to micro, with a test checkpoint at the end of each stage. Each system's t
 | SPEC 10 lists "Pairing, births, and aging (turning these off freezes the population)" as one item. One switch or three? | One switch, as the spec groups them. It can be split into three. |
 | Who pairs with whom? | One man and one woman, since pairs are what births come from (SPEC 6: "specific individuals pair up and have children"). Close relatives (parent and child, brothers and sisters, half-siblings) never pair. |
 | How do children get fed? | From what a parent nearby carries when there is any; otherwise they forage close by themselves. Households come with houses (Stage 3). |
+
+## Questions settled by the builder in Stage 4a (Caleb can change them)
+
+| Question | What 4a does |
+| --- | --- |
+| What a "period of having no culture" is (SPEC 7) | 3 years for a settlement's people (a year is a minute at 1x). People outside any settlement wait 6 years, and then everyone without a culture within 20 tiles forms one together (without that, every wandering family formed its own tiny culture). |
+| What culture traits are (SPEC 11: culture traits; the list is code's) | One side of each of four pairs: temper (martial or peaceful), livelihood (mercantile or agrarian), outlook (traditional or progressive) and order (hierarchical or communal). A new culture's traits are random; a culture that breaks away keeps its parent's traits but one. |
+| What traits do now | Mercantile cultures build a market at 15 people (others at 25); agrarian cultures reckon a farm feeds 10 people (others 12), so they keep more fields. Progressive cultures break away more readily when far from home (30% a year) than traditional ones (10%). Temper and order will shape nations' policies and war (4b, Stage 5), and outlook research (4c). |
+| How far is "far from home" | A settlement more than 50 tiles from every other settlement of its culture, for 10 years. The settlement where most of the culture's people live is its heartland and never counts as far. |
+| A settlement holding several cultures | Its culture is the one most of its people hold; it changes only when another culture is held by more. Newcomers with no culture take up the settlement's culture at once; people whose culture is held by fewer than a quarter of the people there take it up with a 10% chance each year (SPEC 6: groups influence individuals). Children take their mother's culture, or their father's. |
+
+## Builder's additions in Stage 4a (not named in the spec; easy to remove)
+
+- **A key** to the culture map view: each living culture, its color and its people, each opening its panel.
+- **Culture** in the inspect panel's Edit (SPEC 1: everything can be modified).
+- **Break away** as a settlement order (SPEC 7 lets the player decide a break; SPEC 4 puts orders to settlements in Imperatives).
 
 ## Builder's additions in Stage 3c (not named in the spec; easy to remove)
 
@@ -278,6 +306,21 @@ A step has 33 ms at 3x, so there is plenty of room for now. People only walk in 
 | What settlements build | Smithies once they have a mine or iron ore in the store; potteries at 20 people with clay near; markets as above; a mint once a town has gold ore stored or near. When at least 4 adults have no work (counting jobs at workplaces already being built), a settlement adds more of what it has: woodcutter's lodges, quarries and mines up to one per 40 people (plus one), smithies and potteries up to one per 80 (plus one), and farms while its food store is not full. |
 | Saving | Coins, household goods, prices' stocks, traders' runs, fences and clay left are saved (world format version 7). Older worlds open with every clay deposit full and each village or bigger given the purse a new village gets. |
 
+## Cultures (Stage 4a)
+
+| Item | Choice |
+| --- | --- |
+| Forming (SPEC 7: cultures only emerge) | A settlement whose people have had no culture for 3 years forms one, and all its people join it; a single person is enough. People outside settlements form one after 6 years, together with everyone without a culture within 20 tiles. Each culture gets a name (made from old-sounding syllables, such as Merese or Thalish) and a color. |
+| Belonging (SPEC 6: exactly one culture once one exists) | Everyone holds one culture or none. Newborns take their mother's culture (or their father's). People who join a settlement keep their culture; those without one take up the settlement's. |
+| Breaking away (SPEC 7; Caleb: when far from home) | A settlement far from the rest of its culture (see above) may break away: its people of that culture found a new one, keeping the old traits but one. The player can order any settlement to break away (Imperatives, or the settlement panel), whether or not the rule is on. Breaking away over a nation's policies comes with nations (4b). |
+| Extinct | A culture whose last member is gone is marked extinct in that year and kept for the record (its panel still opens from the cultures it gave rise to or broke from). |
+| Editing (SPEC 7: the player can edit cultures) | The culture panel's Edit changes its name, color and traits. A person's culture can be set by hand in the inspect panel's Edit. |
+| What the app shows | The inspect panel and the settlement panel show the culture (with how many other cultures live in the settlement), each a link to the culture's panel: when and where it formed, the culture it broke from and those it gave rise to, people, settlements, traits. |
+| Map views (Caleb: switchable views) | **Map: Plain / Cultures** at the top right. Plain shows settlements' land in the light red tint; Cultures shows each settlement's land in its culture's color (settlements with no culture yet in a faint grey), with a key of cultures under the world panel. The nations view comes with nations (4b) and will be the default. Culture colors are given most distinct first (green late, since it is hard to see on grassland). |
+| The rule (SPEC 10: culture formation) | "Culture formation" in Rules. Off: no culture forms and none breaks away by itself. Cultures that exist stay, newcomers still take up the culture they live among, and the player can still order a break. |
+| Saving | Cultures, people's cultures, and how long a settlement has been without a culture or far from home are saved (world format version 8). Older setups and runs open with no cultures, which form as the run goes on. |
+| In testing | From 360 people in six groups on a Titanic map, the first cultures formed in year 4; by year 30 there were 12 to 14 living cultures on two maps, most with one settlement each, since villages do not found new settlements by themselves (see the note in Stage 4a's checkpoint). Settlers sent 80 tiles away founded a settlement that was far from home from then on. |
+
 ## Towns, fences and gates (Stage 3c)
 
 | Item | Choice |
@@ -352,6 +395,14 @@ Result, 30 years from the same start on three generated maps: 360 grew to 698, 6
 ## Performance (Stage 3c)
 
 With coins, workshops, traders and fences: 2,000 people placed in 40 groups across a Titanic map; 2,050 by year 5, with 95 settlements, 59 villages and 818 buildings. Simulation step 2.9 to 4.9 ms on average, at most 15 ms in the first busy year (Node, the same code as the worker). In headless Chrome at 3x with about 1,960 people: 47 frames a second for the whole map and 57 at mid zoom. One fix came out of measuring: the settlement bookkeeping that was being redone several times a step is done once, and housing families no longer compares every person with every other (the slowest step fell from 33 ms to 12 ms). After the population changes and the natural biome colors: 2,000 people grew to 2,500 by year 5 (was 2,050); 2.9 to 4.3 ms a step on average, at most 12 ms; 43 frames a second for the whole map and 56 at mid zoom with about 2,200 people.
+
+## Performance (Stage 4a)
+
+With cultures: 2,000 people placed in 40 groups grew to 2,390 by year 5. Simulation step 3.1 to 3.8 ms on average, at most 15 ms (Node). In headless Chrome at 3x with about 2,200 people: 44 frames a second for the whole map and 56 at mid zoom. The culture map view redraws the land only when a settlement's culture or a culture's color changes.
+
+## Fixes found while building 4a
+
+- **Send settlers** (3a) rarely worked over long distances: settlers searched for a way only 8,000 tiles deep and gave up when it was farther, and they walked on while starving because their journey came before their hunger. Settlers now search as far as traders, eat and forage on the way (pressing on when there is no food near), and take up to 3 food each from the store when they set out.
 
 ## Look
 

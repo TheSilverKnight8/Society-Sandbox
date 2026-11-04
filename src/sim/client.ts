@@ -1,5 +1,5 @@
 import type { BuildingKind } from './buildings';
-import type { FromSim, Order, PersonDetails, PersonEdit, SettlementDetails, SimState, Snapshot, Speed, Toggles, ToSim } from './types';
+import type { CultureEdit, FromSim, Order, PersonDetails, PersonEdit, SettlementDetails, SimState, Snapshot, Speed, Toggles, ToSim } from './types';
 
 type SettlementOrder = Extract<ToSim, { type: 'settlementOrder' }>['order'];
 
@@ -121,6 +121,10 @@ export class SimClient {
 
   settlementOrder(id: number, order: SettlementOrder) {
     this.send({ type: 'settlementOrder', id, order });
+  }
+
+  cultureEdit(id: number, edit: CultureEdit) {
+    this.send({ type: 'cultureEdit', id, edit });
   }
 
   setToggles(toggles: Toggles) {
