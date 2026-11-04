@@ -23,4 +23,8 @@ export interface TileSource {
   deposit: Uint8Array;
   /** 1 where a deposit has been used up for now (berries picked, fish caught); drawn without its goods. */
   empty?: Uint8Array;
+  /** Trees standing on each forest tile, when trees can be cut (a running world). */
+  trees?: Uint8Array;
+  /** Which settlement owns each tile (0: none), drawn as a tint with a dashed border. */
+  territory?: Uint16Array;
 }

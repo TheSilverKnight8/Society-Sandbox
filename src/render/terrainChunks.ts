@@ -289,6 +289,43 @@ function drawChunkTiles(ctx: CanvasRenderingContext2D, src: TileSource, cx: numb
       ctx.lineTo(X - 0.5 - 2 * e, Y + 0.25);
       ctx.fill();
 
+      // A settlement's land: a light red tint, with a dashed border where it ends.
+      const own = src.territory ? src.territory[i] : 0;
+      if (own) {
+        ctx.fillStyle = 'rgba(252, 63, 63, 0.09)';
+        ctx.beginPath();
+        ctx.moveTo(X, Y);
+        ctx.lineTo(X + 0.5, Y + 0.25);
+        ctx.lineTo(X, Y + 0.5);
+        ctx.lineTo(X - 0.5, Y + 0.25);
+        ctx.fill();
+        const ter = src.territory!;
+        const other = (xx: number, yy: number) => xx < 0 || yy < 0 || xx >= size || yy >= size || ter[yy * size + xx] !== own;
+        ctx.beginPath();
+        if (other(x - 1, y)) {
+          ctx.moveTo(X - 0.5, Y + 0.25);
+          ctx.lineTo(X, Y);
+        }
+        if (other(x, y - 1)) {
+          ctx.moveTo(X, Y);
+          ctx.lineTo(X + 0.5, Y + 0.25);
+        }
+        if (other(x + 1, y)) {
+          ctx.moveTo(X + 0.5, Y + 0.25);
+          ctx.lineTo(X, Y + 0.5);
+        }
+        if (other(x, y + 1)) {
+          ctx.moveTo(X, Y + 0.5);
+          ctx.lineTo(X - 0.5, Y + 0.25);
+        }
+        ctx.strokeStyle = NAVY;
+        ctx.lineWidth = lw * 1.1;
+        if (level >= 16) ctx.setLineDash([0.12, 0.08]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.lineWidth = lw;
+      }
+
       // Outlines along every step down in the land, front and back, so terraces read as line art.
       if (outlines && !water) {
         const hb1 = x > 0 ? elevation[i - 1] : h;
@@ -328,7 +365,7 @@ function drawChunkTiles(ctx: CanvasRenderingContext2D, src: TileSource, cx: numb
       const cxp = X;
       const cyp = Y + 0.27;
       if (st.grid === 1) {
-        biomeDetail(ctx, t, x, y, h, cxp, cyp, lw);
+        biomeDetail(ctx, t, x, y, h, cxp, cyp, lw, src.trees ? src.trees[i] : undefined);
         const d = deposit[i];
         if (d !== Deposit.None) {
           const ox = (hash2(x, y, 51) - 0.5) * 0.1;
@@ -340,7 +377,7 @@ function drawChunkTiles(ctx: CanvasRenderingContext2D, src: TileSource, cx: numb
         const gx = Math.floor(x / g);
         const gy = Math.floor(y / g);
         if (x - gx * g === Math.floor(hash2(gx, gy, 61) * g) && y - gy * g === Math.floor(hash2(gx, gy, 62) * g)) {
-          biomeSparse(ctx, t, x, y, h, cxp, cyp, st.scale, lw);
+          biomeSparse(ctx, t, x, y, h, cxp, cyp, st.scale, lw, src.trees ? src.trees[i] : undefined);
         }
       }
     }

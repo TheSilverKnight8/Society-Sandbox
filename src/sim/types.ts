@@ -10,11 +10,13 @@ export const TICKS_PER_YEAR = TICKS_PER_MONTH * MONTHS_PER_YEAR;
 /** 0 = paused. Fast-forward is a modest speed-up (SPEC 2). */
 export type Speed = 0 | 1 | 2 | 3;
 
+import type { BuildingKind, SettlementStage } from './buildings';
+
 /** What a person is doing right now. */
-export type Task = 'idle' | 'walk' | 'gather' | 'eat' | 'sleep';
+export type Task = 'idle' | 'walk' | 'gather' | 'eat' | 'sleep' | 'chop' | 'quarry' | 'build';
 
 /** Why a person is walking. */
-export type Purpose = 'stroll' | 'food' | 'order';
+export type Purpose = 'stroll' | 'food' | 'order' | 'home' | 'wood' | 'stone' | 'site' | 'settle';
 
 /** An imperative given to a unit by the player (SPEC 4). */
 export interface Order {
@@ -62,15 +64,58 @@ export interface Person {
   childFather?: number;
   /** The step of their last birth, so births are spaced out. */
   lastBirth?: number;
+  /** The settlement they live in, and the building that is their home. */
+  settlement?: number;
+  home?: number;
+  /** Building materials they are carrying to a construction site. */
+  load?: { kind: 'wood' | 'stone'; n: number };
+  /** The construction site they are working for. */
+  site?: number;
+  /** Where they are going to found a settlement (sent as settlers). */
+  settleAt?: number;
+  /** Asleep in their home (not drawn; shelter met). */
+  indoors?: boolean;
+}
+
+export type Focus = 'balanced' | 'food' | 'housing' | 'goods';
+
+/** A settlement (SPEC 7). */
+export interface Settlement {
+  id: number;
+  name: string;
+  stage: SettlementStage;
+  /** Its middle: the campfire's tile. */
+  center: number;
+  founded: number;
+  /** What it puts first (a settlement imperative). */
+  focus: Focus;
+  /** Buildings it has been ordered to build, in order, not yet started. */
+  queue: { kind: BuildingKind; tile: number }[];
+  abandoned?: boolean;
+}
+
+export interface Building {
+  id: number;
+  kind: BuildingKind;
+  tile: number;
+  /** The settlement it belongs to, if any. */
+  settlement?: number;
+  /** Building work done, 0 to 1; 1 is finished. */
+  progress: number;
+  /** Materials brought so far, while it is being built. */
+  wood: number;
+  stone: number;
 }
 
 /** Automatic behaviors the player can turn off (SPEC 10). More are added as their systems are built. */
 export interface Toggles {
   /** Pairing, births and aging. Off freezes the population: nobody pairs, is born, ages, or dies of old age. */
   lifeCycle: boolean;
+  /** People founding settlements by themselves (SPEC 10). */
+  founding: boolean;
 }
 
-export const DEFAULT_TOGGLES: Toggles = { lifeCycle: true };
+export const DEFAULT_TOGGLES: Toggles = { lifeCycle: true, founding: true };
 
 /** Life stages, for drawing and the inspect panel. */
 export const ADULT_AGE = 14;
@@ -86,10 +131,52 @@ export interface SimState {
   /** Food left on each tile with a food deposit (berries, fish); grows back over time. 0 elsewhere. */
   stock?: Uint8Array;
   toggles?: Toggles;
+  /** Trees standing on each forest tile (cut for wood, grow back); 0 elsewhere. */
+  trees?: Uint8Array;
+  /** Which settlement owns each tile (its ID), 0 for none. */
+  territory?: Uint16Array;
+  settlements?: Settlement[];
+  buildings?: Building[];
+  nextSettlementId?: number;
+  nextBuildingId?: number;
 }
 
 export function emptyState(seed: number): SimState {
-  return { tick: 0, nextId: 1, rng: seed >>> 0, people: [], toggles: { ...DEFAULT_TOGGLES } };
+  return { tick: 0, nextId: 1, rng: seed >>> 0, people: [], toggles: { ...DEFAULT_TOGGLES }, settlements: [], buildings: [], nextSettlementId: 1, nextBuildingId: 1 };
+}
+
+/** What the settlement panel shows. */
+export interface SettlementDetails {
+  id: number;
+  name: string;
+  stage: SettlementStage;
+  foundedYear: number;
+  people: number;
+  housed: number;
+  homes: number;
+  buildings: { kind: BuildingKind; done: number; building: number }[];
+  focus: Focus;
+  queue: number;
+  abandoned: boolean;
+}
+
+/** A building, as drawn. */
+export interface BuildingView {
+  id: number;
+  kind: BuildingKind;
+  tile: number;
+  settlement: number;
+  progress: number;
+}
+
+/** A settlement, as listed for the app. */
+export interface SettlementView {
+  id: number;
+  name: string;
+  stage: SettlementStage;
+  center: number;
+  people: number;
+  abandoned: boolean;
 }
 
 /** What the inspect panel shows about one person. */
@@ -111,6 +198,9 @@ export interface PersonDetails {
   /** Living children. */
   children: number[];
   pregnant: boolean;
+  settlement?: string;
+  hasHome: boolean;
+  load?: { kind: 'wood' | 'stone'; n: number };
 }
 
 /** Changes the player can make to a person by hand (SPEC 1: everything can be modified). */
@@ -135,10 +225,18 @@ export type ToSim =
   /** An order to some people; 'stop' cancels their orders. */
   | { type: 'order'; ids: number[]; order: Order | { kind: 'stop' } }
   | { type: 'toggles'; toggles: Toggles }
+  /** Places finished buildings (SPEC 4: placed buildings appear finished). A campfire founds a camp. */
+  | { type: 'placeBuilding'; kind: BuildingKind; tile: number }
+  | { type: 'removeBuildings'; tiles: number[] }
+  | { type: 'watchSettlement'; id: number | null }
+  | { type: 'settlementOrder'; id: number; order: { kind: 'build'; building: BuildingKind; tile: number } | { kind: 'focus'; focus: Focus } | { kind: 'settlers'; tile: number } | { kind: 'abandon' } }
   | { type: 'unpair'; id: number }
   | { type: 'save'; req: number }
   /** Development only: adds n people on land near (x, y), for speed tests. */
   | { type: 'spawnTest'; n: number; x: number; y: number };
+
+/** What a tile change is about. */
+export const TileField = { Empty: 0, Trees: 1, Territory: 2 } as const;
 
 /** Poses for drawing. */
 export const Pose = { Stand: 0, Sleep: 1, Work: 2 } as const;
@@ -152,10 +250,14 @@ export interface Snapshot {
   /** x, y per person, in tiles. */
   pos: Float32Array;
   look: Uint16Array;
-  /** Bit 0: walking. Bit 1: facing left. Bit 2: male. Bits 3-4: pose (see Pose). Bits 5-6: age (see AgeLook). */
+  /** Bit 0: walking. Bit 1: facing left. Bit 2: male. Bits 3-4: pose (see Pose). Bits 5-6: age (see AgeLook). Bit 7: indoors (not drawn). */
   flags: Uint8Array;
-  /** Food tiles that ran out (stored as tile + 1) or came back (stored as -(tile + 1)) since the last snapshot. */
-  stockChanges: Int32Array;
+  /** Tiles whose drawing changed since the last snapshot, as triples: tile, what (TileField), new value. */
+  tileChanges: Int32Array;
+  /** The buildings, when they changed since the last snapshot. */
+  buildings?: BuildingView[];
+  /** The settlements, when they changed. */
+  settlements?: SettlementView[];
   /** Average milliseconds per simulation step over the last second. */
   stepMs: number;
 }
@@ -163,5 +265,6 @@ export interface Snapshot {
 export type FromSim =
   | ({ type: 'snap' } & Snapshot)
   | { type: 'watched'; person: PersonDetails | null; died?: string }
+  | { type: 'watchedSettlement'; settlement: SettlementDetails | null }
   | { type: 'saved'; req: number; state: SimState; deposit: Uint8Array }
   | { type: 'error'; message: string };

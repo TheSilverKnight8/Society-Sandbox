@@ -15,6 +15,7 @@ let speed: Speed = 0;
 let last = performance.now();
 let owed = 0;
 let watching: number | null = null;
+let watchingSettlement: number | null = null;
 let stepTime = 0;
 let stepCount = 0;
 let stepMs = 0;
@@ -28,7 +29,8 @@ function post(msg: FromSim, transfer: Transferable[] = []) {
 function sendSnapshot() {
   if (!world) return;
   const s = world.snapshot(stepMs);
-  post({ type: 'snap', ...s }, [s.ids.buffer, s.pos.buffer, s.look.buffer, s.flags.buffer, s.stockChanges.buffer]);
+  post({ type: 'snap', ...s }, [s.ids.buffer, s.pos.buffer, s.look.buffer, s.flags.buffer, s.tileChanges.buffer]);
+  if (watchingSettlement !== null) post({ type: 'watchedSettlement', settlement: world.towns.details(watchingSettlement) });
   if (watching !== null) {
     const person = world.details(watching);
     const died = person ? undefined : world.deaths.get(watching);
@@ -84,6 +86,22 @@ ctx.onmessage = (e: MessageEvent<ToSim>) => {
         break;
       case 'unpair':
         world?.unpair(m.id);
+        sendSoon = true;
+        break;
+      case 'placeBuilding':
+        world?.towns.place(m.kind, m.tile);
+        sendSoon = true;
+        break;
+      case 'removeBuildings':
+        world?.towns.removeOn(m.tiles);
+        sendSoon = true;
+        break;
+      case 'watchSettlement':
+        watchingSettlement = m.id;
+        sendSoon = true;
+        break;
+      case 'settlementOrder':
+        world?.towns.order(m.id, m.order);
         sendSoon = true;
         break;
       case 'spawnTest':

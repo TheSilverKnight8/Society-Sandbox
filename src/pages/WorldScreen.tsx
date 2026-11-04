@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router';
-import { Apple, Eraser, Footprints, Hand, ListChecks, Maximize, Minus, Moon, Pause, Pencil, Play, Plus, RotateCcw, Save, User, X } from 'lucide-react';
+import { Apple, Eraser, Flag, Flame, Footprints, Hammer, Hand, House, ListChecks, LogOut, Maximize, Minus, Moon, Pause, Pencil, Play, Plus, RotateCcw, Save, Tent, User, Users, Warehouse, X } from 'lucide-react';
 import { ButtonLink, Button, IconButton, Input, Segmented, Spinner, cx } from '../components/ui';
 import { alertDialog, confirmDialog, notify, promptDialog } from '../components/dialogs';
 import { useApp } from '../lib/store';
@@ -9,7 +9,10 @@ import { brushTiles } from '../map/paint';
 import { SimClient } from '../sim/client';
 import { CLOTHES, SKINS, unpackLook } from '../sim/look';
 import { ADULT_AGE, DEFAULT_TOGGLES, ELDER_AGE, MONTHS_PER_YEAR, TICKS_PER_MONTH, TICKS_PER_YEAR, type PersonDetails, type PersonEdit, type Speed, type Toggles } from '../sim/types';
-import { Deposit } from '../map/terrain';
+import { Deposit, Terrain } from '../map/terrain';
+import { BUILDINGS, BuildingKind, STAGE_NAME } from '../sim/buildings';
+import { maxTrees } from '../sim/towns';
+import { TileField, type BuildingView, type Focus, type SettlementDetails, type SettlementView } from '../sim/types';
 import { STEP } from '../render/iso';
 import { IsoView } from '../render/IsoView';
 import { drawPeople, pickPerson } from '../render/people';
@@ -22,7 +25,7 @@ import type { WorldDoc } from '../world/types';
 // in place of god powers.
 
 type Tab = 'main' | 'units' | 'disasters' | 'imperatives';
-type UnitTool = 'person' | 'remove';
+type UnitTool = 'person' | 'remove' | BuildingKind;
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
@@ -52,15 +55,41 @@ export function WorldScreenPage() {
   );
 }
 
-/** Builds the "used up" flags for drawing from a world's saved food stock. */
+/** Builds the "used up" flags for drawing from a world's saved stock (food, and stone once worlds kept it). */
 function emptyFlags(doc: WorldDoc): Uint8Array {
   const n = doc.size * doc.size;
   const out = new Uint8Array(n);
   const stock = doc.state.stock;
   if (!stock || stock.length !== n) return out;
-  for (let i = 0; i < n; i++) if ((doc.deposit[i] === Deposit.Berries || doc.deposit[i] === Deposit.Fish) && stock[i] === 0) out[i] = 1;
+  const stoneKept = !!doc.state.trees;
+  for (let i = 0; i < n; i++) {
+    const d = doc.deposit[i];
+    if ((d === Deposit.Berries || d === Deposit.Fish || (stoneKept && d === Deposit.Stone)) && stock[i] === 0) out[i] = 1;
+  }
   return out;
 }
+
+/** Trees standing on each tile: as saved, or every forest tile full for a world that has not cut any. */
+function treeCounts(doc: WorldDoc): Uint8Array {
+  const n = doc.size * doc.size;
+  if (doc.state.trees && doc.state.trees.length === n) return doc.state.trees.slice();
+  const out = new Uint8Array(n);
+  for (let i = 0; i < n; i++) if (doc.terrain[i] === Terrain.Forest) out[i] = maxTrees(i % doc.size, Math.floor(i / doc.size));
+  return out;
+}
+
+function territoryOf(doc: WorldDoc): Uint16Array {
+  const n = doc.size * doc.size;
+  return doc.state.territory && doc.state.territory.length === n ? doc.state.territory.slice() : new Uint16Array(n);
+}
+
+type SettlementOrderKind = 'build' | 'focus' | 'settlers' | 'abandon';
+/** A settlement imperative being given: waiting for which settlement, then (build, settlers) where. */
+type PendingSettlement = { kind: SettlementOrderKind; stage: 'which' | 'where'; building?: BuildingKind; focus?: Focus } | null;
+
+const FOCUS_LABEL: Record<Focus, string> = { balanced: 'Balanced', food: 'Food', housing: 'Housing', goods: 'Goods' };
+const BUILD_ORDER_KINDS = [BuildingKind.Hut, BuildingKind.House, BuildingKind.Storehouse] as const;
+const BUILDING_ICON: Record<number, typeof House> = { [BuildingKind.Campfire]: Flame, [BuildingKind.Hut]: Tent, [BuildingKind.House]: House, [BuildingKind.Storehouse]: Warehouse };
 
 type OrderKind = 'move' | 'gather' | 'rest' | 'stop';
 /** An imperative being given: waiting for who it is for, or for where (SPEC 4: either order works). */
@@ -95,17 +124,39 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
   const savedTickRef = useRef(savedTick);
   savedTickRef.current = savedTick;
   const empty = useRef(emptyFlags(doc));
+  const trees = useRef(treeCounts(doc));
+  const territory = useRef(territoryOf(doc));
+  const buildingsRef = useRef<BuildingView[]>([]);
+  const buildingAt = useRef(new Map<number, BuildingView>());
+  const settlementsRef = useRef<SettlementView[]>([]);
+  const [settlementCount, setSettlementCount] = useState((doc.state.settlements ?? []).filter((x) => !x.abandoned).length);
+  const [chosenSettlement, setChosenSettlement] = useState<number | null>(null);
+  const chosenSettlementRef = useRef<number | null>(null);
+  chosenSettlementRef.current = chosenSettlement;
+  const [settlementDetails, setSettlementDetails] = useState<SettlementDetails | null>(null);
+  const [pendingS, setPendingS] = useState<PendingSettlement>(null);
 
   const selectedSet = useRef<Set<number>>(new Set());
-  const live = useRef({ tab, tool, radius, pending, selection });
-  live.current = { tab, tool, radius, pending, selection };
+  const live = useRef({ tab, tool, radius, pending, selection, pendingS, chosenSettlement });
+  live.current = { tab, tool, radius, pending, selection, pendingS, chosenSettlement };
   /** The box being dragged out to choose people, in screen pixels. */
   const box = useRef<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const atStart = tick === savedTick;
   const isSetup = doc.kind === 'setup';
   const inspected = selection.length === 1 ? selection[0] : null;
 
+  const chooseSettlement = (id: number | null) => {
+    setChosenSettlement(id);
+    chosenSettlementRef.current = id;
+    if (id === null) setSettlementDetails(null);
+    clientRef.current?.watchSettlement(id);
+    viewRef.current?.redraw();
+  };
+  const chooseSettlementRef = useRef(chooseSettlement);
+  chooseSettlementRef.current = chooseSettlement;
+
   const choose = (ids: number[]) => {
+    if (ids.length && chosenSettlementRef.current !== null) chooseSettlementRef.current(null);
     setSelection(ids);
     selectedSet.current = new Set(ids);
     setDied(null);
@@ -128,10 +179,50 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
   const chooseRef = useRef(choose);
   chooseRef.current = choose;
 
+  /** Gives an imperative to a settlement (SPEC 4). */
+  const giveSettlement = (ps: NonNullable<PendingSettlement>, id: number, tile?: number) => {
+    const client = clientRef.current;
+    if (!client) return;
+    const name = settlementsRef.current.find((x) => x.id === id)?.name ?? 'The settlement';
+    if (ps.kind === 'build' && ps.building !== undefined && tile !== undefined) {
+      client.settlementOrder(id, { kind: 'build', building: ps.building, tile });
+      notify(`${name}: build a ${BUILDINGS[ps.building].name.toLowerCase()} there.`);
+    } else if (ps.kind === 'focus' && ps.focus) {
+      client.settlementOrder(id, { kind: 'focus', focus: ps.focus });
+      notify(`${name}: focus on ${FOCUS_LABEL[ps.focus].toLowerCase()}.`);
+    } else if (ps.kind === 'settlers' && tile !== undefined) {
+      client.settlementOrder(id, { kind: 'settlers', tile });
+      notify(`${name}: settlers are setting out.`);
+    } else if (ps.kind === 'abandon') {
+      void confirmDialog({ title: `Abandon ${name}?`, body: 'Its people leave and its land is given up. Its buildings stand empty for anyone to take over.', confirm: 'Abandon', danger: true }).then((ok) => {
+        if (ok) {
+          client.settlementOrder(id, { kind: 'abandon' });
+          setWorldUnsaved(true);
+          chooseSettlementRef.current(null);
+        }
+      });
+      return;
+    } else return;
+    setWorldUnsaved(true);
+  };
+  const giveSettlementRef = useRef(giveSettlement);
+  giveSettlementRef.current = giveSettlement;
+
+  /** A settlement order button: needs a settlement (the chosen one, or the next one clicked), then maybe a place. */
+  const onSettlementOrderRef = useRef<(ps: NonNullable<PendingSettlement>) => void>(() => {});
+  const onSettlementOrder = (ps: NonNullable<PendingSettlement>) => {
+    setPending(null);
+    if (chosenSettlement === null) return setPendingS({ ...ps, stage: 'which' });
+    if (ps.kind === 'build' || ps.kind === 'settlers') return setPendingS({ ...ps, stage: 'where' });
+    giveSettlement(ps, chosenSettlement);
+    setPendingS(null);
+  };
+  onSettlementOrderRef.current = onSettlementOrder;
+
   // Start the simulation and the view once, when the screen opens.
   useEffect(() => {
     const canvas = canvasRef.current!;
-    const view = new IsoView(canvas, { size: doc.size, terrain: doc.terrain, elevation: doc.elevation, deposit: doc.deposit, empty: empty.current });
+    const view = new IsoView(canvas, { size: doc.size, terrain: doc.terrain, elevation: doc.elevation, deposit: doc.deposit, empty: empty.current, trees: trees.current, territory: territory.current });
     const client = new SimClient();
     viewRef.current = view;
     clientRef.current = client;
@@ -150,15 +241,29 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
       }
       if (!atStartNow) setWorldUnsaved(true);
       setPopulation(s.ids.length);
-      for (const v of s.stockChanges) {
-        const i = Math.abs(v) - 1;
-        empty.current[i] = v > 0 ? 1 : 0;
-        stockDirty.add(i);
+      const tc = s.tileChanges;
+      for (let k = 0; k < tc.length; k += 3) {
+        const t = tc[k];
+        const f = tc[k + 1];
+        const v = tc[k + 2];
+        if (f === TileField.Empty) empty.current[t] = v;
+        else if (f === TileField.Trees) trees.current[t] = v;
+        else territory.current[t] = v;
+        stockDirty.add(t);
+      }
+      if (s.buildings) {
+        buildingsRef.current = s.buildings;
+        buildingAt.current = new Map(s.buildings.map((b) => [b.tile, b]));
+      }
+      if (s.settlements) {
+        settlementsRef.current = s.settlements;
+        setSettlementCount(s.settlements.filter((x) => !x.abandoned).length);
       }
       view.redraw();
     };
-    // Bushes being picked and growing back are redrawn together about once a second, not on
-    // every step, since each redraw of the terrain costs far more than drawing people.
+    client.onWatchedSettlement = (d) => setSettlementDetails(d);
+    // Bushes being picked, trees cut and land claimed are redrawn together about once a
+    // second, not on every step, since each redraw of the terrain costs far more than drawing people.
     const stockDirty = new Set<number>();
     const stockTimer = window.setInterval(() => {
       if (!stockDirty.size) return;
@@ -186,8 +291,14 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
         if (placed.has(i)) return;
         placed.add(i);
         client.place([i]);
+      } else if (tool === 'remove') {
+        const tiles = brushTiles(t.x, t.y, radius - 0.5, doc.size).map(([x, y]) => y * doc.size + x);
+        client.remove(tiles);
+        client.removeBuildings(tiles);
       } else {
-        client.remove(brushTiles(t.x, t.y, radius - 0.5, doc.size).map(([x, y]) => y * doc.size + x));
+        if (placed.has(i)) return;
+        placed.add(i);
+        client.placeBuilding(tool, i);
       }
       setWorldUnsaved(true);
     };
@@ -225,12 +336,42 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
       }
     };
 
+    /** A click while a settlement imperative is being given. */
+    const settlementPick = (tile: { x: number; y: number } | null) => {
+      const ps = live.current.pendingS;
+      if (!ps || !tile) return;
+      const t = tile.y * doc.size + tile.x;
+      if (ps.stage === 'which') {
+        const b = buildingAt.current.get(t);
+        const owner = (b && b.settlement) || territory.current[t];
+        if (!owner) return;
+        chooseSettlementRef.current(owner);
+        if (ps.kind === 'build' || ps.kind === 'settlers') setPendingS({ ...ps, stage: 'where' });
+        else {
+          giveSettlementRef.current(ps, owner);
+          setPendingS(null);
+        }
+        return;
+      }
+      const target = live.current.chosenSettlement;
+      if (target === null) return;
+      giveSettlementRef.current(ps, target, t);
+      setPendingS(null);
+    };
+
     view.hooks = {
       onPointerDown: (p) => {
         const { tab } = live.current;
         if (tab === 'main') {
           const id = pickPerson(view, client, p.sx, p.sy, performance.now());
-          chooseRef.current(id === null ? [] : [id]);
+          if (id !== null) return chooseRef.current([id]);
+          chooseRef.current([]);
+          const b = p.tile ? buildingAt.current.get(p.tile.y * doc.size + p.tile.x) : undefined;
+          chooseSettlementRef.current(b && b.settlement ? b.settlement : null);
+          return;
+        }
+        if (tab === 'imperatives' && live.current.pendingS) {
+          settlementPick(p.tile);
           return;
         }
         if (tab === 'imperatives') {
@@ -253,7 +394,7 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
         placed.clear();
         const b = box.current;
         box.current = null;
-        if (live.current.tab !== 'imperatives' || !b) return;
+        if (live.current.tab !== 'imperatives' || !b || live.current.pendingS) return;
         view.redraw();
         if (Math.hypot(b.x1 - b.x0, b.y1 - b.y0) > 6) imperativePick(inBox(b), null, true);
         else {
@@ -261,7 +402,7 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
           imperativePick(id === null ? [] : [id], p.tile, false);
         }
       },
-      objects: (ctx, v, now) => drawPeople(ctx, v, client, now, selectedSet.current),
+      objects: (ctx, v, now) => drawPeople(ctx, v, client, now, selectedSet.current, buildingsRef.current, chosenSettlementRef.current),
       overlay: (ctx, v) => {
         const b = box.current;
         if (b && Math.hypot(b.x1 - b.x0, b.y1 - b.y0) > 6) {
@@ -275,12 +416,14 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
           ctx.strokeRect(x, y, Math.abs(b.x1 - b.x0), Math.abs(b.y1 - b.y0));
           ctx.setLineDash([]);
         }
+        drawLabels(ctx, v, settlementsRef.current, chosenSettlementRef.current);
         const h = v.hover;
-        const { tab, tool, radius, pending } = live.current;
-        const showTile = tab === 'imperatives' && pending?.stage === 'where';
+        const { tab, tool, radius, pending, pendingS } = live.current;
+        const showTile = tab === 'imperatives' && (pending?.stage === 'where' || pendingS?.stage === 'where');
         if (!h || (tab !== 'units' && !showTile)) return;
         ctx.beginPath();
         const r = tab === 'units' && tool === 'remove' ? radius - 0.5 : 0.5;
+        void tool;
         for (const [x, y] of brushTiles(h.x, h.y, r, doc.size)) v.traceTile(ctx, x, y);
         ctx.fillStyle = 'rgba(252, 63, 63, 0.18)';
         ctx.fill();
@@ -306,9 +449,12 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
   useEffect(() => {
     if (viewRef.current) viewRef.current.animating = speed > 0;
   }, [speed]);
-  useEffect(() => viewRef.current?.redraw(), [tab, tool, radius, selection, pending]);
+  useEffect(() => viewRef.current?.redraw(), [tab, tool, radius, selection, pending, pendingS, chosenSettlement]);
   // Changing tabs drops a half-given imperative.
-  useEffect(() => setPending(null), [tab]);
+  useEffect(() => {
+    setPending(null);
+    setPendingS(null);
+  }, [tab]);
 
   const setSpeed = (s: Speed) => {
     clientRef.current?.setSpeed(s);
@@ -325,7 +471,8 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
         setSpeed(speed === 0 ? 1 : 0);
       } else if (e.key === '1' || e.key === '2' || e.key === '3') setSpeed(Number(e.key) as Speed);
       else if (e.key === 'Escape') {
-        if (pending) setPending(null);
+        if (pendingS) setPendingS(null);
+        else if (pending) setPending(null);
         else {
           choose([]);
           setTab('main');
@@ -410,8 +557,13 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
     clientRef.current?.init(setup.size, setup.terrain, setup.elevation, setup.deposit, setup.state);
     setTogglesState({ ...DEFAULT_TOGGLES, ...setup.state.toggles });
     empty.current.set(emptyFlags(setup));
-    viewRef.current?.replaceTiles({ size: setup.size, terrain: doc.terrain, elevation: doc.elevation, deposit: doc.deposit, empty: empty.current });
+    trees.current.set(treeCounts(setup));
+    territory.current.set(territoryOf(setup));
+    buildingsRef.current = [];
+    buildingAt.current = new Map();
+    viewRef.current?.replaceTiles({ size: setup.size, terrain: doc.terrain, elevation: doc.elevation, deposit: doc.deposit, empty: empty.current, trees: trees.current, territory: territory.current });
     choose([]);
+    chooseSettlement(null);
     setSavedTick(setup.state.tick);
     setTick(setup.state.tick);
     setWorldUnsaved(false);
@@ -436,6 +588,8 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
           </dd>
           <dt className="text-muted">People</dt>
           <dd>{population}</dd>
+          <dt className="text-muted">Settlements</dt>
+          <dd>{settlementCount}</dd>
           <dt className="text-muted">Time</dt>
           <dd>{speed === 0 ? 'Paused' : `Running at ${speed}×`}</dd>
         </dl>
@@ -473,6 +627,16 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
             clientRef.current?.removePerson(inspected);
             setWorldUnsaved(true);
             choose([]);
+          }}
+        />
+      )}
+      {chosenSettlement !== null && selection.length === 0 && (
+        <SettlementPanel
+          details={settlementDetails}
+          onClose={() => chooseSettlement(null)}
+          onOrder={(ps) => {
+            setTab('imperatives');
+            setTimeout(() => onSettlementOrderRef.current(ps), 0);
           }}
         />
       )}
@@ -580,6 +744,14 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
                 <ToolButton active={tool === 'person'} label="Person" onClick={() => setTool('person')}>
                   <User className="size-5" />
                 </ToolButton>
+                {[BuildingKind.Campfire, BuildingKind.Hut, BuildingKind.House, BuildingKind.Storehouse].map((k) => {
+                  const Icon = BUILDING_ICON[k];
+                  return (
+                    <ToolButton key={k} active={tool === k} label={BUILDINGS[k].name} onClick={() => setTool(k)}>
+                      <Icon className="size-5" />
+                    </ToolButton>
+                  );
+                })}
                 <ToolButton active={tool === 'remove'} label="Remove" onClick={() => setTool('remove')}>
                   <Eraser className="size-5" />
                 </ToolButton>
@@ -603,7 +775,13 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
                 </div>
               ) : null}
               <p className="w-56 shrink-0 self-center text-xs text-muted">
-                {tool === 'person' ? 'Click or drag on land to place adults, one per tile. Buildings come in Stage 3.' : 'Removes everyone inside the brush.'}
+                {tool === 'person'
+                  ? 'Click or drag on land to place adults, one per tile.'
+                  : tool === 'remove'
+                    ? 'Removes everyone and every building inside the brush. Removing a campfire abandons its settlement.'
+                    : tool === BuildingKind.Campfire
+                      ? 'A campfire founds a camp; unsettled people nearby join it.'
+                      : 'Placed buildings appear finished. They belong to the settlement whose land they are on, or the nearest within 15 tiles.'}
               </p>
             </div>
           )}
@@ -621,8 +799,37 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
                   </ToolButton>
                 ))}
               </div>
+              <div className="flex flex-col justify-center gap-1 border-l border-line pl-3 pr-1">
+                <span className="label-caps text-muted">Settlements</span>
+                <div className="flex gap-1">
+                  <OrderMenu
+                    active={pendingS?.kind === 'build'}
+                    label="Build"
+                    icon={<Hammer className="size-5" />}
+                    options={BUILD_ORDER_KINDS.map((k) => ({ label: BUILDINGS[k].name, onPick: () => onSettlementOrder({ kind: 'build', stage: 'which', building: k }) }))}
+                  />
+                  <OrderMenu
+                    active={pendingS?.kind === 'focus'}
+                    label="Focus"
+                    icon={<Flag className="size-5" />}
+                    options={(['balanced', 'food', 'housing', 'goods'] as Focus[]).map((f) => ({ label: FOCUS_LABEL[f], onPick: () => onSettlementOrder({ kind: 'focus', stage: 'which', focus: f }) }))}
+                  />
+                  <ToolButton active={pendingS?.kind === 'settlers'} label="Settlers" onClick={() => onSettlementOrder({ kind: 'settlers', stage: 'which' })}>
+                    <Users className="size-5" />
+                  </ToolButton>
+                  <ToolButton active={pendingS?.kind === 'abandon'} label="Abandon" onClick={() => onSettlementOrder({ kind: 'abandon', stage: 'which' })}>
+                    <LogOut className="size-5" />
+                  </ToolButton>
+                </div>
+              </div>
               <p className="w-64 shrink-0 self-center text-xs text-muted">
-                {pending?.stage === 'who'
+                {pendingS?.stage === 'which'
+                  ? 'Now click a settlement (one of its buildings, or its land). Esc cancels.'
+                  : pendingS?.stage === 'where'
+                    ? pendingS.kind === 'build'
+                      ? `Click where to build the ${BUILDINGS[pendingS.building ?? 1].name.toLowerCase()}, on or beside its land. Esc cancels.`
+                      : 'Click where the settlers should found their settlement. Esc cancels.'
+                    : pending?.stage === 'who'
                   ? `${ORDER_LABEL[pending.kind]}: now click a person or drag a box around people. Esc cancels.`
                   : pending?.stage === 'where'
                     ? `${ORDER_LABEL[pending.kind]}: now click ${pending.kind === 'move' ? 'where to go' : 'where to look for food'}. Esc cancels.`
@@ -676,10 +883,24 @@ const TASK_TEXT: Record<string, string> = {
   sleep: 'Sleeping',
   gather: 'Gathering food',
   eat: 'Eating',
+  chop: 'Cutting down a tree',
+  quarry: 'Breaking stone',
+  build: 'Building',
+};
+
+const WALK_TEXT: Record<string, string> = {
+  food: 'Going to gather food',
+  order: 'Following an order',
+  home: 'Going home to sleep',
+  wood: 'Going to cut wood',
+  stone: 'Going for stone',
+  site: 'Going to a building site',
+  settle: 'Going to found a settlement',
 };
 
 function doingText(d: PersonDetails) {
-  if (d.task === 'walk') return d.purpose === 'food' ? 'Going to gather food' : d.purpose === 'order' ? 'Following an order' : 'Walking';
+  if (d.task === 'walk') return (d.purpose && WALK_TEXT[d.purpose]) || 'Walking';
+  if (d.task === 'sleep') return d.hasHome ? 'Sleeping' : 'Sleeping out in the open';
   return TASK_TEXT[d.task] ?? d.task;
 }
 
@@ -725,7 +946,7 @@ function InspectPanel({
   if (d) {
     if (d.food < 45) needs.push(d.food === 0 ? 'Starving' : 'Hungry');
     if (d.rest < 25) needs.push('Tired');
-    needs.push('Shelter');
+    if (!d.hasHome) needs.push('Shelter');
   }
   return (
     <div className="absolute right-3 top-16 max-h-[calc(100%-12rem)] w-72 overflow-y-auto rounded-xl border border-line bg-surface/97 p-3.5 text-sm shadow-pop scrollbar-thin">
@@ -759,7 +980,7 @@ function InspectPanel({
               <Bar value={d.health} warn={d.health < 40} />
             </dd>
             <dt className="text-muted">Job</dt>
-            <dd className="text-muted">None (jobs come in Stage 3)</dd>
+            <dd className="text-muted">None (jobs come in step 3b)</dd>
             <dt className="text-muted">Culture</dt>
             <dd className="text-muted">None</dd>
             <dt className="text-muted">Pair</dt>
@@ -797,7 +1018,7 @@ function InspectPanel({
               <Bar value={d.rest} warn={d.rest < 25} />
             </dd>
             <dt className="text-muted">Shelter</dt>
-            <dd className="text-xs text-muted">None yet: houses come in Stage 3</dd>
+            <dd className="text-xs">{d.hasHome ? 'Has a home' : <span className="text-warn">No home</span>}</dd>
             <dt className="text-muted">Safety</dt>
             <dd className="text-xs">Safe (no threats exist yet)</dd>
           </dl>
@@ -806,8 +1027,10 @@ function InspectPanel({
             <dd>{doingText(d)}</dd>
             <dt className="text-muted">Unmet needs</dt>
             <dd>{needs.length ? needs.join(', ') : 'None'}</dd>
+            <dt className="text-muted">Lives in</dt>
+            <dd>{d.settlement ?? <span className="text-muted">No settlement</span>}</dd>
             <dt className="text-muted">Carrying</dt>
-            <dd>{d.carry ? `${d.carry} food` : 'Nothing'}</dd>
+            <dd>{[d.carry ? `${d.carry} food` : '', d.load ? `${d.load.n} ${d.load.kind}` : ''].filter(Boolean).join(', ') || 'Nothing'}</dd>
             <dt className="text-muted">Order</dt>
             <dd>{d.order ? ORDER_LABEL[d.order] : 'None'}</dd>
           </dl>
@@ -892,6 +1115,7 @@ function EditPerson({ details, onEdit, onUnpair }: { details: PersonDetails; onE
 function RulesPanel({ toggles, onChange, onClose }: { toggles: Toggles; onChange: (t: Toggles) => void; onClose: () => void }) {
   const rows: { key: keyof Toggles; label: string; note: string }[] = [
     { key: 'lifeCycle', label: 'Pairing, births and aging', note: 'Off freezes the population: nobody pairs up, is born, ages, or dies of old age.' },
+    { key: 'founding', label: 'Settlement founding by units', note: 'Off: people no longer found settlements by themselves. They still join settlements, and you can still place campfires and send settlers.' },
   ];
   return (
     <div className="absolute bottom-36 left-1/2 w-[28rem] max-w-[calc(100%-1.5rem)] -translate-x-1/2 animate-rise rounded-2xl border border-line bg-surface p-4 text-sm shadow-pop">
@@ -929,4 +1153,120 @@ function RulesPanel({ toggles, onChange, onClose }: { toggles: Toggles; onChange
       </p>
     </div>
   );
+}
+
+/** An order button with a small menu of choices (building kind, focus). */
+function OrderMenu({ active, label, icon, options }: { active: boolean; label: string; icon: ReactNode; options: { label: string; onPick: () => void }[] }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="relative">
+      <ToolButton active={active || open} label={label} onClick={() => setOpen((o) => !o)}>
+        {icon}
+      </ToolButton>
+      {open && (
+        <div className="absolute bottom-full left-0 z-10 mb-1 w-40 rounded-xl border border-line bg-surface p-1 shadow-pop">
+          {options.map((o) => (
+            <button
+              key={o.label}
+              className="block w-full rounded-lg px-2.5 py-1.5 text-left text-sm hover:bg-raised"
+              onClick={() => {
+                setOpen(false);
+                o.onPick();
+              }}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SettlementPanel({ details, onClose, onOrder }: { details: SettlementDetails | null; onClose: () => void; onOrder: (ps: NonNullable<PendingSettlement>) => void }) {
+  const d = details;
+  return (
+    <div className="absolute right-3 top-16 w-72 rounded-xl border border-line bg-surface/97 p-3.5 text-sm shadow-pop">
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <p className="label-caps text-muted">{d ? (d.abandoned ? 'Abandoned settlement' : STAGE_NAME[d.stage]) : 'Settlement'}</p>
+          <p className="font-display text-lg uppercase leading-tight">{d ? d.name : '…'}</p>
+        </div>
+        <IconButton label="Close" onClick={onClose}>
+          <X className="size-4" />
+        </IconButton>
+      </div>
+      {d && (
+        <>
+          <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+            <dt className="text-muted">Founded</dt>
+            <dd>Year {d.foundedYear}</dd>
+            <dt className="text-muted">People</dt>
+            <dd>{d.people}</dd>
+            <dt className="text-muted">Homes</dt>
+            <dd>
+              {d.housed} housed, room for {d.homes}
+            </dd>
+            <dt className="text-muted">Focus</dt>
+            <dd>{FOCUS_LABEL[d.focus]}</dd>
+          </dl>
+          <p className="label-caps mt-3 text-muted">Buildings</p>
+          <ul className="mt-1 space-y-0.5">
+            {d.buildings.map((b) => (
+              <li key={b.kind} className="flex justify-between">
+                <span>{BUILDINGS[b.kind].name}</span>
+                <span className="text-muted">
+                  {b.done}
+                  {b.building ? ` (+${b.building} being built)` : ''}
+                </span>
+              </li>
+            ))}
+          </ul>
+          {d.queue > 0 && <p className="mt-1 text-xs text-muted">{d.queue} ordered, not started yet</p>}
+          {!d.abandoned && (
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              <Button size="xs" onClick={() => onOrder({ kind: 'build', stage: 'which', building: BuildingKind.Hut })}>
+                Build…
+              </Button>
+              <Button size="xs" onClick={() => onOrder({ kind: 'settlers', stage: 'which' })}>
+                Send settlers
+              </Button>
+              <Button size="xs" variant="danger" onClick={() => onOrder({ kind: 'abandon', stage: 'which' })}>
+                Abandon
+              </Button>
+            </div>
+          )}
+          <p className="mt-2 text-xs text-muted">More orders (focus, other buildings) are in the Imperatives tab.</p>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** Settlement names over their campfires, like place names on a map. */
+function drawLabels(ctx: CanvasRenderingContext2D, view: IsoView, list: readonly SettlementView[], chosen: number | null) {
+  const { size, elevation } = view.src;
+  ctx.font = '13px Norwester, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'bottom';
+  ctx.lineJoin = 'round';
+  for (const s of list) {
+    if (s.abandoned) continue;
+    const x = s.center % size;
+    const y = (s.center - x) / size;
+    const [sx, sy] = view.toScreen((x - y) * 0.5, (x + y) * 0.25 + 0.25 - elevation[s.center] * STEP);
+    const ty = sy - Math.max(14, view.cam.zoom * 0.45);
+    if (sx < -100 || sx > view.width + 100 || ty < -20 || ty > view.height + 20) continue;
+    // The name, with the stage in small letters under it.
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = 'rgba(250, 238, 218, 0.95)';
+    ctx.font = '13px Norwester, sans-serif';
+    ctx.strokeText(s.name.toUpperCase(), sx, ty - 11);
+    ctx.fillStyle = s.id === chosen ? '#fc3f3f' : '#002657';
+    ctx.fillText(s.name.toUpperCase(), sx, ty - 11);
+    ctx.font = '600 10px "Archivo Variable", sans-serif';
+    const stage = `${STAGE_NAME[s.stage]}, ${s.people}`;
+    ctx.strokeText(stage, sx, ty);
+    ctx.fillText(stage, sx, ty);
+  }
 }

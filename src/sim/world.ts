@@ -2,6 +2,7 @@ import { Deposit, isWater } from '../map/terrain';
 import { randomLook } from './look';
 import { PathFinder } from './path';
 import { packLook, unpackLook } from './look';
+import { Towns } from './towns';
 import {
   ADULT_AGE,
   AgeLook,
@@ -17,6 +18,7 @@ import {
   type SimState,
   type Snapshot,
   type Toggles,
+  TileField,
 } from './types';
 
 // The running world, inside the simulation worker. Every individual is simulated in
@@ -119,6 +121,7 @@ function complete(p: Person) {
   p.rest ??= 100;
   p.carry ??= 0;
   if (p.task !== 'sleep' && p.task !== 'idle') p.task = 'idle';
+  if (p.task !== 'sleep') delete p.indoors;
   delete p.purpose;
   delete p.target;
 }
@@ -129,10 +132,11 @@ export class World {
   readonly elevation: Uint8Array;
   readonly deposit: Uint8Array;
   readonly state: SimState;
-  private stock: Uint8Array;
+  /** Food (berries, fish) and stone left on each deposit tile. */
+  readonly stock: Uint8Array;
   private finder: PathFinder;
-  private rand: Rand;
-  private byId = new Map<number, Person>();
+  readonly rand: Rand;
+  readonly byId = new Map<number, Person>();
   private routes = new Map<number, Route>();
   /** People waiting for a path: where they want to go, and why. */
   private queue: { id: number; goal: number; req: number }[] = [];
@@ -150,10 +154,11 @@ export class World {
   private regrowCursor = 0;
   /** A food tile each person could not reach last time, so they look elsewhere next. */
   private avoid = new Map<number, number>();
-  private stockChanges: number[] = [];
+  private tileChanges: number[] = [];
   /** People by cell, rebuilt every so often, for finding someone to pair with. */
   private grid = new Map<number, Person[]>();
-  private toggles: Toggles;
+  readonly toggles: Toggles;
+  readonly towns: Towns;
   /** Why people died recently (for the inspect panel); cleared as it is read. */
   readonly deaths = new Map<number, string>();
 
@@ -172,8 +177,14 @@ export class World {
     this.foodTiles = [];
     const fresh = !state.stock || state.stock.length !== n;
     this.stock = fresh ? new Uint8Array(n) : state.stock!;
+    // Stone deposits got a stock in Stage 3a; a world saved before then starts them full.
+    const freshStone = fresh || !state.trees;
     for (let i = 0; i < n; i++) {
       const d = deposit[i];
+      if (d === Deposit.Stone) {
+        if (freshStone) this.stock[i] = Towns.stoneStock();
+        continue;
+      }
       if (!isFood(d)) {
         this.stock[i] = 0;
         continue;
@@ -192,6 +203,12 @@ export class World {
       complete(p);
       this.byId.set(p.id, p);
     }
+    this.towns = new Towns(this);
+  }
+
+  /** Records that a tile's drawing changed (deposit used up or back, trees, land). */
+  tileChange(t: number, field: number, value: number) {
+    this.tileChanges.push(t, field, value);
   }
 
   private cellOf(t: number) {
@@ -220,6 +237,7 @@ export class World {
     this.finder.expanded = 0;
     this.servePaths();
     this.regrow();
+    this.towns.step();
     if (this.toggles.lifeCycle) {
       if (st.tick % 25 === 0) this.buildGrid();
     } else {
@@ -245,11 +263,11 @@ export class World {
     }
   }
 
-  private ageOf(p: Person) {
+  ageOf(p: Person) {
     return (this.state.tick - p.born) / TICKS_PER_YEAR;
   }
 
-  private near(a: Person, b: Person, range: number) {
+  near(a: Person, b: Person, range: number) {
     const dx = a.x - b.x;
     const dy = a.y - b.y;
     return dx * dx + dy * dy <= range * range;
@@ -342,6 +360,9 @@ export class World {
       carry: 0,
       mother: mother.id,
       father: fatherId,
+      // Born into their mother's settlement and home.
+      settlement: mother.settlement,
+      home: mother.home,
     };
     st.people.push(child);
     this.byId.set(child.id, child);
@@ -368,6 +389,8 @@ export class World {
           this.release(p);
         }
         if (p.purpose === 'order') delete p.order;
+        if (p.purpose === 'settle') delete p.settleAt;
+        this.towns.dropWork(p);
         delete p.purpose;
         p.wait = 10 + this.rand.int(30);
       }
@@ -388,20 +411,22 @@ export class World {
       this.regrowCursor = (this.regrowCursor + 1) % tiles.length;
       const d = this.deposit[i];
       if (this.stock[i] < FOOD_MAX[d] && this.rand.next() < REGROW[d]) {
-        if (this.stock[i] === 0) this.stockChanges.push(-(i + 1));
+        if (this.stock[i] === 0) this.tileChange(i, TileField.Empty, 0);
         this.touch(i, () => this.stock[i]++);
       }
     }
   }
 
   private update(p: Person) {
-    if (this.toggles.lifeCycle) {
-      if ((this.state.tick + p.id) % TICKS_PER_MONTH === 0 && !this.monthly(p)) return;
-      if (p.pregnant !== undefined && --p.pregnant <= 0) this.giveBirth(p);
+    if ((this.state.tick + p.id) % TICKS_PER_MONTH === 0) {
+      if (this.toggles.lifeCycle && !this.monthly(p)) return;
+      this.towns.monthly(p);
     }
+    if (this.toggles.lifeCycle && p.pregnant !== undefined && --p.pregnant <= 0) this.giveBirth(p);
     // Needs change every step.
     p.food = Math.max(0, p.food - FOOD_DECAY);
-    if (p.task === 'sleep') p.rest = Math.min(100, p.rest + REST_GAIN);
+    // Sleeping at home (shelter) rests fully; sleeping out in the open rests more slowly.
+    if (p.task === 'sleep') p.rest = Math.min(100, p.rest + (p.indoors ? REST_GAIN : REST_GAIN * 0.6));
     else p.rest = Math.max(0, p.rest - REST_DECAY);
     if (p.food <= 0) p.health -= STARVE;
     else if (p.food > 30 && p.rest > 15) p.health = Math.min(100, p.health + HEAL);
@@ -416,6 +441,7 @@ export class World {
       case 'sleep':
         if (p.rest >= RESTED) {
           p.task = 'idle';
+          delete p.indoors;
           p.wait = 5 + this.rand.int(15);
           if (p.order?.kind === 'rest') delete p.order;
         }
@@ -447,6 +473,9 @@ export class World {
         if (p.wait === Infinity) return; // waiting for a path
         if (--p.wait <= 0) this.decide(p);
         return;
+      default:
+        this.towns.tick(p);
+        return;
     }
   }
 
@@ -466,7 +495,14 @@ export class World {
         }
       }
     }
-    if (p.rest < TIRED) return this.sleep(p);
+    if (p.settleAt !== undefined) return this.goTo(p, p.settleAt, 'settle');
+    if (p.rest < TIRED) {
+      const bed = this.towns.bed(p);
+      if (bed >= 0 && bed !== this.tileOf(p)) return this.goTo(p, bed, 'home');
+      this.sleep(p);
+      if (bed >= 0) p.indoors = true;
+      return;
+    }
     const child = this.ageOf(p) < ADULT_AGE;
     if (p.food < HUNGRY) {
       if (p.carry > 0) return this.eat(p);
@@ -493,6 +529,17 @@ export class World {
       const t = this.findFood(p, this.tileOf(p), 10);
       if (t >= 0) return this.headFor(p, t);
     }
+    // Settled adults build for their settlement.
+    if (!child && this.towns.work(p)) return;
+    // Settled people keep near home (or the settlement's fire) when nothing needs doing.
+    const homeTile = this.towns.anchorTile(p);
+    if (homeTile >= 0 && !child) {
+      const [hx, hy] = [homeTile % this.size, Math.floor(homeTile / this.size)];
+      if ((p.x - hx) ** 2 + (p.y - hy) ** 2 > 36) return this.strollAt(p, homeTile, 3);
+      if (this.rand.next() < 0.5) return this.strollAt(p, homeTile, 5);
+      p.wait = 20 + this.rand.int(40);
+      return;
+    }
     // Children keep near their mother (or father); pairs keep near each other.
     const anchorId = child ? (p.mother !== undefined && this.byId.has(p.mother) ? p.mother : p.father) : p.pair;
     const anchor = anchorId !== undefined ? this.byId.get(anchorId) : undefined;
@@ -517,7 +564,13 @@ export class World {
     else this.goTo(p, goal, 'stroll');
   }
 
-  private goTo(p: Person, goal: number, purpose: Person['purpose']) {
+  private strollAt(p: Person, tile: number, radius: number) {
+    const goal = this.randomNearby({ x: (tile % this.size) + 0.5, y: Math.floor(tile / this.size) + 0.5 }, radius);
+    if (goal < 0) p.wait = 20;
+    else this.goTo(p, goal, 'stroll');
+  }
+
+  goTo(p: Person, goal: number, purpose: Person['purpose']) {
     p.purpose = purpose;
     p.wait = Infinity; // until the path search answers
     const req = ++this.reqCounter;
@@ -549,7 +602,8 @@ export class World {
   }
 
   /** Stops whatever they are doing and lets go of any food they had claimed. */
-  private stop(p: Person) {
+  stop(p: Person) {
+    this.towns?.dropWork(p);
     this.routes.delete(p.id);
     this.latestReq.delete(p.id);
     this.release(p);
@@ -591,6 +645,7 @@ export class World {
     const purpose = p.purpose;
     delete p.purpose;
     p.task = 'idle';
+    if (this.towns.arrive(p, purpose)) return;
     if (purpose === 'food' && p.target !== undefined) {
       if (this.stock[p.target] > 0) {
         p.task = 'gather';
@@ -617,7 +672,7 @@ export class World {
     if (take > 0) {
       this.touch(t, () => (this.stock[t] -= take));
       p.carry += take;
-      if (this.stock[t] === 0) this.stockChanges.push(t + 1);
+      if (this.stock[t] === 0) this.tileChange(t, TileField.Empty, 1);
     }
     if (p.order?.kind === 'gather') delete p.order;
     if (p.food < 70 && p.carry > 0) this.eat(p);
@@ -685,16 +740,17 @@ export class World {
 
   private die(p: Person, cause: string) {
     this.stop(p);
+    this.towns.leave(p);
     this.unpair(p.id);
     this.deaths.set(p.id, cause);
     this.removeWhere((q) => q === p);
   }
 
-  private tileOf(p: Person) {
+  tileOf(p: { x: number; y: number }) {
     return Math.floor(p.y) * this.size + Math.floor(p.x);
   }
 
-  private randomNearby(p: Person, radius: number): number {
+  private randomNearby(p: { x: number; y: number }, radius: number): number {
     const size = this.size;
     for (let k = 0; k < 8; k++) {
       const x = Math.floor(p.x) + this.rand.int(radius * 2 + 1) - radius;
@@ -762,6 +818,7 @@ export class World {
         this.routes.delete(p.id);
         this.avoid.delete(p.id);
         this.latestReq.delete(p.id);
+        this.towns.leave(p);
       } else keep.push(p);
     }
     this.state.people = keep;
@@ -846,6 +903,9 @@ export class World {
       father: p.father,
       children: this.state.people.filter((q) => q.mother === p.id || q.father === p.id).map((q) => q.id),
       pregnant: p.pregnant !== undefined,
+      settlement: this.towns.settlementName(p.settlement),
+      hasHome: p.home !== undefined,
+      load: p.load ? { ...p.load } : undefined,
     };
   }
 
@@ -862,10 +922,10 @@ export class World {
       pos[k * 2] = p.x;
       pos[k * 2 + 1] = p.y;
       look[k] = p.look;
-      const pose = p.task === 'sleep' ? Pose.Sleep : p.task === 'gather' || p.task === 'eat' ? Pose.Work : Pose.Stand;
+      const pose = p.task === 'sleep' ? Pose.Sleep : p.task === 'gather' || p.task === 'eat' || p.task === 'chop' || p.task === 'quarry' || p.task === 'build' ? Pose.Work : Pose.Stand;
       const age = (this.state.tick - p.born) / TICKS_PER_YEAR;
       const ageLook = age < 7 ? AgeLook.Young : age < ADULT_AGE ? AgeLook.Child : age >= ELDER_AGE ? AgeLook.Elder : AgeLook.Adult;
-      let f = (p.task === 'walk' ? 1 : 0) | (p.sex === 1 ? 4 : 0) | (pose << 3) | (ageLook << 5);
+      let f = (p.task === 'walk' ? 1 : 0) | (p.sex === 1 ? 4 : 0) | (pose << 3) | (ageLook << 5) | (p.indoors ? 128 : 0);
       const r = p.task === 'walk' ? this.routes.get(p.id) : undefined;
       if (r && r.step < r.tiles.length) {
         // Facing left on screen when heading toward smaller (x - y).
@@ -876,9 +936,14 @@ export class World {
       }
       flags[k] = f;
     }
-    const stockChanges = Int32Array.from(this.stockChanges);
-    this.stockChanges = [];
-    return { tick: this.state.tick, ids, pos, look, flags, stockChanges, stepMs };
+    const tileChanges = Int32Array.from(this.tileChanges);
+    this.tileChanges = [];
+    const t = this.towns;
+    const buildings = t.buildingsChanged ? t.buildingViews() : undefined;
+    const settlements = t.settlementsChanged ? t.settlementViews() : undefined;
+    t.buildingsChanged = false;
+    t.settlementsChanged = false;
+    return { tick: this.state.tick, ids, pos, look, flags, tileChanges, buildings, settlements, stepMs };
   }
 
   /** A copy of everything that is saved. */
@@ -888,12 +953,18 @@ export class World {
       rng: this.rand.s,
       stock: this.stock.slice(),
       toggles: { ...this.toggles },
+      trees: this.towns.trees.slice(),
+      territory: this.towns.territory.slice(),
+      settlements: this.towns.settlements.map((s) => ({ ...s, queue: s.queue.map((q) => ({ ...q })) })),
+      buildings: this.towns.buildings.map((b) => ({ ...b })),
       people: this.state.people.map((p) => {
         const q: Person = { ...p, wait: Number.isFinite(p.wait) ? Math.min(p.wait, 100) : 0 };
         // Routes and claims are not saved; anyone on the move starts again from standing.
         if (q.task !== 'sleep') q.task = 'idle';
         delete q.purpose;
         delete q.target;
+        if (q.load) q.load = { ...q.load };
+        else delete q.site;
         return q;
       }),
     };

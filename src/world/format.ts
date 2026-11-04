@@ -8,8 +8,9 @@ import type { WorldDoc } from './types';
 //   1  Stage 2a: people with a position and health.
 //   2  Stage 2b: people's needs (food, rest), the food they carry, their orders; food left on each tile.
 //   3  Stage 2c: pairs, parents, pregnancy and births; the rules the player has turned on or off.
+//   4  Stage 3a: settlements, buildings, land, trees standing, stone left; people's settlement and home.
 
-export const WORLD_FORMAT_VERSION = 3;
+export const WORLD_FORMAT_VERSION = 4;
 
 export function upgradeWorld(version: number, doc: WorldDoc): WorldDoc {
   if (version > WORLD_FORMAT_VERSION) throw new Error('This was saved by a newer version of the app. Reload the app to update it, then try again.');
@@ -20,6 +21,10 @@ export function upgradeWorld(version: number, doc: WorldDoc): WorldDoc {
   if (version < 3) {
     // Nobody saved before 2c is paired or expecting; every rule starts on.
     doc = { ...doc, state: { ...doc.state, toggles: { ...DEFAULT_TOGGLES } } };
+  }
+  if (version < 4) {
+    // No settlements yet; the new rule (settlement founding) starts on. Trees and stone start full (the simulation fills them in).
+    doc = { ...doc, state: { ...doc.state, toggles: { ...DEFAULT_TOGGLES, ...doc.state.toggles }, settlements: [], buildings: [] } };
   }
   return doc;
 }

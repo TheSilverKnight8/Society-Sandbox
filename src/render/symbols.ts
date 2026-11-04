@@ -210,8 +210,19 @@ export function wave(ctx: Ctx, px: number, py: number, s: number, alpha: number)
   ctx.globalAlpha = 1;
 }
 
-/** Draws the biome drawing for one tile (full detail: about one per tile). */
-export function biomeDetail(ctx: Ctx, t: number, x: number, y: number, h: number, px: number, py: number, lw: number) {
+/** A tree stump where a tree was cut. */
+export function stump(ctx: Ctx, px: number, py: number, s: number) {
+  ctx.beginPath();
+  ctx.ellipse(px, py - 0.02 * s, 0.035 * s, 0.018 * s, 0, 0, Math.PI * 2);
+  ctx.moveTo(px - 0.035 * s, py - 0.02 * s);
+  ctx.lineTo(px - 0.035 * s, py + 0.01 * s);
+  ctx.ellipse(px, py + 0.01 * s, 0.035 * s, 0.018 * s, 0, Math.PI, 0, true);
+  ctx.lineTo(px + 0.035 * s, py - 0.02 * s);
+  fillStroke(ctx, OBJ.trunk);
+}
+
+/** Draws the biome drawing for one tile (full detail: about one per tile). `standing`: trees left (forest), if trees can be cut. */
+export function biomeDetail(ctx: Ctx, t: number, x: number, y: number, h: number, px: number, py: number, lw: number, standing?: number) {
   const r = hash2(x, y, 3);
   switch (t) {
     case Terrain.Grassland:
@@ -224,12 +235,14 @@ export function biomeDetail(ctx: Ctx, t: number, x: number, y: number, h: number
       for (let k = 0; k < count; k++) spots.push([0.2 + hash2(x, y, 11 + k) * 0.6, 0.2 + hash2(x, y, 23 + k) * 0.6]);
       spots.sort((a, b) => a[0] + a[1] - (b[0] + b[1]));
       const pines = h >= 5 || hash2(x, y, 31) < 0.3;
-      for (const [u, v] of spots) {
+      const left = standing ?? count;
+      spots.forEach(([u, v], k) => {
         const tx = px + (u - v) * 0.5;
         const ty = py - 0.25 + (u + v) * 0.25;
-        if (pines) pine(ctx, tx, ty, 1);
+        if (k >= left) stump(ctx, tx, ty, 1);
+        else if (pines) pine(ctx, tx, ty, 1);
         else tree(ctx, tx, ty, 1);
-      }
+      });
       break;
     }
     case Terrain.Hills:
@@ -260,8 +273,9 @@ export function biomeDetail(ctx: Ctx, t: number, x: number, y: number, h: number
 }
 
 /** Draws a larger biome drawing standing for the tiles around it (zoomed far out). */
-export function biomeSparse(ctx: Ctx, t: number, x: number, y: number, h: number, px: number, py: number, s: number, lw: number) {
+export function biomeSparse(ctx: Ctx, t: number, x: number, y: number, h: number, px: number, py: number, s: number, lw: number, standing?: number) {
   const r = hash2(x, y, 9);
+  if (t === Terrain.Forest && standing === 0) return;
   switch (t) {
     case Terrain.Grassland:
       if (r < 0.25) tuft(ctx, px, py, s * 0.8);
@@ -323,7 +337,8 @@ export function deposit(ctx: Ctx, d: number, px: number, py: number, s0: number,
 
 /** `empty`: used up for now: fished-out water shows nothing, a picked bush shows no berries. */
 function drawDeposit(ctx: Ctx, d: number, px: number, py: number, s: number, lw: number, empty: boolean) {
-  if (empty && d === Deposit.Fish) return;
+  // Fished-out water and quarried-out stone show nothing until (for fish) they come back.
+  if (empty && (d === Deposit.Fish || d === Deposit.Stone)) return;
   switch (d) {
     case Deposit.Stone:
     case Deposit.Iron:

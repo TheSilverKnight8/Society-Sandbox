@@ -1,6 +1,7 @@
 import { CLOTHES, HAIRS, SKINS, unpackLook } from '../sim/look';
 import type { SimClient } from '../sim/client';
-import { AgeLook, Pose } from '../sim/types';
+import { AgeLook, Pose, type BuildingView } from '../sim/types';
+import { drawBuilding } from './buildings';
 import { isoX, isoY } from './iso';
 import type { IsoView } from './IsoView';
 import { NAVY } from './style';
@@ -227,9 +228,20 @@ function drawStanding(look: number, male: boolean, pose: number, frame: number, 
 let buf = new Float32Array(0);
 let order = new Int32Array(0);
 
-/** Draws everyone on screen, back to front. */
-export function drawPeople(ctx: CanvasRenderingContext2D, view: IsoView, client: SimClient, now: number, selected: ReadonlySet<number>) {
-  const n = client.population;
+/**
+ * Draws everything standing on the map, back to front: people and buildings together, so
+ * someone behind a house is hidden by it. People asleep in their homes are not drawn.
+ */
+export function drawPeople(
+  ctx: CanvasRenderingContext2D,
+  view: IsoView,
+  client: SimClient,
+  now: number,
+  selected: ReadonlySet<number>,
+  buildings: readonly BuildingView[] = [],
+  selectedSettlement: number | null = null,
+) {
+  const n = client.population + buildings.length;
   if (!n) return;
   if (buf.length < n * 6) {
     buf = new Float32Array(n * 6 + 600);
@@ -241,6 +253,7 @@ export function drawPeople(ctx: CanvasRenderingContext2D, view: IsoView, client:
   const Hs = view.height;
   let count = 0;
   client.forEach(now, (_k, id, x, y, look, flags) => {
+    if (flags & 128) return; // asleep indoors
     const tx = Math.min(size - 1, Math.max(0, Math.floor(x)));
     const ty = Math.min(size - 1, Math.max(0, Math.floor(y)));
     const h = elevation[ty * size + tx];
@@ -259,6 +272,23 @@ export function drawPeople(ctx: CanvasRenderingContext2D, view: IsoView, client:
     order[count] = count;
     count++;
   });
+  // Buildings: marked with look = -1, their index in `buildings` in the id slot.
+  for (let k = 0; k < buildings.length; k++) {
+    const b = buildings[k];
+    const bx = b.tile % size;
+    const by = (b.tile - bx) / size;
+    const [sx, sy] = view.toScreen(isoX(bx + 0.5, by + 0.5), isoY(bx + 0.5, by + 0.5, elevation[b.tile]));
+    if (sx < -z * 1.2 || sy < -z * 1.2 || sx > W + z * 1.2 || sy > Hs + z) continue;
+    const o = count * 6;
+    buf[o] = sx;
+    buf[o + 1] = sy;
+    buf[o + 2] = bx + by + 1;
+    buf[o + 3] = -1;
+    buf[o + 4] = 0;
+    buf[o + 5] = k;
+    order[count] = count;
+    count++;
+  }
   const idx = Array.from(order.subarray(0, count)).sort((a, b) => buf[a * 6 + 2] - buf[b * 6 + 2]);
 
   const dpr = view.dpr;
@@ -271,6 +301,12 @@ export function drawPeople(ctx: CanvasRenderingContext2D, view: IsoView, client:
     const look = buf[o + 3];
     const flags = buf[o + 4];
     const id = buf[o + 5];
+    if (look < 0) {
+      const b = buildings[id];
+      if (b.kind === 0 && b.settlement === selectedSettlement && selectedSettlement !== null) drawSelection(ctx, sx, sy, z * 1.6);
+      drawBuilding(ctx, b, sx, sy, z, dpr, now);
+      continue;
+    }
     if (selected.has(id)) drawSelection(ctx, sx, sy, z);
     const ageLook = (flags >> 5) & 3;
     const px = Math.round(figurePx * AGE_SCALE[ageLook]);

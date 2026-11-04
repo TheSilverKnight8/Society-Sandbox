@@ -1,4 +1,7 @@
-import type { FromSim, Order, PersonDetails, PersonEdit, SimState, Snapshot, Speed, Toggles, ToSim } from './types';
+import type { BuildingKind } from './buildings';
+import type { FromSim, Order, PersonDetails, PersonEdit, SettlementDetails, SimState, Snapshot, Speed, Toggles, ToSim } from './types';
+
+type SettlementOrder = Extract<ToSim, { type: 'settlementOrder' }>['order'];
 
 // The app's side of the simulation: starts the worker, sends it commands, and keeps the
 // last two snapshots so people can be drawn moving smoothly between steps.
@@ -17,6 +20,7 @@ export class SimClient {
   speed: Speed = 0;
   onSnapshot?: (s: Snapshot) => void;
   onWatched?: (p: PersonDetails | null, died?: string) => void;
+  onWatchedSettlement?: (s: SettlementDetails | null) => void;
   onError?: (message: string) => void;
 
   constructor() {
@@ -44,6 +48,9 @@ export class SimClient {
       }
       case 'watched':
         this.onWatched?.(m.person, m.died);
+        break;
+      case 'watchedSettlement':
+        this.onWatchedSettlement?.(m.settlement);
         break;
       case 'saved':
         this.saveWaiters.get(m.req)?.({ state: m.state, deposit: m.deposit });
@@ -98,6 +105,22 @@ export class SimClient {
       if (test(x, y)) out.push(id);
     });
     return out;
+  }
+
+  placeBuilding(kind: BuildingKind, tile: number) {
+    this.send({ type: 'placeBuilding', kind, tile });
+  }
+
+  removeBuildings(tiles: number[]) {
+    if (tiles.length) this.send({ type: 'removeBuildings', tiles });
+  }
+
+  watchSettlement(id: number | null) {
+    this.send({ type: 'watchSettlement', id });
+  }
+
+  settlementOrder(id: number, order: SettlementOrder) {
+    this.send({ type: 'settlementOrder', id, order });
   }
 
   setToggles(toggles: Toggles) {

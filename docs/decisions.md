@@ -10,8 +10,11 @@ Macro to micro, with a test checkpoint at the end of each stage. Each system's t
 2. **The main screen and people**, in three steps, each tested on its own:
    - 2a. Setups and saved runs; the main screen (the map with the WorldBox-style toolbar and time controls); placing and removing people; inspecting a person; the simulation running in its own thread; a performance check at 2,000+ individuals, which is the test for SPEC 2's Godot rule. **(done)**
    - 2b. Needs (food, shelter, rest, safety, job) and survival: gathering from tiles, death from unmet needs or injury, the inspect panel showing needs and the current task, editing a person by hand, and the first imperatives (orders to units). **(done)**
-   - 2c. The life cycle: aging, pairing, births and children, natural death, with their toggles (SPEC 10). **(this step)**
-3. **Settlements, buildings and economy:** settlements founded by individuals, construction, buildings that consume, produce and employ, building placement, jobs (tradesman, trader), goods carried by hand, wealth.
+   - 2c. The life cycle: aging, pairing, births and children, natural death, with their toggles (SPEC 10). **(done)**
+3. **Settlements, buildings and economy**, in three steps:
+   - 3a. Settlements founded by people and growing through stages; land with borders; trees and stone as materials; building huts, houses and a storehouse; homes meeting the shelter need; placing buildings; the settlement panel and settlement imperatives; the settlement founding rule. **(this step)**
+   - 3b. Jobs and production: farms, woodcutters, quarries, mines, fishing and the like; hauling to the storehouse; children's light jobs; the job need.
+   - 3c. Goods, coins and trade: workshops, traders between settlements, wages, wealth and inheritance; the town and city stages; fences and gates for towns and above.
 4. **Cultures, nations and technology:** culture formation and breaks, research, nations (placed and emerging), policies and culture support, technology, diplomacy, officials, influence, unique individuals, succession.
 5. **Military and war:** soldier types, weapons and equipment, armies and their leaders, battles with group orders and individual resolution, war declarations.
 6. **Disasters, effects, beasts and criminals;** scenario events (player- and sim-triggered) and the record of events.
@@ -41,6 +44,15 @@ Macro to micro, with a test checkpoint at the end of each stage. Each system's t
 | What threatens safety before beasts, criminals and war exist? | Nothing yet: safety shows as met. |
 | When do imperatives arrive? | With the systems they order (the rule above). 2b gives people tasks, so it brings the first unit orders: Move, Gather food, Rest and Stop. Orders to settlements, nations and cultures come with those. |
 
+## Caleb's answers for Stage 3
+
+| Question | Answer |
+| --- | --- |
+| How settlements start and grow | Named stages: a pair or family founds a camp (no formal jobs; everyone forages and builds); it becomes a village (houses, storehouse; jobs begin), then a town, then a city. |
+| Settlement imperatives | Build here, Set a focus, Send settlers, Abandon, and "something else" (what that is was not given; asked at the 3a checkpoint). |
+| Wealth | Coins: goods have prices; people are paid for work and earn by trade. (Step 3c.) |
+| Land | Each settlement has land shown with a border; towns and above also get fencing with gates. (Fencing in step 3c, with the town stage.) |
+
 ## Questions settled by the builder in Stage 2c (Caleb can change them)
 
 | Question | What 2c does |
@@ -48,6 +60,12 @@ Macro to micro, with a test checkpoint at the end of each stage. Each system's t
 | SPEC 10 lists "Pairing, births, and aging (turning these off freezes the population)" as one item. One switch or three? | One switch, as the spec groups them. It can be split into three. |
 | Who pairs with whom? | One man and one woman, since pairs are what births come from (SPEC 6: "specific individuals pair up and have children"). Close relatives (parent and child, brothers and sisters, half-siblings) never pair. |
 | How do children get fed? | From what a parent nearby carries when there is any; otherwise they forage close by themselves. Households come with houses (Stage 3). |
+
+## Builder's additions in Stage 3a (not named in the spec; easy to remove)
+
+- **Settlement names on the map**, over each campfire, with the stage and number of people (like place names on WorldBox's map).
+- **Placing a campfire** founds an empty camp that unsettled people nearby join (SPEC 1: everything can be modified).
+- **Removing a campfire** abandons its settlement.
 
 ## Builder's additions in Stage 2c (not named in the spec; easy to remove)
 
@@ -190,6 +208,31 @@ A step has 33 ms at 3x, so there is plenty of room for now. People only walk in 
 | The switch (SPEC 10) | **Rules** in the Main tab: "Pairing, births and aging". Off: nobody pairs, falls pregnant, gives birth, ages or dies of old age (anyone already pregnant stays so until it is turned back on). Needs and death from hunger go on, since SPEC 10 makes those always on. The panel lists what is always on. Saved with the setup or run. |
 | Saving | Pairs, parents, pregnancies, the father of an expected child, and the rules are saved (world format version 3). Setups and runs from 2b open with nobody paired and every rule on. |
 
+## Settlements (Stage 3a)
+
+| Item | Choice |
+| --- | --- |
+| Founding (SPEC 7) | Once a month, an unsettled woman whose pair is unsettled and near her may found a camp where she stands (a 20% chance each month), if no settlement's middle is within 20 tiles and trees are within 30 (there must be wood to build with). The camp is a campfire with land 3 tiles around it. Unsettled people within 12 tiles of a settlement's middle join it, bringing their children. |
+| Stages | Camp, village, town, city. A village needs 10 people and 3 homes, a town 60 people and 12 homes, a city 200 and 40. In 3a only villages are reached in practice; towns and cities come into their own in 3c. |
+| Land | Grows each month to 3 tiles plus the square root of its people plus one per three buildings (at most 14), taking only land nobody holds. Shown as a light red tint with a dashed navy border. Unowned buildings on newly claimed land become the settlement's. |
+| What gets built | Each month a settlement starts homes when it has more homeless than planned beds (huts while a camp, houses once a village if there is stone within 40 tiles), a storehouse once a village, and anything it has been ordered to build, first. A camp works on one site at a time, a village on two (one more with the housing focus, one more while orders wait). |
+| Buildings | Campfire (the middle; not built); hut (6 wood; 4 beds); house (8 wood, 4 stone; 6 beds; villages); storehouse (10 wood, 6 stone; villages; it stores goods from 3b on). Building work takes from about 12 to 26 seconds at 1x for one builder; up to 4 build at once. |
+| Building work (SPEC 8) | Settled adults with their needs met take building work (three times in four when free): cut a tree (wood 3, about 4 seconds) or break stone (stone 2, about 5 seconds), carry it to the site, and once the materials are all there, put the building up. Cut trees leave stumps and grow back slowly (about one tree per forest tile every two years); a stone deposit holds 20 and does not come back. Builders go up to 60 tiles for wood and 40 for stone. |
+| Homes and shelter (SPEC 6) | A finished home takes in a homeless family (a pair and their children) or a single adult. People sleep at home when it is within 40 tiles, and are not drawn while inside. Sleeping at home rests fully; sleeping out in the open rests at 60% of the speed. Newborns live in their mother's settlement and home. |
+| The rule (SPEC 10) | "Settlement founding by units" in Rules. Off: nobody founds a settlement by themselves; people still join settlements, and campfires and settlers still work. |
+| Saving | Settlements, buildings, land, trees standing and stone left are saved (world format version 4). Older setups and runs open with no settlements, every tree standing and every stone deposit full. |
+
+## Settlement imperatives (Stage 3a)
+
+| Order | What it does |
+| --- | --- |
+| Build (a hut, house or storehouse) | Click a settlement, then where: on its land, or just beside it (it claims the spot). It goes first in what the settlement builds. |
+| Focus | Balanced, food, housing or goods. In 3a housing lets it build one more home at a time and goods brings the storehouse forward; food and goods do more once jobs and workshops exist (3b, 3c). |
+| Send settlers | About a quarter of its people (whole families) leave and walk to the spot clicked, where the first to arrive founds a new settlement and the rest join it. |
+| Abandon | Asks first. Its people leave, its land is given up, its campfire and unfinished buildings go, and its finished buildings stand empty for anyone to take over. |
+
+Either way round, as for units: choose the settlement first (click one of its buildings in Main) and then the order, or pick the order and then click the settlement. Clicking one of a settlement's buildings in Main opens its panel: stage, when it was founded, people, homes, buildings (finished and being built), focus, and shortcuts to the orders.
+
 ## Imperatives (Stage 2b, units only)
 
 | Item | Choice |
@@ -217,6 +260,10 @@ Two fixes came out of measuring: picked bushes are redrawn together about once a
 ## Performance (Stage 2c)
 
 The life cycle adds a monthly check per person and a grid of people rebuilt every 25 steps; measured as in 2b, the numbers did not change: 2,000 people at 55 to 59 frames a second and 2 to 10 ms a step; 5,000 at 48 to 55 frames a second and 6 to 11 ms a step.
+
+## Performance (Stage 3a)
+
+2,000 people placed in 40 groups across a Titanic map founded about 90 settlements in the first year; by year 6 there were 2,360 people, 66 villages, 590 buildings and 1,700 people housed. Simulation step: 2 to 2.7 ms on average, at most 9 ms (Node, same code as the worker). In headless Chrome at 3x, with all of that on screen: 57 frames a second for the whole map and 56 at mid zoom.
 
 ## Look
 
