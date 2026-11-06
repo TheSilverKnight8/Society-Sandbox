@@ -13,17 +13,19 @@ export type Speed = 0 | 1 | 2 | 3;
 import type { BuildingKind, Good, JobKind, SettlementStage } from './buildings';
 
 /** What a person is doing right now. */
-export type Task = 'idle' | 'walk' | 'gather' | 'eat' | 'sleep' | 'chop' | 'quarry' | 'build' | 'farm' | 'harvest' | 'mine' | 'fish' | 'dig' | 'craft' | 'trade' | 'study' | 'fight' | 'drill';
+export type Task = 'idle' | 'walk' | 'gather' | 'eat' | 'sleep' | 'chop' | 'quarry' | 'build' | 'farm' | 'harvest' | 'mine' | 'fish' | 'dig' | 'craft' | 'trade' | 'study' | 'fight' | 'drill' | 'collect';
 
 /** Why a person is walking. */
-export type Purpose = 'stroll' | 'food' | 'order' | 'home' | 'wood' | 'stone' | 'site' | 'settle' | 'job' | 'deliver' | 'fetch' | 'store' | 'trade' | 'tradeHome' | 'fence' | 'tax' | 'taxHome' | 'pave' | 'muster' | 'chase';
+export type Purpose = 'stroll' | 'food' | 'order' | 'home' | 'wood' | 'stone' | 'site' | 'settle' | 'job' | 'deliver' | 'fetch' | 'store' | 'trade' | 'tradeHome' | 'fence' | 'tax' | 'taxHome' | 'pave' | 'muster' | 'chase' | 'bridge' | 'collect';
 
 /** An imperative given to a unit by the player (SPEC 4). */
 export interface Order {
-  /** 'attack': go there and fight any enemy met on the way (Stage 5: WorldBox-style group orders). */
-  kind: 'move' | 'gather' | 'rest' | 'attack';
-  /** Where to go (move, attack), or where to look for food (gather). */
+  /** 'attack': go there and fight any enemy met on the way (Stage 5: WorldBox-style group orders). 'collect': gather a load of a resource and take it to their store (Caleb after Stage 5). */
+  kind: 'move' | 'gather' | 'rest' | 'attack' | 'collect';
+  /** Where to go (move, attack), or where to look for food (gather) or the resource (collect). */
   tile?: number;
+  /** The resource to collect: wood, stone, iron ore, gold ore or clay. */
+  good?: Good;
 }
 
 export type Weapon = 'spear' | 'sword' | 'bow' | 'crossbow';
@@ -104,7 +106,7 @@ export interface Person {
   /** Their workplace (a building), if they have a job. */
   job?: number;
   /** What they are doing for their job, while walking to it. */
-  jobStep?: 'tend' | 'harvest' | 'collect' | 'gather' | 'fetch-wood' | 'fetch-stone' | 'fetch-tools' | 'fetch-input' | 'craft' | 'fetch-fence' | 'trade-load' | 'study' | 'fetch-pave' | 'fetch-gear' | 'drill';
+  jobStep?: 'tend' | 'harvest' | 'collect' | 'gather' | 'fetch-wood' | 'fetch-stone' | 'fetch-tools' | 'fetch-input' | 'craft' | 'fetch-fence' | 'trade-load' | 'study' | 'fetch-pave' | 'fetch-gear' | 'drill' | 'fetch-bridge';
   /** Their own coins (Caleb: coins; SPEC 6: wealth earned from jobs and trade). */
   coins?: number;
   /** Household goods they own (pottery). Wealth is coins plus what they own. */
@@ -153,6 +155,8 @@ export interface Person {
   siegeTile?: number;
   /** An armorer or groom carrying the makings of these arms (or a horse) to their workplace. */
   making?: Good;
+  /** A builder going to build this tile of bridge. */
+  bridgeTile?: number;
 }
 
 export type Focus = 'balanced' | 'food' | 'housing' | 'goods';
@@ -178,6 +182,8 @@ export interface Settlement {
   fencePlan?: number[];
   /** Tiles it plans to pave: paths from its middle to its buildings' doors (villages and bigger; Caleb after 4c). */
   roadPlan?: number[];
+  /** Tiles of bridge it has planned over rivers and narrow water (Caleb: water is crossed by bridge or boat). */
+  bridgePlan?: number[];
   /** Since when none of its people has had a culture (a culture forms after a while; SPEC 7). Unset: since it was founded. */
   cultureless?: number;
   /** Since when it has been far from every other settlement of its culture (it may break away; Caleb, Stage 4). */
@@ -342,6 +348,8 @@ export interface SimState {
   walls?: Uint8Array;
   /** Pavement on each tile: 1 planned, 2 paved. */
   roads?: Uint8Array;
+  /** Bridges on each tile of water: 1 planned, 2 built. */
+  bridges?: Uint8Array;
   cultures?: Culture[];
   nextCultureId?: number;
   nations?: Nation[];
@@ -379,6 +387,9 @@ export interface SettlementDetails {
   /** Tiles paved and still to pave. */
   paved: number;
   toPave: number;
+  /** Bridges built and still to build (tiles). */
+  bridges: number;
+  toBridge: number;
   /** Soldiers mustering here, and whether enemies are on its land. */
   garrison: number;
   underAttack: boolean;
@@ -415,6 +426,35 @@ export interface BuildingView {
   /** A hall's banner: its nation's color. */
   banner?: string;
   burning?: boolean;
+}
+
+/** A building, for its info panel (Caleb after Stage 5: what it is and what it does). */
+export interface BuildingDetails {
+  id: number;
+  kind: BuildingKind;
+  settlement?: number;
+  settlementName?: string;
+  /** 0 to 1; 1 is finished. */
+  progress: number;
+  /** Materials delivered and needed, while it is being built. */
+  materials?: { wood: [number, number]; stone: [number, number]; tools?: [number, number] };
+  builders: number;
+  /** Workers: adults and children holding jobs here, and how many it takes. */
+  workers: number;
+  jobs: number;
+  lightWorkers: number;
+  lightJobs: number;
+  /** People living here, and how many it houses. */
+  residents: number;
+  homes: number;
+  /** A field's crop (0 to 1) and sheaves waiting to be carried in. */
+  growth?: number;
+  output?: number;
+  /** What its workers are doing now (for workshops: what they are making). */
+  doing: string[];
+  burning: boolean;
+  /** Who lives in a castle (the ruler). */
+  ruler?: { id: number; name: string };
 }
 
 /** A settlement, as listed for the app. */
@@ -580,6 +620,8 @@ export type ToSim =
   | { type: 'placeBuilding'; kind: BuildingKind; tile: number; rot: 0 | 1 }
   | { type: 'removeBuildings'; tiles: number[] }
   | { type: 'watchSettlement'; id: number | null }
+  /** Follows a building for its info panel (Caleb after Stage 5). */
+  | { type: 'watchBuilding'; id: number | null }
   | { type: 'settlementOrder'; id: number; order: SettlementOrder }
   | { type: 'cultureEdit'; id: number; edit: CultureEdit }
   | { type: 'nationEdit'; id: number; edit: NationEdit }
@@ -607,7 +649,7 @@ export type NationOrder =
   | { kind: 'expand'; tile: number };
 
 /** What a tile change is about. */
-export const TileField = { Empty: 0, Trees: 1, Territory: 2, Walls: 3, Roads: 4 } as const;
+export const TileField = { Empty: 0, Trees: 1, Territory: 2, Walls: 3, Roads: 4, Bridges: 5 } as const;
 
 /** Poses for drawing. */
 export const Pose = { Stand: 0, Sleep: 1, Work: 2 } as const;
@@ -621,10 +663,14 @@ export interface Snapshot {
   /** x, y per person, in tiles. */
   pos: Float32Array;
   look: Uint16Array;
-  /** Bit 0: walking. Bit 1: facing left. Bit 2: male. Bits 3-4: pose (see Pose). Bits 5-6: age (see AgeLook). Bit 7: indoors (not drawn). Bit 8: carrying something. Bit 9: a ruler (drawn with a crown). */
+  /** Bit 0: walking. Bit 1: facing left. Bit 2: male. Bits 3-4: pose (see Pose). Bits 5-6: age (see AgeLook). Bit 7: indoors (not drawn). Bit 8: carrying something. Bit 9: a ruler (drawn with a crown). Bit 10: on open water (drawn in a boat). Bit 11: fighting. */
   flags: Uint16Array;
   /** Soldiers' arms, per person (see GEAR in render/people.ts): bits 0-2 weapon, 3-4 armor, 5 horse, 6 catapult, 7 leader, 8-12 nation color + 1. */
   gear: Uint16Array;
+  /** Blows struck since the last snapshot, five numbers each: from x, from y, to x, to y, kind (0 a swing, 1 an arrow, 2 a bolt, 3 a catapult stone). */
+  shots: Float32Array;
+  /** People fallen in battle since the last snapshot, five numbers each: x, y, look, gear, sex. */
+  falls: Float32Array;
   /** Tiles whose drawing changed since the last snapshot, as triples: tile, what (TileField), new value. */
   tileChanges: Int32Array;
   /** The buildings, when they changed since the last snapshot. */
@@ -643,5 +689,6 @@ export type FromSim =
   | ({ type: 'snap' } & Snapshot)
   | { type: 'watched'; person: PersonDetails | null; died?: string }
   | { type: 'watchedSettlement'; settlement: SettlementDetails | null }
+  | { type: 'watchedBuilding'; building: BuildingDetails | null }
   | { type: 'saved'; req: number; state: SimState; deposit: Uint8Array }
   | { type: 'error'; message: string };

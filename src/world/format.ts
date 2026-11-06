@@ -26,8 +26,11 @@ import type { WorldDoc } from './types';
 //  12  Pavement on each tile, and each settlement's planned paths. (New fields only.)
 //  13  Stage 5: armies, wars on relations, soldiers and their arms, arms in stores, buildings
 //      burning, armorers' work; the war rule. (Runs from before have no armies; the rule starts on.)
+//  14  After Stage 5: bridges on each tile, settlements' planned bridges, docks and castles,
+//      builders' bridge work, orders to gather resources. (New fields only. Land on water or
+//      mountains, which older runs could hold, is let go when the run opens.)
 
-export const WORLD_FORMAT_VERSION = 13;
+export const WORLD_FORMAT_VERSION = 14;
 
 export function upgradeWorld(version: number, doc: WorldDoc): WorldDoc {
   if (version > WORLD_FORMAT_VERSION) throw new Error('This was saved by a newer version of the app. Reload the app to update it, then try again.');

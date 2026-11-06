@@ -1,9 +1,9 @@
 import { hash2 } from '../lib/rng';
 import { Deposit, Terrain, isWater } from '../map/terrain';
-import { BUILDINGS, BuildingKind, STAGES, STAGE_NEEDS, anchorFor, footprint, kindAllowsTerrain, needsShore, settlementName, type BuildingDef } from './buildings';
+import { BUILDINGS, BuildingKind, STAGES, STAGE_NEEDS, anchorFor, footprint, kindAllowsTerrain, needsShore, settlementName, type BuildingDef, type Good } from './buildings';
 import { Economy } from './economy';
 import { FENCE_TECH } from './tech';
-import { ADULT_AGE, TICKS_PER_MONTH, TICKS_PER_YEAR, TileField, Wall, type Building, type BuildingView, type Person, type Settlement, type SettlementDetails, type SettlementOrder, type SettlementView } from './types';
+import { ADULT_AGE, TICKS_PER_MONTH, TICKS_PER_YEAR, TileField, Wall, type Building, type BuildingView, type Person, type Settlement, type BuildingDetails, type SettlementDetails, type SettlementOrder, type SettlementView } from './types';
 import type { World } from './world';
 
 // Settlements, buildings and building work (Stage 3a; SPEC 7 and 8).
@@ -49,6 +49,23 @@ const OUTLYING = new Set<number>([BuildingKind.Mine, BuildingKind.Quarry, Buildi
 const OUTLYING_RANGE = 35;
 /** Fields go at least this far from the middle when there is room (on the outskirts). */
 const FIELD_MIN_RANGE = 6;
+/** Land a settlement holds before growing more slowly: this many tiles, plus this many for each of its people (Caleb: a soft limit tied to population). */
+const LAND_BASE = 80;
+const LAND_PER_PERSON = 12;
+/** Bridges: wood per tile, steps of work per tile, the widest water bridged (tiles), how far its goals may be. */
+const BRIDGE_WOOD = 2;
+const BRIDGE_STEPS = 40;
+const MAX_BRIDGE = 4;
+/** How far each settlement's map of where its people can walk reaches from its middle (tiles). */
+const WALK_MAP = 64;
+const BRIDGE_GOAL_RANGE = 90;
+/** The four neighbours of a tile. */
+const N4: [number, number][] = [
+  [1, 0],
+  [-1, 0],
+  [0, 1],
+  [0, -1],
+];
 
 // Spreading (Caleb after 4a: grown villages spread when an expansion threshold is hit).
 /** Most people a settlement holds at each stage; past this, a group leaves to found a new settlement. */
@@ -57,8 +74,15 @@ const MAX_PEOPLE: Record<Settlement['stage'], number> = { camp: 40, village: 120
 const CROWDED_SHARE = 0.3;
 const CROWDED_YEARS = 2;
 /** Chance each year that a young family strikes out from a village or bigger with at least this many people. */
-const STRIKE_OUT_CHANCE = 0.15;
-const STRIKE_OUT_MIN = 30;
+const STRIKE_OUT_CHANCE = 0.08;
+const STRIKE_OUT_MIN = 50;
+/** A group striking out: this many young families at most (at least two), with this many young people not yet paired, and at least this many people in all. */
+const STRIKE_OUT_FAMILIES = 3;
+const STRIKE_OUT_SINGLES = 3;
+const STRIKE_OUT_PEOPLE = 6;
+/** Chance a year that a grown-up with nobody to pair with at home moves to a settlement within this many tiles that has someone. */
+const MOVE_FOR_PAIR_CHANCE = 0.25;
+const MOVE_FOR_PAIR_RANGE = 60;
 /** How far settlers go (tiles): mostly near, now and then far. */
 const SPREAD_NEAR: [number, number] = [25, 50];
 const SPREAD_FAR: [number, number] = [60, 100];
@@ -91,6 +115,8 @@ export class Towns {
   /** Fences and gates on each tile (towns and cities). */
   readonly walls: Uint8Array;
   /** Pavement on each tile: 1 planned, 2 paved. */
+  /** Bridges over water: 1 planned, 2 built (Caleb: water is crossed by bridge or boat). */
+  readonly bridges: Uint8Array;
   readonly roads: Uint8Array;
   private treeTiles: number[] = [];
   private treeCursor = 0;
@@ -113,6 +139,14 @@ export class Towns {
   /** How many people live in each home. */
   private occupants = new Map<number, number>();
   buildingsChanged = true;
+  /** Tiles each settlement holds, and how far its land reaches from its middle (tiles, either way). */
+  private land = new Map<number, number>();
+  private reach = new Map<number, number>();
+  /** Unclaimed tiles beside each settlement's land that its people have stood on this month, and how often. */
+  private frontier = new Map<number, Map<number, number>>();
+  private regions = new Map<number, { at: number; tiles: Set<number> }>();
+  private singlesCache?: { month: number; map: Map<number, Person[]> };
+  private walkMaps = new Map<number, { at: number; version: number; center: number; ox: number; oy: number; d: Uint16Array }>();
   settlementsChanged = true;
   readonly economy: Economy;
 
@@ -131,6 +165,8 @@ export class Towns {
     this.territory = st.territory && st.territory.length === n ? st.territory : new Uint16Array(n);
     this.walls = st.walls && st.walls.length === n ? st.walls : new Uint8Array(n);
     this.roads = st.roads && st.roads.length === n ? st.roads : new Uint8Array(n);
+    this.bridges = st.bridges && st.bridges.length === n ? st.bridges : new Uint8Array(n);
+    st.bridges = this.bridges;
     st.walls = this.walls;
     st.territory = this.territory;
     const cells = Math.ceil(w.size / TREE_CELL);
@@ -153,6 +189,21 @@ export class Towns {
         }
       }
       if (w.deposit[i] === Deposit.Stone) this.stoneTiles.push(i);
+    }
+    // Land held: water and mountains are natural borders (land claimed before that rule is let go).
+    for (let i = 0; i < n; i++) {
+      const own = this.territory[i];
+      if (!own) continue;
+      if (!this.claimable(i)) {
+        this.territory[i] = 0;
+        continue;
+      }
+      this.land.set(own, (this.land.get(own) ?? 0) + 1);
+      const s = this.sById.get(own);
+      if (s) {
+        const d = Math.max(Math.abs((i % w.size) - (s.center % w.size)), Math.abs(Math.floor(i / w.size) - Math.floor(s.center / w.size)));
+        if (d > (this.reach.get(own) ?? 0)) this.reach.set(own, d);
+      }
     }
     this.recount();
     this.economy = new Economy(w, this);
@@ -366,7 +417,7 @@ export class Towns {
     this.sById.set(s.id, s);
     this.counts.set(s.id, { people: 0, housed: 0, homes: 0, homeBuildings: 0 });
     this.addBuilding(BuildingKind.Campfire, tile, s.id, true);
-    this.claim(s, 3);
+    this.claim(s, 4);
     for (const p of founders) this.join(p, s);
     this.settlementsChanged = true;
     return s;
@@ -386,42 +437,215 @@ export class Towns {
     }
   }
 
-  /** Claims the land within `radius` of a settlement's middle that nobody else holds. */
+  /** Whether land can be held by a settlement at all: water and mountains are natural borders (Caleb). */
+  claimable(t: number) {
+    const ter = this.w.terrain[t];
+    return !isWater(ter) && ter !== Terrain.Mountain && ter !== Terrain.Snow;
+  }
+
+  private claimTile(s: Settlement, t: number) {
+    const w = this.w;
+    this.territory[t] = s.id;
+    this.land.set(s.id, (this.land.get(s.id) ?? 0) + 1);
+    const d = Math.max(Math.abs((t % w.size) - (s.center % w.size)), Math.abs(Math.floor(t / w.size) - Math.floor(s.center / w.size)));
+    if (d > (this.reach.get(s.id) ?? 0)) this.reach.set(s.id, d);
+    w.tileChange(t, TileField.Territory, s.id);
+    // Buildings nobody owns on newly claimed land become the settlement's.
+    const b = this.bByTile.get(t);
+    if (b && b.settlement === undefined) {
+      b.settlement = s.id;
+      this.buildingsChanged = true;
+    }
+  }
+
+  /**
+   * Claims land within `radius` of a tile that nobody else holds, spreading out from it over
+   * land only, so it does not jump rivers, lakes or mountains (Caleb: natural borders).
+   */
   private claim(s: Settlement, radius: number, around = s.center) {
     const w = this.w;
     const [cx, cy] = this.tileXY(around);
-    const r = Math.ceil(radius);
-    for (let dy = -r; dy <= r; dy++) {
-      for (let dx = -r; dx <= r; dx++) {
-        if (dx * dx + dy * dy > radius * radius + 0.5) continue;
-        const x = cx + dx;
-        const y = cy + dy;
-        if (x < 0 || y < 0 || x >= w.size || y >= w.size) continue;
-        const t = y * w.size + x;
-        if (this.territory[t] !== 0 || isWater(w.terrain[t])) continue;
-        this.territory[t] = s.id;
-        w.tileChange(t, TileField.Territory, s.id);
-        // Buildings nobody owns on newly claimed land become the settlement's.
-        const b = this.bByTile.get(t);
-        if (b && b.settlement === undefined) {
-          b.settlement = s.id;
-          this.buildingsChanged = true;
+    const r2 = radius * radius + 0.5;
+    const seen = new Set<number>([around]);
+    const queue = [around];
+    for (let k = 0; k < queue.length; k++) {
+      const t = queue[k];
+      const own = this.territory[t];
+      if ((own !== 0 && own !== s.id) || !this.claimable(t)) continue;
+      if (own === 0) this.claimTile(s, t);
+      const x = t % w.size;
+      const y = (t - x) / w.size;
+      for (const [dx, dy] of N4) {
+        const nx = x + dx;
+        const ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= w.size || ny >= w.size || (nx - cx) ** 2 + (ny - cy) ** 2 > r2) continue;
+        const n = ny * w.size + nx;
+        if (!seen.has(n)) {
+          seen.add(n);
+          queue.push(n);
         }
       }
     }
+  }
+
+  /**
+   * Someone of a settlement stands on unclaimed land beside its own: the settlement may take it
+   * in at the month's turn (Caleb: land grows where its people go). Called every few steps.
+   */
+  explore(p: Person) {
+    if (p.settlement === undefined) return;
+    const w = this.w;
+    const t = w.tileOf(p);
+    if (this.territory[t] !== 0 || !this.claimable(t)) return;
+    const x = t % w.size;
+    const y = (t - x) / w.size;
+    let beside = false;
+    for (const [dx, dy] of N4) {
+      const nx = x + dx;
+      const ny = y + dy;
+      if (nx >= 0 && ny >= 0 && nx < w.size && ny < w.size && this.territory[ny * w.size + nx] === p.settlement) {
+        beside = true;
+        break;
+      }
+    }
+    if (!beside) return;
+    let f = this.frontier.get(p.settlement);
+    if (!f) this.frontier.set(p.settlement, (f = new Map()));
+    f.set(t, (f.get(t) ?? 0) + 1);
+  }
+
+  /**
+   * Once a month: land its people have walked onto is taken in, freely while the settlement holds
+   * less than its people need and less and less often beyond that (Caleb: a soft limit tied to
+   * population). Unclaimed land mostly surrounded by its own is always taken in (no holes).
+   */
+  private growLand(s: Settlement, people: number) {
+    const w = this.w;
+    const f = this.frontier.get(s.id);
+    this.frontier.delete(s.id);
+    if (!f) return;
+    const limit = LAND_BASE + LAND_PER_PERSON * people;
+    for (const [t, visits] of f) {
+      if (this.territory[t] !== 0 || !this.claimable(t)) continue;
+      const x = t % w.size;
+      const y = (t - x) / w.size;
+      let own = 0;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if ((dx || dy) && this.territory[(y + dy) * w.size + x + dx] === s.id) own++;
+      if (own === 0) continue;
+      const size = this.land.get(s.id) ?? 0;
+      const chance = own >= 5 ? 1 : size < limit ? 1 : Math.pow(limit / size, 4) * Math.min(1, visits / 3);
+      if (w.rand.next() < chance) this.claimTile(s, t);
+    }
+  }
+
+  /**
+   * Whether a settlement's people can walk to a tile from its middle (looked up in a map of the
+   * tiles within WALK_MAP of its middle that can be walked to, made again each month and when a
+   * bridge is built). Tiles beyond the map count as reachable (a search decides). Things that
+   * cannot be stood on (fish) count when a tile beside them can be walked to.
+   */
+  canWalk(settlement: number, t: number): boolean {
+    return this.walkDist(settlement, t) !== -1;
+  }
+
+  /**
+   * How many steps a tile is from a settlement's middle on foot: -1 if it cannot be walked to,
+   * undefined if it is beyond the settlement's walk map (unknown). A tile that cannot be stood on
+   * (fish) counts by the tiles beside it.
+   */
+  walkDist(settlement: number, t: number): number | undefined {
+    const s = this.sById.get(settlement);
+    if (!s) return undefined;
+    const w = this.w;
+    let f = this.walkMaps.get(settlement);
+    if (!f || w.state.tick - f.at >= TICKS_PER_MONTH || f.version !== w.finder.landVersion || f.center !== s.center) f = this.makeWalkMap(s);
+    const size = w.size;
+    const x = (t % size) - f.ox;
+    const y = Math.floor(t / size) - f.oy;
+    const W = 2 * WALK_MAP + 1;
+    if (x < 0 || y < 0 || x >= W || y >= W) return undefined;
+    const here = f.d[y * W + x];
+    if (here) return here - 1;
+    if (w.finder.walkable(t)) return -1;
+    let best = 0;
+    for (const n of [x > 0 ? f.d[y * W + x - 1] : 0, x < W - 1 ? f.d[y * W + x + 1] : 0, y > 0 ? f.d[(y - 1) * W + x] : 0, y < W - 1 ? f.d[(y + 1) * W + x] : 0]) if (n && (!best || n < best)) best = n;
+    return best ? best : -1;
+  }
+
+  private makeWalkMap(s: Settlement) {
+    const w = this.w;
+    const size = w.size;
+    w.finder.land(s.center); // brings the pieces of land up to date first
+    const W = 2 * WALK_MAP + 1;
+    const ox = (s.center % size) - WALK_MAP;
+    const oy = Math.floor(s.center / size) - WALK_MAP;
+    const d = new Uint16Array(W * W);
+    const queue = new Int32Array(W * W);
+    let head = 0;
+    let tail = 0;
+    const start = WALK_MAP * W + WALK_MAP;
+    d[start] = 1;
+    queue[tail++] = start;
+    while (head < tail) {
+      const c = queue[head++];
+      const cx = c % W;
+      const cy = (c - cx) / W;
+      for (const [dx, dy] of N4) {
+        const nx = cx + dx;
+        const ny = cy + dy;
+        if (nx < 0 || ny < 0 || nx >= W || ny >= W) continue;
+        const n = ny * W + nx;
+        if (d[n]) continue;
+        const gx = ox + nx;
+        const gy = oy + ny;
+        if (gx < 0 || gy < 0 || gx >= size || gy >= size || !w.finder.walkable(gy * size + gx)) continue;
+        d[n] = d[c] + 1;
+        queue[tail++] = n;
+      }
+    }
+    const f = { at: w.state.tick, version: w.finder.landVersion, center: s.center, ox, oy, d };
+    this.walkMaps.set(s.id, f);
+    return f;
+  }
+
+  /** Land a settlement can reach from its middle without crossing water or mountains, nor others' land (cached for a month). */
+  private regionOf(s: Settlement, range: number): Set<number> {
+    const hit = this.regions.get(s.id);
+    const tick = this.w.state.tick;
+    if (hit && tick - hit.at < TICKS_PER_MONTH) return hit.tiles;
+    const w = this.w;
+    const [cx, cy] = this.tileXY(s.center);
+    const tiles = new Set<number>([s.center]);
+    const queue = [s.center];
+    for (let k = 0; k < queue.length; k++) {
+      const t = queue[k];
+      const x = t % w.size;
+      const y = (t - x) / w.size;
+      for (const [dx, dy] of N4) {
+        const nx = x + dx;
+        const ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= w.size || ny >= w.size || Math.max(Math.abs(nx - cx), Math.abs(ny - cy)) > range) continue;
+        const n = ny * w.size + nx;
+        if (tiles.has(n) || !this.claimable(n) || (this.territory[n] !== 0 && this.territory[n] !== s.id)) continue;
+        tiles.add(n);
+        queue.push(n);
+      }
+    }
+    this.regions.set(s.id, { at: tick, tiles });
+    return tiles;
   }
 
   /** Once a month: land, stage, and what to build next. */
   private manage(s: Settlement) {
     const c = this.counts.get(s.id) ?? { people: 0, housed: 0, homes: 0, homeBuildings: 0 };
     const mine = this.buildings.filter((b) => b.settlement === s.id);
-    // Land grows with people and buildings.
-    // (Buildings are several tiles across, so land grows faster than people alone would need.)
-    const radius = Math.min(22, 4 + Math.floor(Math.sqrt(c.people) * 1.3) + Math.floor(mine.length / 2));
-    this.claim(s, radius);
+    // Land grows where its people go, up to a soft limit set by how many they are (Caleb).
+    this.growLand(s, c.people);
     // Stage up when big enough.
     const next = STAGES[STAGES.indexOf(s.stage) + 1];
-    if (next && c.people >= STAGE_NEEDS[next].people && c.homeBuildings >= STAGE_NEEDS[next].homes) {
+    // (Homes: that many home buildings, or beds enough for the people the stage needs, since a town's
+    // townhouses hold ten each and a big town has fewer, larger homes.)
+    if (next && c.people >= STAGE_NEEDS[next].people && (c.homeBuildings >= STAGE_NEEDS[next].homes || c.homes >= STAGE_NEEDS[next].people)) {
       s.stage = next;
       this.economy.onStage(s);
       this.settlementsChanged = true;
@@ -433,7 +657,10 @@ export class Towns {
     this.economy.assignJobs(s);
     // Towns and cities fence their built-up middle, looked at again every year (Caleb: fencing and gates for towns and above).
     // Villages and bigger pave paths to their buildings, looked at again every year (Caleb after 4c).
-    if (s.stage !== 'camp' && (!s.roadPlan || Math.floor(this.w.state.tick / TICKS_PER_MONTH) % 12 === 6)) this.planRoads(s);
+    if (s.stage !== 'camp' && (!s.roadPlan || Math.floor(this.w.state.tick / TICKS_PER_MONTH) % 12 === 6)) {
+      this.planRoads(s);
+      this.planBridges(s);
+    }
     // (Fences need Fortification, Stage 4c.)
     if ((s.stage === 'town' || s.stage === 'city') && this.w.tech.has(s, FENCE_TECH) && (!s.fencePlan || Math.floor(this.w.state.tick / TICKS_PER_MONTH) % 12 === 0)) this.planFence(s);
     // How many buildings it puts up at once grows with its people (a builder crew per site).
@@ -458,13 +685,21 @@ export class Towns {
   }
 
   /** Starts a home if more people lack beds than the homes being built will hold. */
-  private startHome(s: Settlement, c: { people: number; housed: number }, stoneNear: boolean): boolean {
+  private startHome(s: Settlement, c: { people: number; housed: number; homes: number }, stoneNear: boolean): boolean {
     const mine = this.buildings.filter((b) => b.settlement === s.id && b.progress < 1);
-    const homeless = c.people - c.housed;
+    // People beyond its beds (children born into a home, and pairs moving in, can crowd homes past their beds).
+    const homeless = c.people - Math.min(c.housed, c.homes);
     const planned = mine.reduce((n, b) => n + this.def(b).homes, 0);
     if (homeless <= planned) return false;
     const town = s.stage === 'town' || s.stage === 'city';
-    const kind = town && stoneNear && this.economy.stockOf(s).tools >= 2 && this.w.tech.canBuild(s, BuildingKind.Townhouse) ? BuildingKind.Townhouse : s.stage !== 'camp' && stoneNear ? BuildingKind.House : BuildingKind.Hut;
+    // Stone homes where stone is near, or the store has enough (bought or carried in).
+    const stone = this.economy.stockOf(s).stone;
+    const kind =
+      town && (stoneNear || stone >= BUILDINGS[BuildingKind.Townhouse].stone) && this.economy.stockOf(s).tools >= 2 && this.w.tech.canBuild(s, BuildingKind.Townhouse)
+        ? BuildingKind.Townhouse
+        : s.stage !== 'camp' && (stoneNear || stone >= BUILDINGS[BuildingKind.House].stone)
+          ? BuildingKind.House
+          : BuildingKind.Hut;
     const spot = this.freeSpot(s, kind);
     if (!spot) return false;
     this.addBuilding(kind, spot.tile, s.id, false, spot.rot);
@@ -475,7 +710,7 @@ export class Towns {
   private startOther(s: Settlement, c: { people: number }, stoneNear: boolean): boolean {
     const mine = this.buildings.filter((b) => b.settlement === s.id);
     const hasStore = mine.some((b) => b.kind === BuildingKind.Storehouse);
-    if (s.stage !== 'camp' && !hasStore && stoneNear && s.focus !== 'housing') {
+    if (s.stage !== 'camp' && !hasStore && (stoneNear || this.economy.stockOf(s).stone >= BUILDINGS[BuildingKind.Storehouse].stone) && s.focus !== 'housing') {
       const spot = this.freeSpot(s, BuildingKind.Storehouse);
       if (spot) {
         this.addBuilding(BuildingKind.Storehouse, spot.tile, s.id, false, spot.rot);
@@ -495,7 +730,7 @@ export class Towns {
     return false;
   }
 
-  private stoneNear(center: number) {
+  stoneNear(center: number) {
     const r2 = STONE_RANGE * STONE_RANGE;
     return this.stoneTiles.some((t) => this.w.stock[t] > 0 && this.dist2(t, center) <= r2);
   }
@@ -509,6 +744,8 @@ export class Towns {
   private freeSpot(s: Settlement, kind: BuildingKind, test?: (anchor: number, w: number, d: number) => boolean): { tile: number; rot: 0 | 1; outlying?: boolean } | null {
     const w = this.w;
     if (OUTLYING.has(kind)) {
+      // Only at resources it can reach without crossing water or mountains (Caleb: natural borders).
+      const region = this.regionOf(s, OUTLYING_RANGE + 6);
       for (const res of this.economy.resourceSpots(kind, s.center, OUTLYING_RANGE)) {
         const [rx, ry] = this.tileXY(res);
         for (let r = 1; r <= 6; r++) {
@@ -520,6 +757,7 @@ export class Towns {
               const y = ry + dy;
               if (x < 0 || y < 0 || x >= w.size || y >= w.size) continue;
               const center = y * w.size + x;
+              if (!region.has(center)) continue;
               for (const rot of [0, 1] as const) {
                 const { w: fw, d: fd } = footprint(kind, rot);
                 const anchor = anchorFor(kind, rot, center, w.size);
@@ -533,7 +771,9 @@ export class Towns {
     }
     const [cx, cy] = this.tileXY(s.center);
     const field = kind === BuildingKind.Farm;
-    const rings = field ? [...Array.from({ length: 23 - FIELD_MIN_RANGE }, (_, k) => FIELD_MIN_RANGE + k), ...Array.from({ length: FIELD_MIN_RANGE - 2 }, (_, k) => 2 + k)] : Array.from({ length: 21 }, (_, k) => 2 + k);
+    // As far out as its land reaches (Caleb: land grows where its people go).
+    const far = Math.max(6, Math.min(80, (this.reach.get(s.id) ?? 6) + 1));
+    const rings = field ? [...Array.from({ length: Math.max(0, far - FIELD_MIN_RANGE + 1) }, (_, k) => FIELD_MIN_RANGE + k), ...Array.from({ length: FIELD_MIN_RANGE - 2 }, (_, k) => 2 + k)] : Array.from({ length: far - 1 }, (_, k) => 2 + k);
     for (const r of rings) {
       const options: { tile: number; rot: 0 | 1 }[] = [];
       for (let dy = -r; dy <= r; dy++) {
@@ -543,10 +783,12 @@ export class Towns {
           const y = cy + dy;
           if (x < 0 || y < 0 || x >= w.size || y >= w.size) continue;
           const center = y * w.size + x;
+          if (this.territory[center] !== s.id) continue;
           for (const rot of [0, 1] as const) {
             const { w: fw, d: fd } = footprint(kind, rot);
             const anchor = anchorFor(kind, rot, center, w.size);
-            if (this.areaFree(anchor, fw, fd, s.id, false, true, kind) && (!test || test(anchor, fw, fd))) options.push({ tile: anchor, rot });
+            // (A dock needs no lane around it: one side is the water.)
+            if (this.areaFree(anchor, fw, fd, s.id, false, kind !== BuildingKind.Dock, kind) && (!test || test(anchor, fw, fd))) options.push({ tile: anchor, rot });
           }
         }
       }
@@ -578,6 +820,7 @@ export class Towns {
     b.stone = 0;
     delete b.tools;
     this.buildingsChanged = true;
+    if (b.kind === BuildingKind.Dock && this.w.finder) this.markDocks();
     const s = b.settlement !== undefined ? this.sById.get(b.settlement) : undefined;
     if (s && this.def(b).homes) {
       const c = this.counts.get(s.id);
@@ -626,7 +869,10 @@ export class Towns {
 
   /** Once a month for each person: unsettled people join a settlement near them, or a pair founds one. */
   monthly(p: Person) {
-    if (p.settlement !== undefined) this.economy.monthly(p);
+    if (p.settlement !== undefined) {
+      this.economy.monthly(p);
+      this.moveForPair(p);
+    }
     if (p.settlement !== undefined || p.settleAt !== undefined) return;
     const w = this.w;
     const age = w.ageOf(p);
@@ -673,9 +919,11 @@ export class Towns {
     // Carrying wood for the fence: put it up; carrying stone for paving: lay it.
     if (p.load && p.load.kind === 'wood' && p.site === undefined && this.fenceWork(p)) return true;
     if (p.load && p.load.kind === 'stone' && p.site === undefined && this.paveWork(p)) return true;
+    if (p.load && p.load.kind === 'wood' && p.site === undefined && this.bridgeWork(p)) return true;
     if (w.rand.next() > 0.75) return false;
     const sites = this.buildings.filter((b) => b.settlement === p.settlement && b.progress < 1);
     if (!sites.length || w.rand.next() < 0.25) {
+      if (this.bridgeWork(p)) return true;
       if (this.fenceWork(p)) return true;
       if (this.paveWork(p)) return true;
       if (!sites.length) return false;
@@ -712,7 +960,7 @@ export class Towns {
       }
     }
     if (site.wood + inc.wood < def.wood) {
-      const t = this.nearestTree(site.tile);
+      const t = this.nearestTree(site.tile, WOOD_RANGE, site.settlement);
       if (t < 0) return false;
       this.claimRes(t, 1);
       inc.wood += WOOD_PER_TREE;
@@ -723,7 +971,7 @@ export class Towns {
       return true;
     }
     if (site.stone + inc.stone < def.stone) {
-      const t = this.nearestStone(site.tile);
+      const t = this.nearestStone(site.tile, site.settlement);
       if (t < 0) return false;
       this.claimRes(t, 1);
       inc.stone += STONE_PER_TRIP;
@@ -776,14 +1024,57 @@ export class Towns {
     }
   }
 
+  /** The nearest source of a resource to a tile (trees for wood; stone, ore and clay deposits), or -1 (an order to collect it). */
+  sourceOf(good: Good, from: number, range: number, owner?: number): number {
+    const w = this.w;
+    if (good === 'wood') return this.nearestTree(from, range, owner);
+    const want = good === 'stone' ? Deposit.Stone : good === 'iron' ? Deposit.Iron : good === 'gold' ? Deposit.Gold : good === 'clay' ? Deposit.Clay : -1;
+    if (want < 0) return -1;
+    const [fx, fy] = this.tileXY(from);
+    const fromLand = w.finder.land(from);
+    let best = -1;
+    let bestD = range * range + 1;
+    for (let dy = -range; dy <= range; dy++) {
+      for (let dx = -range; dx <= range; dx++) {
+        const x = fx + dx;
+        const y = fy + dy;
+        if (x < 0 || y < 0 || x >= w.size || y >= w.size) continue;
+        const t = y * w.size + x;
+        const d = dx * dx + dy * dy;
+        if (d < bestD && w.deposit[t] === want && w.stock[t] > 0 && w.finder.reachable(fromLand, t) && (owner === undefined || this.canWalk(owner, t))) {
+          bestD = d;
+          best = t;
+        }
+      }
+    }
+    return best;
+  }
+
+  /** Someone collecting by order takes what they can from a source: a tree's wood, or some stone, ore or clay. Returns how much. */
+  takeFrom(good: Good, t: number): number {
+    const w = this.w;
+    if (good === 'wood') {
+      if (this.trees[t] <= 0) return 0;
+      this.setTrees(t, this.trees[t] - 1);
+      return WOOD_PER_TREE;
+    }
+    if (w.stock[t] <= 0) return 0;
+    const n = Math.min(w.stock[t], 2);
+    w.stock[t] -= n;
+    if (w.stock[t] === 0) w.tileEmptied(t);
+    return n;
+  }
+
   /** The nearest tree nobody is already heading for, within `range` tiles, or -1. */
-  nearestTree(from: number, range = WOOD_RANGE): number {
+  nearestTree(from: number, range = WOOD_RANGE, settlement?: number): number {
     const size = this.w.size;
     const cells = Math.ceil(size / TREE_CELL);
     const [fx, fy] = this.tileXY(from);
     const cx = Math.floor(fx / TREE_CELL);
     const cy = Math.floor(fy / TREE_CELL);
     const rings = Math.ceil(range / TREE_CELL);
+    // Trees across water cannot be reached (from a building, its own tile's land).
+    const fromLand = this.w.finder.land(from);
     let best = -1;
     let bestD = range * range + 1;
     for (let ring = 0; ring <= rings; ring++) {
@@ -795,7 +1086,7 @@ export class Towns {
           const c = gy * cells + gx;
           if (this.treeCount[c] <= 0) continue;
           for (const t of this.treeCells[c]) {
-            if (this.trees[t] <= (this.resClaims.get(t) ?? 0)) continue;
+            if (this.trees[t] <= (this.resClaims.get(t) ?? 0) || !this.w.finder.reachable(fromLand, t) || (settlement !== undefined && !this.canWalk(settlement, t))) continue;
             const d = ((t % size) - fx) ** 2 + (Math.floor(t / size) - fy) ** 2;
             if (d < bestD) {
               bestD = d;
@@ -808,11 +1099,12 @@ export class Towns {
     return best;
   }
 
-  private nearestStone(from: number): number {
+  private nearestStone(from: number, settlement?: number): number {
     let best = -1;
     let bestD = STONE_RANGE * STONE_RANGE;
+    const fromLand = this.w.finder.land(from);
     for (const t of this.stoneTiles) {
-      if (this.w.stock[t] <= (this.resClaims.get(t) ?? 0) * STONE_PER_TRIP) continue;
+      if (this.w.stock[t] <= (this.resClaims.get(t) ?? 0) * STONE_PER_TRIP || !this.w.finder.reachable(fromLand, t) || (settlement !== undefined && !this.canWalk(settlement, t))) continue;
       const d = this.dist2(t, from);
       if (d < bestD) {
         bestD = d;
@@ -867,6 +1159,16 @@ export class Towns {
         }
         p.task = 'build';
         p.wait = 15;
+        return true;
+      }
+      case 'bridge': {
+        const t = p.bridgeTile;
+        if (t === undefined || !p.load || p.load.kind !== 'wood' || this.bridges[t] !== 1) {
+          delete p.bridgeTile;
+          return true;
+        }
+        p.task = 'build';
+        p.wait = BRIDGE_STEPS;
         return true;
       }
       case 'fence': {
@@ -947,6 +1249,23 @@ export class Towns {
           if (home) this.economy.stockOf(home).wood += this.trees[t] * WOOD_PER_TREE;
           this.setTrees(t, 0);
         }
+      }
+      p.task = 'idle';
+      p.wait = 2;
+      return true;
+    }
+    if (p.task === 'build' && p.bridgeTile !== undefined) {
+      if (--p.wait > 0) return true;
+      const t = p.bridgeTile;
+      delete p.bridgeTile;
+      if (this.bridges[t] === 1 && p.load && p.load.kind === 'wood' && p.load.n >= BRIDGE_WOOD) {
+        this.bridges[t] = 2;
+        w.finder.landDirty = true;
+        w.tileChange(t, TileField.Bridges, 2);
+        p.load.n -= BRIDGE_WOOD;
+        if (p.load.n <= 0) delete p.load;
+        const home = p.settlement !== undefined ? this.sById.get(p.settlement) : undefined;
+        if (home) this.economy.pay(home, p, 1);
       }
       p.task = 'idle';
       p.wait = 2;
@@ -1221,8 +1540,7 @@ export class Towns {
     const s = p.settlement !== undefined ? this.sById.get(p.settlement) : undefined;
     if (!s || !s.fencePlan || (s.stage !== 'town' && s.stage !== 'city')) return false;
     const here = w.tileOf(p);
-    const taken = new Set<number>();
-    for (const q of w.state.people) if (q !== p && q.fenceTile !== undefined) taken.add(q.fenceTile);
+    const taken = this.taken().fence;
     let best = -1;
     let bestD = Infinity;
     for (const t of s.fencePlan) {
@@ -1237,6 +1555,7 @@ export class Towns {
     if (best < 0) return false;
     if (p.load && p.load.kind === 'wood' && p.site === undefined) {
       p.fenceTile = best;
+      this.taken().fence.add(best);
       w.goTo(p, best, 'fence');
       return true;
     }
@@ -1285,8 +1604,7 @@ export class Towns {
     const s = p.settlement !== undefined ? this.sById.get(p.settlement) : undefined;
     if (!s || !s.roadPlan || s.stage === 'camp') return false;
     const here = w.tileOf(p);
-    const taken = new Set<number>();
-    for (const q of w.state.people) if (q !== p && q.paveTile !== undefined) taken.add(q.paveTile);
+    const taken = this.taken().pave;
     let best = -1;
     let bestD = Infinity;
     for (const t of s.roadPlan) {
@@ -1300,6 +1618,7 @@ export class Towns {
     if (best < 0) return false;
     if (p.load && p.load.kind === 'stone' && p.site === undefined) {
       p.paveTile = best;
+      this.taken().pave.add(best);
       w.goTo(p, best, 'pave');
       return true;
     }
@@ -1312,6 +1631,153 @@ export class Towns {
     return false;
   }
 
+  /**
+   * Once a year (villages and bigger): where a settlement or a resource nearby is cut off by a
+   * river or narrow water, plan a bridge across it (Caleb: water is crossed by bridge or boat).
+   * A bridge spans at most a few tiles of shallow water; wider water needs boats.
+   */
+  private planBridges(s: Settlement) {
+    const w = this.w;
+    const goals: number[] = [];
+    // Its neighbours, nearest first.
+    const others = this.settlements
+      .filter((o) => o !== s && !o.abandoned && this.dist2(o.center, s.center) <= BRIDGE_GOAL_RANGE * BRIDGE_GOAL_RANGE)
+      .sort((a, b) => this.dist2(a.center, s.center) - this.dist2(b.center, s.center))
+      .slice(0, 3);
+    for (const o of others) goals.push(o.center);
+    // The nearest trees, stone and ore.
+    const tree = this.nearestTree(s.center, 40);
+    if (tree >= 0) goals.push(tree);
+    for (const list of [this.stoneTiles, this.economy.oreList()]) {
+      let best = -1;
+      let bestD = 40 * 40;
+      for (const t of list) {
+        const d = this.dist2(t, s.center);
+        if (w.stock[t] > 0 && d < bestD) {
+          bestD = d;
+          best = t;
+        }
+      }
+      if (best >= 0) goals.push(best);
+    }
+    const plan = new Set<number>((s.bridgePlan ?? []).filter((t) => this.bridges[t] > 0));
+    const home = w.finder.land(s.center);
+    for (const g0 of goals) {
+      const g = w.finder.walkable(g0) ? g0 : this.approach(g0);
+      if (g < 0) continue;
+      // Only where it is cut off: on another piece of land (once bridged, it is the same piece).
+      if (w.finder.land(g) === home) continue;
+      const route = w.finder.find(s.center, g, 10000, 'plan');
+      if (!route) continue;
+      // Each stretch of open water on the way becomes a bridge, if it is narrow enough.
+      let run: number[] = [];
+      const flush = () => {
+        if (run.length && run.length <= MAX_BRIDGE) {
+          for (const t of run) {
+            if (this.bridges[t] === 0) this.bridges[t] = 1;
+            plan.add(t);
+          }
+        }
+        run = [];
+      };
+      for (const t of route) {
+        if (w.finder.water(t)) run.push(t);
+        else flush();
+      }
+      flush();
+    }
+    s.bridgePlan = [...plan].filter((t) => this.bridges[t] > 0);
+  }
+
+  /** Fence, pavement and bridge tiles someone is already going to build (worked out once a step). */
+  private taken() {
+    const tick = this.w.state.tick;
+    if (this.takenCache?.tick !== tick) {
+      const fence = new Set<number>();
+      const pave = new Set<number>();
+      const bridge = new Set<number>();
+      for (const q of this.w.state.people) {
+        if (q.fenceTile !== undefined) fence.add(q.fenceTile);
+        if (q.paveTile !== undefined) pave.add(q.paveTile);
+        if (q.bridgeTile !== undefined) bridge.add(q.bridgeTile);
+      }
+      this.takenCache = { tick, fence, pave, bridge };
+    }
+    return this.takenCache;
+  }
+
+  private takenCache?: { tick: number; fence: Set<number>; pave: Set<number>; bridge: Set<number> };
+
+  /** Bridge building for a settled adult: fetch wood from the store, then build the next tile of a planned bridge out from its bank. */
+  private bridgeWork(p: Person): boolean {
+    const w = this.w;
+    const s = p.settlement !== undefined ? this.sById.get(p.settlement) : undefined;
+    if (!s || !s.bridgePlan?.length || s.stage === 'camp') return false;
+    if (!s.bridgePlan.some((t) => this.bridges[t] === 1)) return false;
+    const here = w.tileOf(p);
+    const taken = this.taken().bridge;
+    let best = -1;
+    let bestStand = -1;
+    let bestD = Infinity;
+    for (const t of s.bridgePlan) {
+      if (this.bridges[t] !== 1 || taken.has(t)) continue;
+      // It is built from the bank or from bridge already built.
+      const stand = this.standBeside(t);
+      if (stand < 0) continue;
+      const d = this.dist2(stand, here);
+      if (d < bestD) {
+        bestD = d;
+        best = t;
+        bestStand = stand;
+      }
+    }
+    if (best < 0) return false;
+    if (p.load && p.load.kind === 'wood' && p.load.n >= BRIDGE_WOOD && p.site === undefined) {
+      p.bridgeTile = best;
+      this.taken().bridge.add(best);
+      w.goTo(p, bestStand, 'bridge');
+      return true;
+    }
+    if (this.economy.stockOf(s).wood >= BRIDGE_WOOD * 2) {
+      p.jobStep = 'fetch-bridge';
+      w.goTo(p, this.economy.storeTile(s, here), 'fetch');
+      return true;
+    }
+    return false;
+  }
+
+  /** A walkable tile beside a tile of water (bank or built bridge), or -1. */
+  private standBeside(t: number): number {
+    const w = this.w;
+    const x = t % w.size;
+    const y = (t - x) / w.size;
+    for (const [dx, dy] of N4) {
+      const nx = x + dx;
+      const ny = y + dy;
+      if (nx < 0 || ny < 0 || nx >= w.size || ny >= w.size) continue;
+      const n = ny * w.size + nx;
+      if (w.finder.walkable(n)) return n;
+    }
+    return -1;
+  }
+
+  /** Marks where people can board boats: the tiles of every finished dock. */
+  markDocks() {
+    const f = this.w.finder;
+    const n = this.w.size * this.w.size;
+    if (!f.launch || f.launch.length !== n) f.launch = new Uint8Array(n);
+    f.launch.fill(0);
+    f.launchCount = 0;
+    f.landDirty = true;
+    for (const b of this.buildings) {
+      if (b.kind !== BuildingKind.Dock || b.progress < 1) continue;
+      for (const t of this.tilesOf(b)) {
+        f.launch[t] = 1;
+        f.launchCount++;
+      }
+    }
+  }
+
   fenceCounts(s: Settlement) {
     let built = 0;
     let planned = 0;
@@ -1321,6 +1787,27 @@ export class Towns {
       else if (v !== Wall.None) planned++;
     }
     return { built, planned };
+  }
+
+  /** Someone moves to live in a building (the ruler's family into the castle): its settlement becomes theirs. */
+  moveInto(p: Person, b: Building) {
+    if (b.settlement === undefined) return;
+    if (p.settlement !== b.settlement) {
+      this.w.stop(p);
+      this.dropWork(p);
+      this.economy.quit(p);
+      p.settlement = b.settlement;
+    }
+    p.home = b.id;
+    delete p.indoors;
+    this.recount();
+    this.settlementsChanged = true;
+  }
+
+  /** Where a settlement is taken from: its castle, if it has a finished one (Caleb), else its middle. */
+  seatOf(s: Settlement): number {
+    const castle = this.buildings.find((b) => b.kind === BuildingKind.Castle && b.settlement === s.id && b.progress >= 1);
+    return castle ? this.economy.doorTile(castle) : s.center;
   }
 
   /** Where a tired person goes to sleep: their home, if it is not too far. */
@@ -1398,6 +1885,7 @@ export class Towns {
     const i = this.buildings.indexOf(b);
     if (i >= 0) this.buildings.splice(i, 1);
     this.bById.delete(b.id);
+    if (b.kind === BuildingKind.Dock) this.markDocks();
     for (const t of this.tilesOf(b)) if (this.bByTile.get(t) === b) this.bByTile.delete(t);
     for (const p of this.w.state.people) {
       if (p.home === b.id) {
@@ -1457,10 +1945,10 @@ export class Towns {
    * now and then a young family strikes out on its own (Caleb: grown villages spread when an
    * expansion threshold is hit). Revolts and nations wanting land come with nations (4b).
    */
-  private spread(s: Settlement, c: { people: number; housed: number }) {
+  private spread(s: Settlement, c: { people: number; housed: number; homes: number }) {
     const w = this.w;
     const tick = w.state.tick;
-    const homeless = c.people - c.housed;
+    const homeless = c.people - Math.min(c.housed, c.homes);
     // Camps are not crowded: their people are still building their first homes.
     if (s.stage !== 'camp' && homeless > c.people * CROWDED_SHARE) s.crowdedSince ??= tick;
     else delete s.crowdedSince;
@@ -1501,15 +1989,21 @@ export class Towns {
       for (const q of members) if (w.ageOf(q) < ADULT_AGE && (q.mother === p.id || q.father === p.id)) leaving.add(q);
     };
     if (which === 'young') {
+      // A few young families together, with some young people not yet paired, so the new
+      // settlement has people to pair and grow (Caleb: one family alone never develops).
       const young = members.filter((p) => {
         const partner = p.pair !== undefined ? w.byId.get(p.pair) : undefined;
         const age = w.ageOf(p);
-        return age >= 16 && age <= 35 && partner && partner.settlement === s.id && w.ageOf(partner) <= 35;
+        return p.sex === 0 && age >= 16 && age <= 35 && partner && partner.settlement === s.id && w.ageOf(partner) <= 35;
       });
-      if (young.length) addFamily(young[w.rand.int(young.length)]);
+      if (young.length < 2) return leaving;
+      for (let k = 0; k < STRIKE_OUT_FAMILIES && young.length; k++) addFamily(young.splice(w.rand.int(young.length), 1)[0]);
+      const singles = members.filter((p) => p.pair === undefined && !leaving.has(p) && w.ageOf(p) >= 16 && w.ageOf(p) <= 28);
+      for (let k = 0; k < STRIKE_OUT_SINGLES && singles.length; k++) leaving.add(singles.splice(w.rand.int(singles.length), 1)[0]);
+      if (leaving.size < STRIKE_OUT_PEOPLE) leaving.clear();
       return leaving;
     }
-    const want = Math.max(2, Math.ceil(members.length / 4));
+    const want = Math.max(8, Math.ceil(members.length / 4));
     for (const p of members) {
       if (leaving.size >= want) break;
       if (leaving.has(p) || w.ageOf(p) < ADULT_AGE) continue;
@@ -1574,6 +2068,61 @@ export class Towns {
     return true;
   }
 
+  /**
+   * A grown-up with nobody at home they could pair with may move to a settlement nearby that has
+   * someone (so small settlements are not left to one family, and people come and go between them).
+   */
+  private moveForPair(p: Person) {
+    const w = this.w;
+    if (!w.toggles.founding || p.pair !== undefined || p.soldier || p.job !== undefined && this.economy.jobOf(p) === 'official') return;
+    const age = w.ageOf(p);
+    if (age < 17 || age > 35 || w.nations.rulers.has(p.id) || w.rand.next() > 1 - Math.pow(1 - MOVE_FOR_PAIR_CHANCE, 1 / 12)) return;
+    const singles = this.singlesBySettlement();
+    const fits = (q: Person) => q.sex !== p.sex && Math.abs(w.ageOf(q) - age) <= 12 && !w.isRelated(p, q);
+    if ((singles.get(p.settlement!) ?? []).some(fits)) return;
+    const home = this.sById.get(p.settlement!);
+    if (!home) return;
+    let best: Settlement | null = null;
+    let bestScore = -Infinity;
+    for (const s of this.settlements) {
+      if (s === home || s.abandoned || this.dist2(s.center, home.center) > MOVE_FOR_PAIR_RANGE * MOVE_FOR_PAIR_RANGE) continue;
+      const n = (singles.get(s.id) ?? []).filter(fits).length;
+      if (!n) continue;
+      // Rather their own culture's and nation's, and nearer.
+      const score = n + (s.nation !== undefined && s.nation === home.nation ? 3 : 0) - Math.sqrt(this.dist2(s.center, home.center)) / 20;
+      if (score > bestScore) {
+        bestScore = score;
+        best = s;
+      }
+    }
+    if (!best) return;
+    w.stop(p);
+    this.dropWork(p);
+    this.economy.quit(p);
+    delete p.settlement;
+    delete p.home;
+    delete p.indoors;
+    p.settleAt = best.center;
+    w.goTo(p, best.center, 'settle', true);
+    this.recount();
+    this.settlementsChanged = true;
+  }
+
+  /** Grown-ups not paired, by settlement (worked out once a month). */
+  private singlesBySettlement(): Map<number, Person[]> {
+    const month = Math.floor(this.w.state.tick / TICKS_PER_MONTH);
+    if (this.singlesCache?.month === month) return this.singlesCache.map;
+    const map = new Map<number, Person[]>();
+    for (const q of this.w.state.people) {
+      if (q.settlement === undefined || q.pair !== undefined || this.w.ageOf(q) < 16) continue;
+      const l = map.get(q.settlement);
+      if (l) l.push(q);
+      else map.set(q.settlement, [q]);
+    }
+    this.singlesCache = { month, map };
+    return map;
+  }
+
   /** Its people leave and its land is given up; its buildings stand empty for anyone to take over. */
   private abandon(s: Settlement) {
     const w = this.w;
@@ -1589,6 +2138,9 @@ export class Towns {
       this.economy.quit(p);
       this.dropWork(p);
     }
+    this.land.delete(s.id);
+    this.reach.delete(s.id);
+    this.frontier.delete(s.id);
     for (let t = 0; t < this.territory.length; t++) {
       if (this.territory[t] === s.id) {
         this.territory[t] = 0;
@@ -1625,6 +2177,52 @@ export class Towns {
 
   buildingAt(tile: number) {
     return this.bByTile.get(tile);
+  }
+
+  /** A building's info panel (Caleb after Stage 5). */
+  buildingDetails(id: number): BuildingDetails | null {
+    const b = this.bById.get(id);
+    if (!b) return null;
+    const def = this.def(b);
+    const s = b.settlement !== undefined ? this.sById.get(b.settlement) : undefined;
+    let workers = 0;
+    let lightWorkers = 0;
+    let residents = 0;
+    let builders = 0;
+    const doing: string[] = [];
+    let ruler: { id: number; name: string } | undefined;
+    for (const p of this.w.state.people) {
+      if (p.home === b.id) {
+        residents++;
+        if (this.w.nations.rulers.has(p.id)) ruler = { id: p.id, name: p.unique?.name ?? `No. ${p.id}` };
+      }
+      if (p.site === b.id) builders++;
+      if (p.job !== b.id) continue;
+      if (this.w.ageOf(p) < ADULT_AGE) lightWorkers++;
+      else workers++;
+      if (p.making) doing.push(`making ${p.making}`);
+      else if (p.load) doing.push(`carrying ${p.load.n} ${p.load.kind}`);
+    }
+    return {
+      id: b.id,
+      kind: b.kind,
+      settlement: b.settlement,
+      settlementName: s?.name,
+      progress: b.progress,
+      materials: b.progress < 1 ? { wood: [b.wood, def.wood], stone: [b.stone, def.stone], tools: def.tools ? [b.tools ?? 0, def.tools] : undefined } : undefined,
+      builders,
+      workers,
+      jobs: def.jobs,
+      lightWorkers,
+      lightJobs: def.lightJobs,
+      residents,
+      homes: def.homes,
+      growth: b.kind === BuildingKind.Farm ? b.growth ?? 0 : undefined,
+      output: b.output,
+      doing,
+      burning: b.fire !== undefined,
+      ruler,
+    };
   }
 
   details(id: number): SettlementDetails | null {
@@ -1665,7 +2263,13 @@ export class Towns {
           if (this.roads[t] === 2) paved++;
           else if (this.roads[t] === 1) toPave++;
         }
-        return { paved, toPave };
+        let bridges = 0;
+        let toBridge = 0;
+        for (const t of s.bridgePlan ?? []) {
+          if (this.bridges[t] === 2) bridges++;
+          else if (this.bridges[t] === 1) toBridge++;
+        }
+        return { paved, toPave, bridges, toBridge };
       })(),
       ...(() => {
         const j = this.economy.jobCounts(s);
@@ -1687,7 +2291,7 @@ export class Towns {
     return this.buildings.map((b) => {
       const { w, d } = footprint(b.kind, b.rot);
       const look = b.kind === BuildingKind.Farm ? this.economy.cropLook(b) : 0;
-      const banner = b.kind === BuildingKind.Hall || b.kind === BuildingKind.Barracks ? this.w.nations?.bannerOf(b.settlement) : undefined;
+      const banner = b.kind === BuildingKind.Hall || b.kind === BuildingKind.Barracks || b.kind === BuildingKind.Castle ? this.w.nations?.bannerOf(b.settlement) : undefined;
       return { id: b.id, kind: b.kind, tile: b.tile, w, d, rot: b.rot ?? 0, settlement: b.settlement ?? 0, progress: b.progress, look, banner, burning: b.fire !== undefined || undefined };
     });
   }

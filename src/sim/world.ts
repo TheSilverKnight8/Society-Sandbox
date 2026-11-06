@@ -55,6 +55,8 @@ const HUNGRY = 45;
 const PECKISH = 85;
 const EAT_GAIN = 50;
 const CARRY_MAX = 3;
+/** A load collected by order (wood, stone, ore or clay) before it goes to the store. */
+const COLLECT_LOAD = 6;
 /** Rest lost per step awake, and gained per step asleep. */
 const REST_DECAY = 0.08;
 const REST_GAIN = 0.6;
@@ -87,10 +89,10 @@ const PAIR_CHANCE = 0.35;
 const FERTILE_MIN = 16;
 const FERTILE_MAX = 45;
 /** Chance each month that a fed, healthy, paired woman with her pair nearby becomes pregnant. */
-const CONCEIVE_CHANCE = 0.04;
+const CONCEIVE_CHANCE = 0.07;
 const PREGNANCY = 9 * TICKS_PER_MONTH;
 /** At least this long between births. */
-const BIRTH_GAP = 18 * TICKS_PER_MONTH;
+const BIRTH_GAP = 12 * TICKS_PER_MONTH;
 /** How near a parent must be to share food with a hungry child. */
 const SHARE_RANGE = 6;
 
@@ -153,14 +155,18 @@ export class World {
   private reqCounter = 0;
   /** How many people are on their way to each food tile, so a crowd does not all head for one bush. */
   private claims = new Map<number, number>();
+  /** How much each person's claim holds. */
+  private claimed = new Map<number, number>();
+  /** Which way each person last faced (true: left on screen), kept while they stand. */
+  private facing = new Map<number, boolean>();
   /** Food tiles, by cell. */
   private foodCells: number[][];
   /** How many tiles in each cell still have food nobody has claimed, so searches skip empty cells at once. */
   private cellFree: Int32Array;
   private foodTiles: number[];
   private regrowCursor = 0;
-  /** A food tile each person could not reach last time, so they look elsewhere next. */
-  private avoid = new Map<number, number>();
+  /** Food tiles each person could not reach lately (the last few), so they look elsewhere. */
+  private avoid = new Map<number, number[]>();
   private tileChanges: number[] = [];
   /** People by cell, rebuilt every so often, for finding someone to pair with. */
   private grid = new Map<number, Person[]>();
@@ -217,6 +223,8 @@ export class World {
     this.towns = new Towns(this);
     this.finder.walls = this.towns.walls;
     this.finder.roads = this.towns.roads;
+    this.finder.bridges = this.towns.bridges;
+    this.towns.markDocks();
     this.cultures = new Cultures(this);
     this.nations = new Nations(this);
     this.tech = new Technology(this);
@@ -332,6 +340,10 @@ export class World {
     return true;
   }
 
+  isRelated(a: Person, b: Person) {
+    return this.related(a, b);
+  }
+
   private related(a: Person, b: Person) {
     if (a.mother !== undefined && (a.mother === b.mother || a.mother === b.id)) return true;
     if (a.father !== undefined && (a.father === b.father || a.father === b.id)) return true;
@@ -406,8 +418,26 @@ export class World {
       const p = this.byId.get(id);
       if (!p || p.task !== 'idle' || this.latestReq.get(id) !== req) continue;
       this.latestReq.delete(id);
-      // Long journeys (traders) may look much further.
-      const tiles = this.finder.find(this.tileOf(p), goal, far ? 60000 : 8000);
+      // Long journeys (traders) may look much further. Between pieces of land there is no way on
+      // foot: a long journey may go by boat, from land with a dock (Caleb: water is crossed by boat or bridge).
+      const start = this.tileOf(p);
+      const from = this.finder.land(start);
+      const to = this.finder.land(goal);
+      // (Someone already afloat sails wherever they go next.)
+      const byBoat = from < 0 || ((far || p.purpose === 'order') && this.finder.hasBoats && this.finder.dockOn(from));
+      // A short trip that needs a long way round (food just across a river) is given up quickly,
+      // so they choose something else: the search looks at more tiles the further the goal is.
+      const sx = start % this.size - goal % this.size;
+      const sy = Math.floor(start / this.size) - Math.floor(goal / this.size);
+      let limit = far ? 60000 : Math.min(8000, Math.max(600, (sx * sx + sy * sy) * 25));
+      // Settled people near home: when their settlement's walk map says the goal can be walked to,
+      // the search is given room for the way round it may take (so it finds it rather than giving up).
+      if (p.settlement !== undefined && from >= 0 && from === to) {
+        const ds = this.towns.walkDist(p.settlement, start);
+        const dg = this.towns.walkDist(p.settlement, goal);
+        if (ds !== undefined && dg !== undefined && ds >= 0 && dg >= 0) limit = Math.max(limit, Math.min(30000, (ds + dg) * (ds + dg) * 3 + 600));
+      }
+      const tiles = from >= 0 && from === to ? this.finder.find(start, goal, limit) : byBoat ? this.finder.find(start, goal, 60000, 'boat') : null;
       if (tiles && tiles.length) {
         this.routes.set(id, { tiles, step: 0 });
         p.task = 'walk';
@@ -416,7 +446,11 @@ export class World {
         this.arrive(p);
       } else {
         if (p.target !== undefined) {
-          this.avoid.set(p.id, p.target);
+          // They remember the last few things they could not get to, and look elsewhere.
+          const list = this.avoid.get(p.id) ?? [];
+          list.push(p.target);
+          if (list.length > 6) list.shift();
+          this.avoid.set(p.id, list);
           this.release(p);
         }
         if (p.purpose === 'order') delete p.order;
@@ -470,8 +504,10 @@ export class World {
       this.die(p, 'hunger');
       return;
     }
-    // Too tired to stay awake: they fall asleep wherever they are.
-    if (p.rest <= 0 && p.task !== 'sleep') this.sleep(p);
+    // Too tired to stay awake: they fall asleep wherever they are (after eating, if they are).
+    if (p.rest <= 0 && p.task !== 'sleep' && p.task !== 'eat') this.sleep(p);
+    // Settlement land grows where its people go (Caleb), looked at every few steps.
+    if ((this.state.tick + p.id) % 15 === 0) this.towns.explore(p);
     // Fighting comes before anything else (Stage 5).
     if (this.military.fight(p)) return;
 
@@ -483,20 +519,49 @@ export class World {
           delete p.indoors;
           p.wait = 5 + this.rand.int(15);
           if (p.order?.kind === 'rest') delete p.order;
+          // Woken by hunger with food in hand: they eat first.
+          if (p.food < HUNGRY && p.carry > 0) this.eat(p);
         }
         return;
       case 'walk':
-        // A stroll gives way to hunger or tiredness; settlers on the road stop to eat when they must.
-        const settlerStops = p.purpose === 'settle' && (p.food < STARVING || (p.food < HUNGRY && p.carry > 0));
-        if (((p.purpose === 'stroll' && (p.food < HUNGRY || p.rest < TIRED)) || settlerStops) && (this.state.tick + p.id) % 10 === 0) {
-          this.stop(p);
-          p.wait = 0;
-          return;
+        if ((this.state.tick + p.id) % 10 === 0) {
+          // Hungry with food in hand: they eat where they are, then go on.
+          if (p.food < HUNGRY && p.carry > 0) {
+            this.stop(p);
+            this.eat(p);
+            return;
+          }
+          // A stroll gives way to hunger or tiredness; anyone starving on the way somewhere else
+          // stops to see to it (unless they are already going for food).
+          // (Someone in a boat keeps going: there is nothing to find on open water.)
+          const forFood = p.purpose === 'food' || p.purpose === 'store';
+          const afloat = this.finder.water(this.tileOf(p));
+          if (!afloat && ((p.purpose === 'stroll' && (p.food < HUNGRY || p.rest < TIRED)) || (p.food < STARVING && !forFood))) {
+            this.stop(p);
+            p.wait = 0;
+            return;
+          }
         }
         this.walk(p);
         return;
       case 'gather':
         if (--p.wait <= 0) this.finishGather(p);
+        return;
+      case 'collect':
+        if (--p.wait <= 0) {
+          const t = p.target;
+          const good = p.order?.kind === 'collect' ? p.order.good : undefined;
+          delete p.target;
+          if (t !== undefined && good) {
+            const n = this.towns.takeFrom(good, t);
+            if (n > 0) {
+              if (p.load && p.load.kind === good) p.load.n += n;
+              else p.load = { kind: good, n };
+            }
+          }
+          p.task = 'idle';
+          p.wait = 2;
+        }
         return;
       case 'eat':
         if (--p.wait <= 0) {
@@ -529,6 +594,20 @@ export class World {
     if (o) {
       if (o.kind === 'rest') return this.sleep(p);
       if ((o.kind === 'move' || o.kind === 'attack') && o.tile !== undefined) return this.goTo(p, o.tile, 'order');
+      if (o.kind === 'collect' && o.good && o.tile !== undefined && p.task !== 'sleep') {
+        // A full load: to the store with it (or kept, by someone with no settlement); the order is done.
+        if (p.load && p.load.kind === o.good && p.load.n >= COLLECT_LOAD) {
+          delete p.order;
+          if (this.towns.economy.deliver(p)) return;
+        } else {
+          const src = this.towns.sourceOf(o.good, o.tile, 24, p.settlement);
+          if (src >= 0) {
+            p.target = src;
+            return this.goTo(p, src, 'collect');
+          }
+          delete p.order;
+        }
+      }
       if (o.kind === 'gather') {
         if (p.carry >= CARRY_MAX) {
           delete p.order;
@@ -623,16 +702,22 @@ export class World {
     p.wait = EAT_STEPS;
   }
 
+  /** A stroll: to a spot nearby that can be walked to in a straight line (strolls are aimless, so not worth a search). */
   private stroll(p: Person, radius: number, around?: Person) {
-    const goal = this.randomNearby(around ?? p, radius);
-    if (goal < 0) p.wait = 20;
-    else this.goTo(p, goal, 'stroll');
+    this.strollTo(p, () => this.randomNearby(around ?? p, radius));
   }
 
   private strollAt(p: Person, tile: number, radius: number) {
-    const goal = this.randomNearby({ x: (tile % this.size) + 0.5, y: Math.floor(tile / this.size) + 0.5 }, radius);
-    if (goal < 0) p.wait = 20;
-    else this.goTo(p, goal, 'stroll');
+    this.strollTo(p, () => this.randomNearby({ x: (tile % this.size) + 0.5, y: Math.floor(tile / this.size) + 0.5 }, radius));
+  }
+
+  private strollTo(p: Person, pick: () => number) {
+    const here = this.tileOf(p);
+    for (let k = 0; k < 4; k++) {
+      const goal = pick();
+      if (goal >= 0 && (goal === here || this.straightLine(here, goal))) return this.goTo(p, goal, 'stroll');
+    }
+    p.wait = 20;
   }
 
   goTo(p: Person, goal: number, purpose: Person['purpose'], far = false) {
@@ -642,10 +727,47 @@ export class World {
       if (a >= 0) goal = a;
     }
     p.purpose = purpose;
+    // A short trip with nothing in the way is walked straight, without a search (most trips are
+    // short: strolls, the store, work nearby), which keeps the searches for the long ones.
+    const line = this.straightLine(this.tileOf(p), goal);
+    if (line && line.length) {
+      this.latestReq.delete(p.id);
+      this.routes.set(p.id, { tiles: line, step: 0 });
+      p.task = 'walk';
+      p.wait = Infinity;
+      return;
+    }
     p.wait = Infinity; // until the path search answers
     const req = ++this.reqCounter;
     this.latestReq.set(p.id, req);
     this.queue.push({ id: p.id, goal, req, far });
+  }
+
+  /** The tiles of a straight walk from one tile to another (up to 12 tiles away), if all of it can be walked; else null. */
+  private straightLine(from: number, to: number): number[] | null {
+    const size = this.size;
+    const x0 = from % size;
+    const y0 = (from - x0) / size;
+    const dx = (to % size) - x0;
+    const dy = Math.floor(to / size) - y0;
+    const n = Math.max(Math.abs(dx), Math.abs(dy));
+    if (n === 0 || n > 12) return null;
+    const f = this.finder;
+    const out: number[] = [];
+    let px = x0;
+    let py = y0;
+    for (let k = 1; k <= n; k++) {
+      const x = Math.round(x0 + (dx * k) / n);
+      const y = Math.round(y0 + (dy * k) / n);
+      const t = y * size + x;
+      if (!f.walkable(t)) return null;
+      // No cutting corners past what cannot be walked.
+      if (x !== px && y !== py && (!f.walkable(py * size + x) || !f.walkable(y * size + px))) return null;
+      out.push(t);
+      px = x;
+      py = y;
+    }
+    return out;
   }
 
   /** Heads for a food tile, claiming a share of it. */
@@ -656,7 +778,10 @@ export class World {
       return;
     }
     p.target = tile;
-    this.touch(tile, () => this.claims.set(tile, (this.claims.get(tile) ?? 0) + 1));
+    // A claim holds what they will take (up to a full hand), so those after them find what is left.
+    const take = Math.max(1, Math.min(CARRY_MAX - p.carry, this.stock[tile] - (this.claims.get(tile) ?? 0)));
+    this.claimed.set(p.id, take);
+    this.touch(tile, () => this.claims.set(tile, (this.claims.get(tile) ?? 0) + take));
     this.goTo(p, goal, 'food');
   }
 
@@ -664,10 +789,11 @@ export class World {
     const t = p.target;
     if (t === undefined) return;
     this.touch(t, () => {
-      const c = (this.claims.get(t) ?? 1) - 1;
+      const c = (this.claims.get(t) ?? 1) - (this.claimed.get(p.id) ?? 1);
       if (c <= 0) this.claims.delete(t);
       else this.claims.set(t, c);
     });
+    this.claimed.delete(p.id);
     delete p.target;
   }
 
@@ -722,6 +848,12 @@ export class World {
     const purpose = p.purpose;
     delete p.purpose;
     p.task = 'idle';
+    if (purpose === 'collect') {
+      // At the source: work it for a while (see 'collect' in update).
+      p.task = 'collect';
+      p.wait = 45;
+      return;
+    }
     if (purpose === 'muster' || purpose === 'chase') {
       this.military.muster(p);
       p.wait = purpose === 'chase' ? 0 : 10 + this.rand.int(30);
@@ -745,12 +877,15 @@ export class World {
 
   private finishGather(p: Person) {
     const t = p.target;
+    const held = this.claimed.get(p.id) ?? CARRY_MAX;
     this.release(p);
     if (t === undefined) {
       p.task = 'idle';
       return;
     }
-    const take = Math.min(this.stock[t], CARRY_MAX - p.carry);
+    // What their claim held (more if nobody else is waiting on it).
+    const free = this.stock[t] - (this.claims.get(t) ?? 0);
+    const take = Math.min(this.stock[t], CARRY_MAX - p.carry, Math.max(held, free));
     if (take > 0) {
       this.touch(t, () => (this.stock[t] -= take));
       p.carry += take;
@@ -774,6 +909,8 @@ export class World {
     const cy = Math.floor(fy / CELL);
     const rings = Math.ceil(radius / CELL);
     const skip = this.avoid.get(p.id);
+    const myLand = this.finder.land(this.tileOf(p));
+    const home = p.settlement;
     let best = -1;
     let bestD = radius * radius + 1;
     for (let ring = 0; ring <= rings; ring++) {
@@ -785,9 +922,11 @@ export class World {
           if (gx < 0 || gy < 0 || gx >= cells || gy >= cells) continue;
           if (this.cellFree[gy * cells + gx] <= 0) continue;
           for (const t of this.foodCells[gy * cells + gx]) {
-            if (t === skip) continue;
+            if (skip && skip.includes(t)) continue;
             const left = this.stock[t] - (this.claims.get(t) ?? 0);
             if (left <= 0) continue;
+            // Only food they can walk to (not across a river or sea).
+            if (!this.finder.reachable(myLand, t) || (home !== undefined && !this.towns.canWalk(home, t))) continue;
             const dx = (t % size) - fx;
             const dy = Math.floor(t / size) - fy;
             const d = dx * dx + dy * dy;
@@ -855,7 +994,7 @@ export class World {
   place(tiles: number[]): number {
     let n = 0;
     for (const i of tiles) {
-      if (i < 0 || i >= this.terrain.length || isWater(this.terrain[i]) || !this.finder.walkable(i)) continue;
+      if (!Number.isInteger(i) || i < 0 || i >= this.terrain.length || isWater(this.terrain[i]) || !this.finder.walkable(i)) continue;
       const st = this.state;
       const age = 16 + this.rand.next() * 20;
       const p: Person = {
@@ -897,6 +1036,7 @@ export class World {
     const keep: Person[] = [];
     for (const p of this.state.people) {
       if (test(p)) {
+        this.release(p);
         if (p.pair !== undefined) {
           const q = this.byId.get(p.pair);
           if (q && q.pair === p.id) delete q.pair;
@@ -1053,7 +1193,7 @@ export class World {
       const pose = p.task === 'sleep' ? Pose.Sleep : p.task === 'walk' || p.task === 'idle' ? Pose.Stand : Pose.Work;
       const age = (this.state.tick - p.born) / TICKS_PER_YEAR;
       const ageLook = age < 7 ? AgeLook.Young : age < ADULT_AGE ? AgeLook.Child : age >= ELDER_AGE ? AgeLook.Elder : AgeLook.Adult;
-      let f = (p.task === 'walk' ? 1 : 0) | (p.sex === 1 ? 4 : 0) | (pose << 3) | (ageLook << 5) | (p.indoors ? 128 : 0) | (p.load || p.taxCoins ? 256 : 0) | (this.nations.rulers.has(p.id) ? 512 : 0);
+      let f = (p.task === 'walk' ? 1 : 0) | (p.sex === 1 ? 4 : 0) | (pose << 3) | (ageLook << 5) | (p.indoors ? 128 : 0) | (p.load || p.taxCoins ? 256 : 0) | (this.nations.rulers.has(p.id) ? 512 : 0) | (this.finder.water(this.tileOf(p)) ? 1024 : 0) | (p.task === 'fight' ? 2048 : 0);
       const r = p.task === 'walk' ? this.routes.get(p.id) : undefined;
       if (r && r.step < r.tiles.length) {
         // Facing left on screen when heading toward smaller (x - y).
@@ -1061,7 +1201,12 @@ export class World {
         const nx = (next % this.size) + 0.5;
         const ny = Math.floor(next / this.size) + 0.5;
         if (nx - ny < p.x - p.y) f |= 2;
-      }
+        this.facing.set(p.id, nx - ny < p.x - p.y);
+      } else if (p.task === 'fight') {
+        // A fighter faces their foe.
+        const foe = p.foe !== undefined ? this.byId.get(p.foe) : undefined;
+        if (foe ? foe.x - foe.y < p.x - p.y : this.facing.get(p.id)) f |= 2;
+      } else if (this.facing.get(p.id)) f |= 2;
       flags[k] = f;
       if (p.soldier) gear[k] = this.military.gearOf(p);
     }
@@ -1078,7 +1223,9 @@ export class World {
     this.nations.changed = false;
     this.tech.changed = false;
     this.military.changed = false;
-    return { tick: this.state.tick, ids, pos, look, flags, gear, tileChanges, buildings, settlements, cultures, nations, stepMs };
+    const { shots, falls } = this.military.takeEffects();
+    if (this.facing.size > people.length * 2) for (const id of this.facing.keys()) if (!this.byId.has(id)) this.facing.delete(id);
+    return { tick: this.state.tick, ids, pos, look, flags, gear, shots, falls, tileChanges, buildings, settlements, cultures, nations, stepMs };
   }
 
   /** A copy of everything that is saved. */
@@ -1092,6 +1239,7 @@ export class World {
       territory: this.towns.territory.slice(),
       walls: this.towns.walls.slice(),
       roads: this.towns.roads.slice(),
+      bridges: this.towns.bridges.slice(),
       settlements: this.towns.settlements.map((s) => ({ ...s, queue: s.queue.map((q) => ({ ...q })) })),
       buildings: this.towns.buildings.map((b) => ({ ...b })),
       cultures: this.cultures.list.map((c) => ({ ...c, traits: { ...c.traits }, support: c.support ? { ...c.support } : undefined, techs: c.techs ? [...c.techs] : undefined, progress: c.progress ? { ...c.progress } : undefined })),

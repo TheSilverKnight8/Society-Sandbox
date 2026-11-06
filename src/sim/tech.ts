@@ -75,6 +75,7 @@ export const BUILDING_TECH: Partial<Record<BuildingKind, string>> = {
   [BuildingKind.University]: 'scholasticism',
   [BuildingKind.Armory]: 'ironWorking',
   [BuildingKind.Stable]: 'horsemanship',
+  [BuildingKind.Castle]: 'fortification',
 };
 /** Arms that need a technology to make (Caleb: technology opens better kinds). Spears need only the armory (Iron working). */
 export const GOOD_TECH: Partial<Record<Good, string>> = { spear: 'ironWorking', sword: 'ironWorking', bow: 'archery', crossbow: 'crossbows', mail: 'mail', plate: 'plate', horse: 'horsemanship', engine: 'engineering' };
@@ -224,19 +225,44 @@ export class Technology {
     return Object.keys(c.progress ?? {}).filter((id) => this.isWaiting(c, id));
   }
 
-  /** Takes the goods a technology needs from a store of the culture's settlements, if any has enough. */
+  /**
+   * Takes the goods a technology needs from the stores of the culture's settlements, together
+   * (Caleb after Stage 5: goods held in small amounts across its settlements count too).
+   */
   private takeResource(c: Culture, t: TechDef): boolean {
     if (!t.resource) return true;
-    const s = this.storeWith(c, t.resource.good, t.resource.n);
-    if (!s) return false;
-    this.w.towns.economy.stockOf(s)[t.resource.good] -= t.resource.n;
+    const { good, n } = t.resource;
+    const C = this.w.cultures;
+    const E = this.w.towns.economy;
+    const stores = this.w.towns.settlements.filter((s) => !s.abandoned && C.dominant.get(s.id) === c.id && E.stockOf(s)[good] > 0);
+    const total = stores.reduce((a, s) => a + E.stockOf(s)[good], 0);
+    if (total < n) return false;
+    let left = n;
+    for (const s of stores.sort((a, b) => E.stockOf(b)[good] - E.stockOf(a)[good])) {
+      const take = Math.min(left, E.stockOf(s)[good]);
+      E.stockOf(s)[good] -= take;
+      left -= take;
+      if (left <= 0) break;
+    }
     this.w.towns.settlementsChanged = true;
     return true;
   }
 
-  private storeWith(c: Culture, good: Good, n: number): Settlement | undefined {
-    const C = this.w.cultures;
-    return this.w.towns.settlements.find((s) => !s.abandoned && C.dominant.get(s.id) === c.id && this.w.towns.economy.stockOf(s)[good] >= n);
+  /**
+   * Goods a settlement's culture needs for its research: what technologies done are waiting for,
+   * and what the one it is researching will need. Its people then dig and buy them (prices rise).
+   */
+  wanted(s: Settlement): Partial<Record<Good, number>> {
+    const c = this.w.cultures?.cultureOf(s);
+    if (!c) return {};
+    const out: Partial<Record<Good, number>> = {};
+    const add = (id: string | undefined) => {
+      const r = id ? TECH_BY_ID.get(id)?.resource : undefined;
+      if (r) out[r.good] = (out[r.good] ?? 0) + r.n;
+    };
+    for (const id of this.waitingFor(c)) add(id);
+    add(c.research);
+    return out;
   }
 
   /** Picks what a culture researches next: by its traits, cheaper ones a little more often (Caleb: the sim picks by traits). */

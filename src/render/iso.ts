@@ -33,6 +33,8 @@ export interface TileSource {
   walls?: Uint8Array;
   /** Pavement (2: paved): drawn as stone slabs, without the tile's other drawings. */
   roads?: Uint8Array;
+  /** Bridges over water (2: built): drawn as a plank deck. */
+  bridges?: Uint8Array;
   /** On a colored map view (cultures, later nations): each settlement's land tint, by settlement ID. Unset: the plain red tint. */
   landColors?: Map<number, string>;
 }

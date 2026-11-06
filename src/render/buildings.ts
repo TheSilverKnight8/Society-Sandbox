@@ -613,6 +613,138 @@ function drawMarket(ctx: CanvasRenderingContext2D, w: number, d: number, progres
   });
 }
 
+/** A dock: a plank landing on posts with a small boat tied up beside it (Caleb: boats cross wide water). */
+function drawDock(ctx: CanvasRenderingContext2D, w: number, d: number, progress: number) {
+  const a = w / 2 - 0.08;
+  const b = d / 2 - 0.08;
+  const H = 0.14;
+  // Posts at the corners and along the sides.
+  for (const [u, v] of [
+    [-a, b],
+    [a, b],
+    [a, -b],
+    [0, b],
+    [a, 0],
+  ] as const) beam(ctx, pt(u, v, 0), pt(u, v, H), C.timber, 1.4);
+  // The deck, laid as far as the work has gone.
+  const laid = progress >= 1 ? 1 : Math.max(0.15, progress);
+  const a1 = -a + 2 * a * laid;
+  poly(ctx, [pt(-a, b, H), pt(a1, b, H), pt(a1, -b, H), pt(-a, -b, H)], C.plank);
+  poly(ctx, [pt(-a, b, 0), pt(a1, b, 0), pt(a1, b, H), pt(-a, b, H)], C.plankLine);
+  for (let k = 1; k < 6; k++) {
+    const u = -a + (2 * a * k) / 6;
+    if (u > a1) break;
+    line(ctx, pt(u, b, H), pt(u, -b, H), C.plankLine, 0.7);
+  }
+  if (progress < 1) return;
+  // A rowing boat beside its front edge, and a coil of rope.
+  const c = pt(a * 0.1, b + 0.36, 0.02);
+  ctx.beginPath();
+  ctx.moveTo(c[0] - 0.34, c[1] - 0.12);
+  ctx.quadraticCurveTo(c[0] - 0.05, c[1] + 0.16, c[0] + 0.3, c[1] + 0.06);
+  ctx.lineTo(c[0] + 0.36, c[1] - 0.04);
+  ctx.quadraticCurveTo(c[0], c[1] - 0.02, c[0] - 0.34, c[1] - 0.12);
+  ctx.closePath();
+  ctx.fillStyle = C.hull;
+  ctx.fill();
+  ctx.stroke();
+  const r = pt(-a * 0.5, -b * 0.3, H);
+  ctx.beginPath();
+  ctx.ellipse(r[0], r[1], 0.08, 0.04, 0, 0, Math.PI * 2);
+  ctx.fillStyle = C.net;
+  ctx.fill();
+  ctx.stroke();
+}
+
+/** A stone block from (u0, v0) to (u1, v1), h high, standing h0 up: its top and its two faces toward the viewer. */
+function block(ctx: CanvasRenderingContext2D, u0: number, v0: number, u1: number, v1: number, h: number, h0 = 0, light = C.stone, dark = C.stoneDark) {
+  poly(ctx, [pt(u0, v1, h0), pt(u1, v1, h0), pt(u1, v1, h0 + h), pt(u0, v1, h0 + h)], light);
+  poly(ctx, [pt(u1, v0, h0), pt(u1, v1, h0), pt(u1, v1, h0 + h), pt(u1, v0, h0 + h)], dark);
+  poly(ctx, [pt(u0, v0, h0 + h), pt(u1, v0, h0 + h), pt(u1, v1, h0 + h), pt(u0, v1, h0 + h)], C.limestone);
+}
+
+/** Battlements along the top of a block's edges (the merlons). */
+function merlons(ctx: CanvasRenderingContext2D, u0: number, v0: number, u1: number, v1: number, h: number) {
+  const m = 0.12;
+  const step = 0.28;
+  for (let u = u0; u <= u1 - m + 1e-6; u += step) block(ctx, u, v0, u + m, v0 + m, 0.1, h);
+  for (let v = v0 + step; v <= v1 - m + 1e-6; v += step) block(ctx, u0, v, u0 + m, v + m, 0.1, h);
+  for (let v = v0 + step; v <= v1 - m + 1e-6; v += step) block(ctx, u1 - m, v, u1, v + m, 0.1, h);
+  for (let u = u0; u <= u1 - m + 1e-6; u += step) block(ctx, u, v1 - m, u + m, v1, 0.1, h);
+}
+
+/**
+ * A castle (Caleb: the ruler's seat in a nation's biggest city): a curtain wall with battlements,
+ * a square tower at each corner, a gate, and a tall keep flying the nation's banner. The walls rise
+ * as the work goes on.
+ */
+function drawCastle(ctx: CanvasRenderingContext2D, w: number, d: number, progress: number, banner?: string) {
+  const a = w / 2 - 0.15;
+  const b = d / 2 - 0.15;
+  const rise = progress >= 1 ? 1 : Math.max(0.12, progress);
+  const wallH = 0.7 * rise;
+  const towerH = 1.25 * rise;
+  const keepH = 1.9 * rise;
+  const t = 0.22;
+  const ts = 0.9;
+  const done = progress >= 1;
+  // The courtyard.
+  poly(ctx, [pt(-a, b), pt(a, b), pt(a, -b), pt(-a, -b)], '#cfc6b4');
+  // Back tower, the two back walls, the side towers, the keep, the front walls, the front tower.
+  block(ctx, -a, -b, -a + ts, -b + ts, towerH);
+  if (done) merlons(ctx, -a, -b, -a + ts, -b + ts, towerH);
+  block(ctx, -a + ts, -b, a - ts, -b + t, wallH);
+  block(ctx, -a, -b + ts, -a + t, b - ts, wallH);
+  if (done) {
+    merlons(ctx, -a + ts, -b, a - ts, -b + t, wallH);
+    merlons(ctx, -a, -b + ts, -a + t, b - ts, wallH);
+  }
+  block(ctx, a - ts, -b, a, -b + ts, towerH);
+  block(ctx, -a, b - ts, -a + ts, b, towerH);
+  if (done) {
+    merlons(ctx, a - ts, -b, a, -b + ts, towerH);
+    merlons(ctx, -a, b - ts, -a + ts, b, towerH);
+  }
+  const k = Math.min(a, b) * 0.42;
+  block(ctx, -k, -k, k, k, keepH);
+  if (done) {
+    merlons(ctx, -k, -k, k, k, keepH);
+    // Windows on the keep's two faces.
+    for (const f of [-0.45, 0.45]) {
+      const wl = pt(f * k, k, keepH * 0.62);
+      poly(ctx, [[wl[0] - 0.04, wl[1] - 0.02], [wl[0] + 0.04, wl[1] + 0.02], [wl[0] + 0.04, wl[1] + 0.16], [wl[0] - 0.04, wl[1] + 0.12]], C.window);
+      const wr = pt(k, f * k, keepH * 0.62);
+      poly(ctx, [[wr[0] - 0.04, wr[1] + 0.02], [wr[0] + 0.04, wr[1] - 0.02], [wr[0] + 0.04, wr[1] + 0.12], [wr[0] - 0.04, wr[1] + 0.16]], C.window);
+    }
+    // The banner on a pole above the keep.
+    const base = pt(0, 0, keepH + 0.1);
+    const top: P = [base[0], base[1] - 1.0];
+    beam(ctx, base, top, C.timber, 1.1);
+    poly(ctx, [[top[0], top[1] + 0.02], [top[0] + 0.42, top[1] + 0.1], [top[0] + 0.3, top[1] + 0.18], [top[0] + 0.42, top[1] + 0.26], [top[0], top[1] + 0.32]], banner ?? C.banner);
+  }
+  block(ctx, -a + ts, b - t, a - ts, b, wallH);
+  block(ctx, a - t, -b + ts, a, b - ts, wallH);
+  if (done) {
+    merlons(ctx, -a + ts, b - t, a - ts, b, wallH);
+    merlons(ctx, a - t, -b + ts, a, b - ts, wallH);
+    // The gate in the front-left wall.
+    const g0 = pt(-0.32, b, 0);
+    const g1 = pt(0.32, b, 0);
+    const gt = pt(0, b, wallH * 0.75);
+    ctx.beginPath();
+    ctx.moveTo(g0[0], g0[1]);
+    ctx.lineTo(g0[0], g0[1] - wallH * 0.5);
+    ctx.quadraticCurveTo(gt[0], gt[1] - 0.08, g1[0], g1[1] - wallH * 0.5);
+    ctx.lineTo(g1[0], g1[1]);
+    ctx.closePath();
+    ctx.fillStyle = C.door;
+    ctx.fill();
+    ctx.stroke();
+  }
+  block(ctx, a - ts, b - ts, a, b, towerH);
+  if (done) merlons(ctx, a - ts, b - ts, a, b, towerH);
+}
+
 /** A mine: a rocky mound with a timbered entrance and a cart of ore. */
 function drawMine(ctx: CanvasRenderingContext2D, w: number, d: number, progress: number) {
   const a = w / 2 - 0.12;
@@ -836,7 +968,7 @@ function sprite(b: BuildingView, step: number, frame: number, px: number, plinth
   }
   const { w, d } = b;
   const sh = SHAPES[b.kind];
-  const tall = (sh ? sh.wall + sh.roof : b.kind === BuildingKind.Mine ? 0.7 : b.kind === BuildingKind.Market ? 0.6 : 0.4) + (b.kind === BuildingKind.Hall || b.kind === BuildingKind.Barracks ? 0.4 : 0);
+  const tall = (sh ? sh.wall + sh.roof : b.kind === BuildingKind.Mine ? 0.7 : b.kind === BuildingKind.Market ? 0.6 : b.kind === BuildingKind.Castle ? 3.2 : 0.4) + (b.kind === BuildingKind.Hall || b.kind === BuildingKind.Barracks ? 0.4 : 0);
   const halfW = (w + d) / 4 + 0.3;
   const up = (w + d) / 8 + tall + 0.3;
   const down = (w + d) / 8 + plinth + 0.25;
@@ -861,7 +993,12 @@ function sprite(b: BuildingView, step: number, frame: number, px: number, plinth
   else if (b.kind === BuildingKind.Mine) {
     drawMine(ctx, w, d, step / 10);
     if (step < 10) drawPiles(ctx, w, d);
-  } else if (b.kind === BuildingKind.Campfire || !sh) drawCampfire(ctx, frame);
+  } else if (b.kind === BuildingKind.Dock) drawDock(ctx, w, d, step / 10);
+  else if (b.kind === BuildingKind.Castle) {
+    drawCastle(ctx, w, d, step / 10, b.banner);
+    if (step < 10) drawPiles(ctx, w, d);
+  }
+  else if (b.kind === BuildingKind.Campfire || !sh) drawCampfire(ctx, frame);
   else {
     const progress = step / 10;
     if (progress >= 1) {

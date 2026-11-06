@@ -72,6 +72,8 @@ export const BuildingKind = {
   Barracks: 17,
   Armory: 18,
   Stable: 19,
+  Dock: 20,
+  Castle: 21,
 } as const;
 export type BuildingKind = (typeof BuildingKind)[keyof typeof BuildingKind];
 
@@ -125,6 +127,8 @@ export const BUILDINGS: BuildingDef[] = [
   { kind: BuildingKind.Barracks, name: 'Barracks', wood: 16, stone: 14, work: 340, homes: 0, stage: 'village', buildable: true, w: 3, d: 2, jobs: 10, lightJobs: 0, job: 'soldier' },
   { kind: BuildingKind.Armory, name: 'Armory', wood: 10, stone: 10, work: 260, homes: 0, stage: 'village', buildable: true, w: 2, d: 2, jobs: 2, lightJobs: 0, job: 'armorer' },
   { kind: BuildingKind.Stable, name: 'Stable', wood: 14, stone: 4, work: 240, homes: 0, stage: 'village', buildable: true, w: 3, d: 2, jobs: 2, lightJobs: 0, job: 'groom' },
+  { kind: BuildingKind.Dock, name: 'Dock', wood: 16, stone: 0, work: 220, homes: 0, stage: 'village', buildable: true, w: 2, d: 2, jobs: 0, lightJobs: 0 },
+  { kind: BuildingKind.Castle, name: 'Castle', wood: 40, stone: 80, tools: 4, work: 1200, homes: 0, stage: 'city', buildable: true, w: 5, d: 5, jobs: 0, lightJobs: 0 },
 ];
 
 /** Whether a building of this kind may stand on a tile of this terrain (fields need fertile ground). `cleared`: a forest tile with no trees left. */
@@ -136,7 +140,7 @@ export function kindAllowsTerrain(kind: BuildingKind, terrain: number, cleared: 
 
 /** Buildings that must stand at the water's edge (one of their tiles beside water). */
 export function needsShore(kind: BuildingKind) {
-  return kind === BuildingKind.FishingHut;
+  return kind === BuildingKind.FishingHut || kind === BuildingKind.Dock;
 }
 
 /** A building's footprint once turned (rot 1 swaps its sides). */

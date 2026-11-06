@@ -14,7 +14,7 @@ import { NATION_COLORS } from '../sim/nations';
 // Zoomed far out, a person is a dot in their clothing color.
 
 /** A person's height, in tile widths. */
-const HEIGHT = 0.42;
+const HEIGHT = 0.63;
 /** Below this height on screen (device pixels), people are dots. */
 const MIN_FIGURE_PX = 10;
 const LEGS = '#5a4232';
@@ -39,12 +39,12 @@ interface Sprite {
 
 const sprites = new Map<string, Sprite>();
 
-function sprite(look: number, male: boolean, pose: number, frame: number, px: number, elder: boolean, carrying = false, crown = false, gear = 0): Sprite {
-  const key = `${look}|${male ? 1 : 0}|${pose}|${frame}|${px}|${elder ? 1 : 0}|${carrying ? 1 : 0}|${crown ? 1 : 0}|${gear}`;
+function sprite(look: number, male: boolean, pose: number, frame: number, px: number, elder: boolean, carrying = false, crown = false, gear = 0, boat = false, fight = false): Sprite {
+  const key = `${look}|${male ? 1 : 0}|${pose}|${frame}|${px}|${elder ? 1 : 0}|${carrying ? 1 : 0}|${crown ? 1 : 0}|${gear}|${boat ? 1 : 0}|${fight ? 1 : 0}`;
   const hit = sprites.get(key);
   if (hit) return hit;
   if (sprites.size > 4000) sprites.clear();
-  const s = pose === Pose.Sleep ? drawSleeping(look, male, px, elder) : drawStanding(look, male, pose, frame, px, elder, carrying, crown, gear);
+  const s = pose === Pose.Sleep && !boat ? drawSleeping(look, male, px, elder) : drawStanding(look, male, pose === Pose.Sleep ? Pose.Stand : pose, frame, px, elder, carrying, crown, gear, boat, fight);
   sprites.set(key, s);
   return s;
 }
@@ -65,7 +65,7 @@ function limbOf(ctx: CanvasRenderingContext2D, H: number, lw: number) {
 }
 
 /** Lying on the ground asleep, head to the left, with a small "z". */
-function drawSleeping(look: number, male: boolean, px: number, elder: boolean): Sprite {
+function drawSleeping(look: number, male: boolean, px: number, elder: boolean, z = true): Sprite {
   const H = px;
   const lw = Math.max(1.2, H * 0.08);
   const w = Math.ceil(H * 1.0 + lw * 2);
@@ -118,7 +118,7 @@ function drawSleeping(look: number, male: boolean, px: number, elder: boolean): 
   ctx.strokeStyle = NAVY;
   ctx.stroke();
   // A "z" above the head.
-  if (H >= 18) {
+  if (z && H >= 18) {
     ctx.beginPath();
     const zx = -0.18 * H;
     const zy = -0.48 * H;
@@ -134,7 +134,7 @@ function drawSleeping(look: number, male: boolean, px: number, elder: boolean): 
   return { canvas, ax, ay };
 }
 
-function drawStanding(look: number, male: boolean, pose: number, frame: number, px: number, elder: boolean, carrying: boolean, crown: boolean, gear = 0): Sprite {
+function drawStanding(look: number, male: boolean, pose: number, frame: number, px: number, elder: boolean, carrying: boolean, crown: boolean, gear = 0, boat = false, fight = false): Sprite {
   const H = px;
   const lw = Math.max(1.2, H * 0.08);
   // A soldier's arms (see Snapshot.gear): weapon, armor, horse, catapult, leader's banner, nation color.
@@ -146,7 +146,9 @@ function drawStanding(look: number, male: boolean, pose: number, frame: number, 
   const soldier = gear !== 0;
   const nationC = gear >> 8 ? NATION_COLORS[(gear >> 8) - 1] : null;
   const lift = horse ? 0.34 : 0;
-  const w = Math.ceil(H * (engine ? 1.3 : horse ? 1.25 : soldier ? 0.9 : 0.7) + lw * 2);
+  // A fighter's swing or thrust reaches further out (frame 0: raised or drawn; frame 1: the blow).
+  const strike = fight && frame === 1;
+  const w = Math.ceil(H * (engine ? 1.3 : horse ? 1.25 : fight && soldier ? 1.35 : soldier || boat ? 0.9 : 0.7) + lw * 2);
   const h = Math.ceil(H * ((crown ? 1.22 : 1.06) + lift + (leader ? 0.36 : weapon === 1 ? 0.2 : 0)) + lw * 2);
   const canvas = document.createElement('canvas');
   canvas.width = w;
@@ -268,8 +270,8 @@ function drawStanding(look: number, male: boolean, pose: number, frame: number, 
     ctx.closePath();
     outline(nationC ?? '#fc3f3f', lw * 0.8);
   }
-  // A bow or crossbow is held out in front; a spear stands beside them.
-  if (weapon === 1) {
+  // A bow or crossbow is held out in front; a spear stands beside them (thrust forward in a fight).
+  if (weapon === 1 && !strike) {
     limb(
       [
         [0.2, 0.02],
@@ -380,6 +382,25 @@ function drawStanding(look: number, male: boolean, pose: number, frame: number, 
       ctx.stroke();
     }
   }
+  // In a boat crossing water: a wooden hull up to the waist, and an oar.
+  if (boat) {
+    limb(
+      [
+        [0.14, -0.42],
+        [0.34, -0.02],
+      ],
+      WOOD,
+      limbW * 0.8,
+    );
+    ctx.beginPath();
+    ctx.moveTo(-0.36 * H, -0.32 * H);
+    ctx.lineTo(0.36 * H, -0.32 * H);
+    ctx.quadraticCurveTo(0.3 * H, -0.02 * H, 0.18 * H, 0);
+    ctx.lineTo(-0.18 * H, 0);
+    ctx.quadraticCurveTo(-0.3 * H, -0.02 * H, -0.36 * H, -0.32 * H);
+    ctx.closePath();
+    outline(WOOD);
+  }
   // Head, then hair on top.
   ctx.beginPath();
   ctx.arc(0, -0.84 * H, 0.13 * H, 0, Math.PI * 2);
@@ -402,20 +423,33 @@ function drawStanding(look: number, male: boolean, pose: number, frame: number, 
     ctx.closePath();
     outline(armor === 2 ? STEEL : IRON);
   }
-  // Swords are held up in the right hand; bows and crossbows out in front.
-  if (weapon === 2) {
+  // A spear thrust forward.
+  if (weapon === 1 && strike) {
     limb(
       [
-        [0.15, -0.42],
-        [0.3, -0.78],
+        [-0.1, -0.5],
+        [0.58, -0.56],
       ],
-      STEEL,
-      limbW * 0.8,
+      WOOD,
+      limbW * 0.75,
     );
+    ctx.beginPath();
+    ctx.moveTo(0.56 * H, -0.6 * H);
+    ctx.lineTo(0.68 * H, -0.57 * H);
+    ctx.lineTo(0.56 * H, -0.52 * H);
+    ctx.closePath();
+    outline(STEEL, lw * 0.7);
+  }
+  // Swords are held up in the right hand (raised overhead, then swung forward, in a fight); bows and crossbows out in front.
+  if (weapon === 2) {
+    const [hand, tip]: [number, number][] = fight ? (strike ? [[0.16, -0.46], [0.56, -0.38]] : [[0.12, -0.62], [0.02, -1.06]]) : [[0.15, -0.42], [0.3, -0.78]];
+    limb([hand, tip], STEEL, limbW * 0.8);
+    const gx = hand[0] - (tip[1] - hand[1]) * 0.25;
+    const gy = hand[1] + (tip[0] - hand[0]) * 0.25;
     limb(
       [
-        [0.1, -0.47],
-        [0.21, -0.41],
+        [hand[0] * 2 - gx, hand[1] * 2 - gy],
+        [gx, gy],
       ],
       WOOD,
       limbW * 0.7,
@@ -439,6 +473,20 @@ function drawStanding(look: number, male: boolean, pose: number, frame: number, 
         limbW,
       );
     }
+    // In a fight the string is drawn back with an arrow on it, then loosed.
+    const ends: [number, number][] = [
+      [0.08 + 0.2 * Math.cos(-1.1), -0.5 + 0.2 * Math.sin(-1.1)],
+      [0.08 + 0.2 * Math.cos(1.1), -0.5 + 0.2 * Math.sin(1.1)],
+    ];
+    const pull = fight && !strike ? -0.08 : ends[0][0];
+    ctx.beginPath();
+    ctx.moveTo(ends[0][0] * H, ends[0][1] * H);
+    ctx.lineTo(pull * H, -0.5 * H);
+    ctx.lineTo(ends[1][0] * H, ends[1][1] * H);
+    ctx.strokeStyle = NAVY;
+    ctx.lineWidth = Math.max(0.8, lw * 0.5);
+    ctx.stroke();
+    if (fight && !strike) limb([[pull, -0.5], [0.34, -0.5]], WOOD, limbW * 0.45);
   }
   // A ruler wears a gold crown.
   if (crown) {
@@ -554,6 +602,7 @@ export function drawPeople(
   }
   const figurePx = Math.round(HEIGHT * z * dpr);
   const t = Math.floor(now / 140);
+  drawFalls(ctx, view, client, now, figurePx);
   for (const k of idx) {
     const o = k * 7;
     const sx = buf[o];
@@ -584,10 +633,121 @@ export function drawPeople(
       continue;
     }
     const pose = (flags >> 3) & 3;
-    const frame = flags & 1 ? (t + id) % 4 : pose === Pose.Work ? Math.floor((t + id) / 2) % 2 : 0;
-    const sp = sprite(look, (flags & 4) !== 0, pose, frame, Math.max(6, Math.min(px, 90)), ageLook === AgeLook.Elder, (flags & 256) !== 0, (flags & 512) !== 0, gear);
+    const fight = (flags & 2048) !== 0;
+    const frame = flags & 1 ? (t + id) % 4 : pose === Pose.Work ? Math.floor((t + id) / (fight ? 3 : 2)) % 2 : 0;
+    const sp = sprite(look, (flags & 4) !== 0, pose, frame, Math.max(6, Math.min(px, 90)), ageLook === AgeLook.Elder, (flags & 256) !== 0, (flags & 512) !== 0, gear, (flags & 1024) !== 0, fight);
     const scale = px > 90 ? px / 90 : 1;
+    const dw = (sp.canvas.width * scale) / dpr;
+    const dh = (sp.canvas.height * scale) / dpr;
+    // Facing left: the picture is mirrored (people face where they go, or the foe they fight).
+    if (flags & 2) {
+      ctx.save();
+      ctx.translate(sx, 0);
+      ctx.scale(-1, 1);
+      ctx.drawImage(sp.canvas, -(sp.ax * scale) / dpr, sy - (sp.ay * scale) / dpr, dw, dh);
+      ctx.restore();
+    } else ctx.drawImage(sp.canvas, sx - (sp.ax * scale) / dpr, sy - (sp.ay * scale) / dpr, dw, dh);
+  }
+  drawShots(ctx, view, client, now, figurePx);
+}
+
+/** How long blows and the fallen are drawn (ms): a swing's flash, an arrow, a bolt, a stone; a body lying. */
+const SHOT_MS = [220, 380, 300, 650];
+const FALL_MS = 6000;
+
+/** The fallen lie where they fell, fading (drawn on the ground, under everyone). */
+function drawFalls(ctx: CanvasRenderingContext2D, view: IsoView, client: SimClient, now: number, figurePx: number) {
+  const { size, elevation } = view.src;
+  const dpr = view.dpr;
+  const falls = client.falls;
+  while (falls.length && now - falls[0].at > FALL_MS) falls.shift();
+  if (figurePx < MIN_FIGURE_PX) return;
+  for (const f of falls) {
+    const age = (now - f.at) / FALL_MS;
+    const h = elevation[Math.min(size - 1, Math.floor(f.y)) * size + Math.min(size - 1, Math.floor(f.x))];
+    const [sx, sy] = view.toScreen(isoX(f.x, f.y), isoY(f.x, f.y, h));
+    const key = `fall|${f.look}|${f.male ? 1 : 0}|${figurePx}`;
+    let sp = sprites.get(key);
+    if (!sp) {
+      sp = drawSleeping(f.look, f.male, Math.max(6, Math.min(figurePx, 90)), false, false);
+      sprites.set(key, sp);
+    }
+    const scale = figurePx > 90 ? figurePx / 90 : 1;
+    ctx.globalAlpha = Math.max(0, 1 - age * age);
     ctx.drawImage(sp.canvas, sx - (sp.ax * scale) / dpr, sy - (sp.ay * scale) / dpr, (sp.canvas.width * scale) / dpr, (sp.canvas.height * scale) / dpr);
+    ctx.globalAlpha = 1;
+  }
+}
+
+/** Blows struck: a flash where a swing lands; arrows, bolts and catapult stones flying in an arc to their mark. */
+function drawShots(ctx: CanvasRenderingContext2D, view: IsoView, client: SimClient, now: number, figurePx: number) {
+  const shots = client.shots;
+  while (shots.length && now - shots[0].at > 700) shots.shift();
+  if (!shots.length) return;
+  const { size, elevation } = view.src;
+  const z = view.cam.zoom;
+  const at = (x: number, y: number, lift: number): [number, number] => {
+    const h = elevation[Math.min(size - 1, Math.max(0, Math.floor(y))) * size + Math.min(size - 1, Math.max(0, Math.floor(x)))];
+    return view.toScreen(isoX(x, y), isoY(x, y, h) - lift);
+  };
+  const body = (HEIGHT * 0.55);
+  for (const s of shots) {
+    const dur = SHOT_MS[s.kind] ?? 300;
+    const t = (now - s.at) / dur;
+    if (t < 0 || t > 1) continue;
+    if (s.kind === 0) {
+      // A swing landing: a small burst at the foe.
+      const [cx, cy] = at(s.x1, s.y1, body);
+      const r = Math.max(2.5, z * 0.12) * (0.6 + t);
+      ctx.beginPath();
+      for (let k = 0; k < 8; k++) {
+        const a = (k / 8) * Math.PI * 2;
+        const rr = k % 2 ? r * 0.45 : r;
+        if (k) ctx.lineTo(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr * 0.8);
+        else ctx.moveTo(cx + rr, cy);
+      }
+      ctx.closePath();
+      ctx.globalAlpha = 1 - t * 0.6;
+      ctx.fillStyle = '#fff6d8';
+      ctx.fill();
+      ctx.lineWidth = Math.max(0.8, z * 0.02);
+      ctx.strokeStyle = NAVY;
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+      continue;
+    }
+    if (figurePx < MIN_FIGURE_PX * 0.6) continue;
+    // In flight: higher in the middle, a stone higher still.
+    const arc = Math.sin(Math.PI * t) * (s.kind === 3 ? 1.6 : 0.6);
+    const x = s.x0 + (s.x1 - s.x0) * t;
+    const y = s.y0 + (s.y1 - s.y0) * t;
+    const [px, py] = at(x, y, body + arc);
+    if (s.kind === 3) {
+      ctx.beginPath();
+      ctx.arc(px, py, Math.max(2, z * 0.08), 0, Math.PI * 2);
+      ctx.fillStyle = '#8c8c8c';
+      ctx.fill();
+      ctx.lineWidth = Math.max(0.8, z * 0.02);
+      ctx.strokeStyle = NAVY;
+      ctx.stroke();
+      continue;
+    }
+    // An arrow or bolt pointing the way it flies.
+    const t2 = Math.min(1, t + 0.05);
+    const [qx, qy] = at(s.x0 + (s.x1 - s.x0) * t2, s.y0 + (s.y1 - s.y0) * t2, body + Math.sin(Math.PI * t2) * 0.6);
+    const len = Math.hypot(qx - px, qy - py) || 1;
+    const ux = (qx - px) / len;
+    const uy = (qy - py) / len;
+    const L = Math.max(4, z * (s.kind === 2 ? 0.16 : 0.22));
+    ctx.beginPath();
+    ctx.moveTo(px - ux * L * 0.5, py - uy * L * 0.5);
+    ctx.lineTo(px + ux * L * 0.5, py + uy * L * 0.5);
+    ctx.lineWidth = Math.max(1.6, z * 0.035);
+    ctx.strokeStyle = NAVY;
+    ctx.stroke();
+    ctx.lineWidth = Math.max(0.8, z * 0.016);
+    ctx.strokeStyle = '#d9c39a';
+    ctx.stroke();
   }
 }
 

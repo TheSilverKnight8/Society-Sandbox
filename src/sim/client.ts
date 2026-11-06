@@ -1,5 +1,5 @@
 import type { BuildingKind } from './buildings';
-import type { CultureEdit, FromSim, NationEdit, NationOrder, Order, PersonDetails, PersonEdit, SettlementDetails, SimState, Snapshot, SoldierKind, Speed, Toggles, ToSim } from './types';
+import type { BuildingDetails, CultureEdit, FromSim, NationEdit, NationOrder, Order, PersonDetails, PersonEdit, SettlementDetails, SimState, Snapshot, SoldierKind, Speed, Toggles, ToSim } from './types';
 
 type SettlementOrder = Extract<ToSim, { type: 'settlementOrder' }>['order'];
 
@@ -18,9 +18,13 @@ export class SimClient {
   private saveWaiters = new Map<number, (r: { state: SimState; deposit: Uint8Array }) => void>();
   private req = 0;
   speed: Speed = 0;
+  /** Recent blows (a swing landing, or an arrow, bolt or stone in flight) and people fallen in battle, with when they came. */
+  shots: { x0: number; y0: number; x1: number; y1: number; kind: number; at: number }[] = [];
+  falls: { x: number; y: number; look: number; gear: number; male: boolean; at: number }[] = [];
   onSnapshot?: (s: Snapshot) => void;
   onWatched?: (p: PersonDetails | null, died?: string) => void;
   onWatchedSettlement?: (s: SettlementDetails | null) => void;
+  onWatchedBuilding?: (b: BuildingDetails | null) => void;
   onError?: (message: string) => void;
 
   constructor() {
@@ -43,6 +47,11 @@ export class SimClient {
         this.currAt = now;
         this.currIndex = new Map();
         for (let k = 0; k < m.ids.length; k++) this.currIndex.set(m.ids[k], k);
+        // Blows and the fallen, kept a little while for drawing (Caleb after Stage 5: combat animations).
+        for (let k = 0; k + 4 < m.shots.length; k += 5) this.shots.push({ x0: m.shots[k], y0: m.shots[k + 1], x1: m.shots[k + 2], y1: m.shots[k + 3], kind: m.shots[k + 4], at: now + Math.random() * 60 });
+        for (let k = 0; k + 4 < m.falls.length; k += 5) this.falls.push({ x: m.falls[k], y: m.falls[k + 1], look: m.falls[k + 2], gear: m.falls[k + 3], male: m.falls[k + 4] === 1, at: now });
+        if (this.shots.length > 800) this.shots.splice(0, this.shots.length - 800);
+        if (this.falls.length > 300) this.falls.splice(0, this.falls.length - 300);
         this.onSnapshot?.(m);
         break;
       }
@@ -51,6 +60,9 @@ export class SimClient {
         break;
       case 'watchedSettlement':
         this.onWatchedSettlement?.(m.settlement);
+        break;
+      case 'watchedBuilding':
+        this.onWatchedBuilding?.(m.building);
         break;
       case 'saved':
         this.saveWaiters.get(m.req)?.({ state: m.state, deposit: m.deposit });
@@ -113,6 +125,10 @@ export class SimClient {
 
   removeBuildings(tiles: number[]) {
     if (tiles.length) this.send({ type: 'removeBuildings', tiles });
+  }
+
+  watchBuilding(id: number | null) {
+    this.send({ type: 'watchBuilding', id });
   }
 
   watchSettlement(id: number | null) {

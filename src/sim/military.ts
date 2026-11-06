@@ -86,6 +86,9 @@ export class Military {
   /** Fences and gates that have been struck: how much they have left. */
   private wallHealth = new Map<number, number>();
   changed = true;
+  /** Blows (from x, from y, to x, to y, kind) and the fallen (x, y, look, gear, sex) since the last snapshot. */
+  private shots: number[] = [];
+  private falls: number[] = [];
   /** Someone has fallen since the views were last refreshed. */
   private fell = false;
 
@@ -306,13 +309,29 @@ export class Military {
     if (foe.armor) dmg *= 1 - ARMOR[foe.armor].guard;
     foe.health -= dmg;
     p.cooldown = p.engine ? ENGINE.every : weapon!.every;
+    this.blow(p, foe.x, foe.y);
     if (foe.health <= 0) {
       p.kills = (p.kills ?? 0) + 1;
       this.fallen(foe, p);
+      this.falls.push(foe.x, foe.y, foe.look, this.gearOf(foe), foe.sex);
       w.kill(foe, 'battle');
       delete p.foe;
     }
     return true;
+  }
+
+  /** A blow struck, for the app to draw: a swing landing, or an arrow, bolt or stone in flight. */
+  private blow(p: Person, tx: number, ty: number) {
+    const kind = p.engine ? 3 : p.weapon === 'crossbow' ? 2 : p.weapon === 'bow' ? 1 : 0;
+    this.shots.push(p.x, p.y, tx, ty, kind);
+  }
+
+  /** Blows struck and people fallen since the last snapshot (taken by the snapshot). */
+  takeEffects(): { shots: Float32Array; falls: Float32Array } {
+    const out = { shots: Float32Array.from(this.shots), falls: Float32Array.from(this.falls) };
+    this.shots = [];
+    this.falls = [];
+    return out;
   }
 
   /** Moves straight toward a foe. Returns false when something is in the way (then they go round by a path). */
@@ -375,6 +394,7 @@ export class Military {
     if (p.cooldown) return true;
     const weapon = WEAPONS[p.weapon ?? 'none'];
     const dmg = p.engine ? ENGINE.damage * ENGINE.walls : weapon.range > 2 ? weapon.damage * 0.3 : weapon.damage;
+    this.blow(p, (t % w.size) + 0.5, Math.floor(t / w.size) + 0.5);
     const left = (this.wallHealth.get(t) ?? (v === Wall.Gate ? WALL_HEALTH.gate : WALL_HEALTH.fence)) - dmg;
     p.cooldown = p.engine ? ENGINE.every : weapon.every;
     if (left > 0) {
@@ -419,8 +439,10 @@ export class Military {
     if (o && o.kind !== 'return') {
       const s = w.towns.byId(o.settlement);
       if (s) {
-        if (w.towns.dist2(here, s.center) > 25) w.goTo(p, s.center, 'muster', true);
-        else this.strollNear(p, s.center, 4);
+        // An enemy capital with a castle is taken at its castle (Caleb).
+        const seat = o.kind === 'attack' ? w.towns.seatOf(s) : s.center;
+        if (w.towns.dist2(here, seat) > 25) w.goTo(p, seat, 'muster', true);
+        else this.strollNear(p, seat, 4);
         return true;
       }
     }
@@ -771,7 +793,9 @@ export class Military {
         a.order = { kind: 'return' };
         continue;
       }
-      const near = (p: Person, r: number) => T.dist2(w.tileOf(p), s.center) <= r * r;
+      // A settlement is taken where its seat is: its castle if it has one (Caleb), else its middle.
+      const seat = T.seatOf(s);
+      const near = (p: Person, r: number) => T.dist2(w.tileOf(p), seat) <= r * r;
       const ours = w.state.people.filter((p) => p.soldier && p.army === a.id && near(p, 8));
       if (ours.length < 3) continue;
       const defenders = w.state.people.filter((p) => p.soldier && this.atWarWith(this.nationOf(p), a.nation) && near(p, 10));

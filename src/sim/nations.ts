@@ -1,4 +1,4 @@
-import { BUILDINGS } from './buildings';
+import { BUILDINGS, BuildingKind } from './buildings';
 import { TRAIT_AXES } from './cultures';
 import { POLICY_TECH } from './tech';
 import {
@@ -159,12 +159,25 @@ export class Nations {
     return best !== undefined ? this.w.cultures.byId.get(best) : undefined;
   }
 
+  /** How many of a nation's people hold each culture (counted for every nation in one pass, kept for the step). */
   private cultureTally(n: Nation): Map<number, number> {
-    const ids = new Set(this.settlementsOf(n).map((s) => s.id));
-    const tally = new Map<number, number>();
-    for (const p of this.w.state.people) if (p.settlement !== undefined && ids.has(p.settlement) && p.culture !== undefined) tally.set(p.culture, (tally.get(p.culture) ?? 0) + 1);
-    return tally;
+    const tick = this.w.state.tick;
+    if (!this.tallies || this.tallies.tick !== tick) {
+      const all = new Map<number, Map<number, number>>();
+      for (const p of this.w.state.people) {
+        if (p.settlement === undefined || p.culture === undefined) continue;
+        const nid = this.towns.byId(p.settlement)?.nation;
+        if (nid === undefined) continue;
+        let t = all.get(nid);
+        if (!t) all.set(nid, (t = new Map()));
+        t.set(p.culture, (t.get(p.culture) ?? 0) + 1);
+      }
+      this.tallies = { tick, all };
+    }
+    return this.tallies.all.get(n.id) ?? new Map();
   }
+
+  private tallies?: { tick: number; all: Map<number, Map<number, number>> };
 
   /** A person's influence (SPEC 6, a [Claude's call] item: from office held, wealth, and family and pair ties). */
   influence(p: Person): number {
@@ -572,6 +585,7 @@ export class Nations {
 
   /** Succession when a ruler has died or left (SPEC 10: always happens). */
   private checkRuler(n: Nation) {
+    this.seatRuler(n);
     const w = this.w;
     const ruler = n.ruler !== undefined ? w.byId.get(n.ruler) : undefined;
     if (ruler && this.nationOfPerson(ruler) === n) return;
@@ -831,6 +845,45 @@ export class Nations {
   wantsHall(s: Settlement): boolean {
     const n = s.nation !== undefined ? this.byId.get(s.nation) : undefined;
     return !!n && (n.capital === s.id || s.stage === 'town' || s.stage === 'city');
+  }
+
+  /**
+   * Whether a settlement should build the nation's castle (Caleb): the nation's biggest city,
+   * when the nation has no castle yet.
+   */
+  wantsCastle(s: Settlement): boolean {
+    const n = s.nation !== undefined ? this.byId.get(s.nation) : undefined;
+    if (!n || s.stage !== 'city') return false;
+    const mine = this.settlementsOf(n);
+    if (this.towns.buildings.some((b) => b.kind === BuildingKind.Castle && b.settlement !== undefined && mine.some((m) => m.id === b.settlement))) return false;
+    const cities = mine.filter((m) => m.stage === 'city').sort((a, b) => this.towns.peopleOf(b) - this.towns.peopleOf(a));
+    return cities[0] === s;
+  }
+
+  /** The castle of a nation, finished, if it has one. */
+  castleOf(n: Nation) {
+    const mine = new Set(this.settlementsOf(n).map((m) => m.id));
+    return this.towns.buildings.find((b) => b.kind === BuildingKind.Castle && b.progress >= 1 && b.settlement !== undefined && mine.has(b.settlement));
+  }
+
+  /**
+   * The capital is where the castle stands, and the ruler and their family live in it (Caleb).
+   * Looked at every month.
+   */
+  private seatRuler(n: Nation) {
+    const castle = this.castleOf(n);
+    if (!castle || castle.settlement === undefined) return;
+    if (n.capital !== castle.settlement) {
+      n.capital = castle.settlement;
+      this.markChanged();
+    }
+    const ruler = n.ruler !== undefined ? this.w.byId.get(n.ruler) : undefined;
+    if (!ruler) return;
+    const family = [ruler, ...(ruler.pair !== undefined ? [this.w.byId.get(ruler.pair)] : []), ...this.w.state.people.filter((q) => (q.mother === ruler.id || q.father === ruler.id) && this.w.ageOf(q) < ADULT_AGE)];
+    for (const p of family) {
+      if (!p || (p.home === castle.id && p.settlement === castle.settlement)) continue;
+      this.towns.moveInto(p, castle);
+    }
   }
 
   /** Workers a hall can use. */

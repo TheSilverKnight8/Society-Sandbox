@@ -16,6 +16,7 @@ let last = performance.now();
 let owed = 0;
 let watching: number | null = null;
 let watchingSettlement: number | null = null;
+let watchingBuilding: number | null = null;
 let stepTime = 0;
 let stepCount = 0;
 let stepMs = 0;
@@ -29,8 +30,9 @@ function post(msg: FromSim, transfer: Transferable[] = []) {
 function sendSnapshot() {
   if (!world) return;
   const s = world.snapshot(stepMs);
-  post({ type: 'snap', ...s }, [s.ids.buffer, s.pos.buffer, s.look.buffer, s.flags.buffer, s.gear.buffer, s.tileChanges.buffer]);
+  post({ type: 'snap', ...s }, [s.ids.buffer, s.pos.buffer, s.look.buffer, s.flags.buffer, s.gear.buffer, s.shots.buffer, s.falls.buffer, s.tileChanges.buffer]);
   if (watchingSettlement !== null) post({ type: 'watchedSettlement', settlement: world.towns.details(watchingSettlement) });
+  if (watchingBuilding !== null) post({ type: 'watchedBuilding', building: world.towns.buildingDetails(watchingBuilding) });
   if (watching !== null) {
     const person = world.details(watching);
     const died = person ? undefined : world.deaths.get(watching);
@@ -94,6 +96,10 @@ ctx.onmessage = (e: MessageEvent<ToSim>) => {
         break;
       case 'removeBuildings':
         world?.towns.removeOn(m.tiles);
+        sendSoon = true;
+        break;
+      case 'watchBuilding':
+        watchingBuilding = m.id;
         sendSoon = true;
         break;
       case 'watchSettlement':

@@ -289,6 +289,44 @@ function drawChunkTiles(ctx: CanvasRenderingContext2D, src: TileSource, cx: numb
       ctx.lineTo(X - 0.5 - 2 * e, Y + 0.25);
       ctx.fill();
 
+      // A bridge: a plank deck across the water, its planks running across the way it spans.
+      if (src.bridges && src.bridges[i] === 2) {
+        const B = src.bridges;
+        const along = (xx: number, yy: number) => xx >= 0 && yy >= 0 && xx < size && yy < size && (B[yy * size + xx] === 2 || !isWater(terrain[yy * size + xx]));
+        // Spans along x when it joins land or bridge to its x sides (else along y).
+        const alongX = along(x - 1, y) && along(x + 1, y);
+        // A point at (a along the span, b across it) from the tile's middle, in tiles.
+        const pt = (a: number, b: number): [number, number] => {
+          const u = alongX ? a : b;
+          const v = alongX ? b : a;
+          return [X + 0.5 * u - 0.5 * v, Y + 0.25 + 0.25 * u + 0.25 * v - 0.05];
+        };
+        ctx.fillStyle = LAND.bridge;
+        ctx.strokeStyle = NAVY;
+        ctx.lineWidth = lw * 0.8;
+        ctx.beginPath();
+        for (const [k, [a, b]] of ([[-0.5, -0.3], [0.5, -0.3], [0.5, 0.3], [-0.5, 0.3]] as const).entries()) {
+          const [px, py] = pt(a, b);
+          if (k) ctx.lineTo(px, py);
+          else ctx.moveTo(px, py);
+        }
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        if (level >= 16) {
+          ctx.strokeStyle = LAND.bridgeLine;
+          ctx.lineWidth = lw * 0.5;
+          ctx.beginPath();
+          for (const a of [-0.25, 0, 0.25]) {
+            const [x0, y0] = pt(a, -0.3);
+            const [x1, y1] = pt(a, 0.3);
+            ctx.moveTo(x0, y0);
+            ctx.lineTo(x1, y1);
+          }
+          ctx.stroke();
+        }
+      }
+
       // Pavement: stone slabs, with a navy edge where it meets open ground.
       const paved = src.roads ? src.roads[i] === 2 : false;
       if (paved) {

@@ -1,4 +1,4 @@
-import { Deposit, isWater } from '../map/terrain';
+import { Deposit, Terrain, isWater } from '../map/terrain';
 import { BASE_PRICE, BUILDINGS, BuildingKind, GOODS, footprint, type Good, type JobKind } from './buildings';
 import { RECIPES } from './military';
 import { ADULT_AGE, MONTHS_PER_YEAR, TICKS_PER_MONTH, TICKS_PER_YEAR, type Building, type Person, type Settlement } from './types';
@@ -77,6 +77,8 @@ const OFFICIAL_SHARE = 0.1;
 const SCHOLAR_WAGE = 2;
 /** Ages at which people serve as soldiers, and what a nation's treasury needs for volunteers to enlist. */
 const SOLDIER_AGE = [16, 45];
+/** A settlement this big on a coast builds a dock. */
+const DOCK_PEOPLE = 25;
 const VOLUNTEER_TREASURY = 12;
 const SOLDIER_SHARE = 0.15;
 /** Workplaces that call workers from ordinary work when they have open places. */
@@ -126,6 +128,11 @@ export class Economy {
 
   /** How much of a good a settlement wants to keep; prices rise below this and fall above it. */
   private target(s: Settlement, g: Good) {
+    // Goods its culture's research needs are wanted more (Caleb after Stage 5: they should reach research).
+    return this.baseTarget(s, g) + (this.w.tech?.wanted(s)[g] ?? 0) * 2;
+  }
+
+  private baseTarget(s: Settlement, g: Good) {
     const people = Math.max(1, this.t.peopleOf(s));
     switch (g) {
       case 'food':
@@ -266,8 +273,6 @@ export class Economy {
     if (p.settlement === undefined) return -1;
     const s = this.t.byId(p.settlement);
     if (!s || this.stockOf(s).food <= 0) return -1;
-    // With no coins, only the very hungry go (to be given food).
-    if ((p.coins ?? 0) < this.price(s, 'food') && p.food >= 25) return -1;
     const here = this.w.tileOf(p);
     const t = this.storeTile(s, here);
     return this.t.dist2(t, here) <= STORE_RANGE * STORE_RANGE ? t : -1;
@@ -484,7 +489,9 @@ export class Economy {
     }
     const child = this.ageOf(p) < ADULT_AGE;
     // The store already holds plenty of what they make: other work (building) or rest for now.
-    if (this.full(s, JOB_GOOD[job]) && !(b.output ?? 0)) return false;
+    // (Miners: plenty of every ore they could dig.)
+    const plenty = job === 'miner' ? this.full(s, 'iron') && (this.full(s, 'gold') || this.oreNear(b, 'gold') < 0) : this.full(s, JOB_GOOD[job]);
+    if (plenty && !(b.output ?? 0)) return false;
     if (job === 'farmer') {
       if ((b.output ?? 0) > 0 && !child) {
         p.jobStep = 'collect';
@@ -669,13 +676,43 @@ export class Economy {
   private resourceFor(job: JobKind, b: Building): number {
     const range = JOB_RANGE[job] ?? 20;
     const from = this.t.middleTile(b);
-    if (job === 'woodcutter') return this.t.nearestTree(from, range);
-    const list = job === 'quarryman' ? this.stoneTiles : job === 'miner' ? this.oreTiles : job === 'potter' ? this.clayTiles : job === 'fisher' ? this.fishTiles : null;
+    if (job === 'woodcutter') return this.t.nearestTree(from, range, b.settlement);
+    if (job === 'miner') {
+      // The ore the settlement needs more: gold when it is wanted (research, a mint) or short, else iron.
+      const s = b.settlement !== undefined ? this.t.byId(b.settlement) : undefined;
+      const gold = this.oreNear(b, 'gold');
+      const iron = this.oreNear(b, 'iron');
+      if (!s) return iron >= 0 ? iron : gold;
+      const st = this.stockOf(s);
+      const want = this.w.tech?.wanted(s) ?? {};
+      const goldFirst = gold >= 0 && ((want.gold ?? 0) > st.gold || this.full(s, 'iron') || st.gold / STOCK_CAP.gold < st.iron / STOCK_CAP.iron);
+      return goldFirst ? gold : iron >= 0 ? iron : gold;
+    }
+    const list = job === 'quarryman' ? this.stoneTiles : job === 'potter' ? this.clayTiles : job === 'fisher' ? this.fishTiles : null;
     if (!list) return -1;
     let best = -1;
     let bestD = range * range;
+    const fromLand = this.w.finder.land(from);
     for (const t of list) {
-      if (this.w.stock[t] <= 0) continue;
+      if (this.w.stock[t] <= 0 || !this.w.finder.reachable(fromLand, t) || (b.settlement !== undefined && !this.t.canWalk(b.settlement, t))) continue;
+      const d = this.t.dist2(t, from);
+      if (d < bestD) {
+        bestD = d;
+        best = t;
+      }
+    }
+    return best;
+  }
+
+  /** The nearest iron or gold ore deposit with ore left within a mine's reach, or -1. */
+  private oreNear(b: Building, kind: 'iron' | 'gold'): number {
+    const range = JOB_RANGE.miner ?? 20;
+    const from = this.t.middleTile(b);
+    let best = -1;
+    let bestD = range * range;
+    const fromLand = this.w.finder.land(from);
+    for (const t of kind === 'gold' ? this.goldTiles : this.oreTiles) {
+      if (this.w.stock[t] <= 0 || (kind === 'iron' && this.w.deposit[t] !== Deposit.Iron) || !this.w.finder.reachable(fromLand, t) || (b.settlement !== undefined && !this.t.canWalk(b.settlement, t))) continue;
       const d = this.t.dist2(t, from);
       if (d < bestD) {
         bestD = d;
@@ -794,6 +831,16 @@ export class Economy {
         }
         return this.done(p);
       }
+      if (step === 'fetch-bridge') {
+        // A builder at the store, taking wood for a bridge.
+        const n = s ? Math.min(4, this.stockOf(s).wood) : 0;
+        if (s && n > 0) {
+          this.stockOf(s).wood -= n;
+          p.load = { kind: 'wood', n };
+          this.t.settlementsChanged = true;
+        }
+        return this.done(p);
+      }
       if (step === 'fetch-fence') {
         // A builder at the store, taking wood for the town's fence.
         const n = s ? Math.min(4, this.stockOf(s).wood) : 0;
@@ -827,7 +874,8 @@ export class Economy {
         const cost = this.price(s, 'food');
         let n = Math.min(3 - p.carry, st.food, Math.floor((p.coins ?? 0) / cost));
         if (n > 0) this.charge(p, s, n * cost);
-        else if (p.food < 25 && st.food > 0) n = 1;
+        // Someone hungry who cannot pay is given a meal (treasuries run dry, and nobody starves beside a full store).
+        else if (st.food > 0) n = 1;
         n = Math.max(0, n);
         st.food -= n;
         p.carry += n;
@@ -1067,7 +1115,9 @@ export class Economy {
     const center = s.center;
     const near = (list: number[], r: number) => list.some((t) => this.w.stock[t] > 0 && this.t.dist2(t, center) <= r * r);
     const fishNear = near(this.fishTiles, 26);
-    const hasStore = mine.some((b) => b.kind === BuildingKind.Storehouse);
+    // Its campfire serves as the store where there is no stone near to build a storehouse with
+    // (otherwise such a settlement could never build its workplaces).
+    const hasStore = mine.some((b) => b.kind === BuildingKind.Storehouse) || !this.t.stoneNear(center);
     const options: { kind: BuildingKind; test: (anchor: number, w: number, d: number) => boolean }[] = [];
     const any = () => true;
     const foodOption = () => {
@@ -1080,6 +1130,10 @@ export class Economy {
       if (!count(BuildingKind.Woodcutter) && this.t.nearestTree(center, 22) >= 0) options.push({ kind: BuildingKind.Woodcutter, test: (a) => this.t.nearestTree(a, 16) >= 0 });
       if (!count(BuildingKind.Quarry) && near(this.stoneTiles, 30)) options.push({ kind: BuildingKind.Quarry, test: (a) => this.nearList(this.stoneTiles, a, 22) });
       if (!count(BuildingKind.Mine) && near(this.oreTiles, 30) && hasStore) options.push({ kind: BuildingKind.Mine, test: (a) => this.nearList(this.oreTiles, a, 22) });
+      // A mine at gold too, once gold is wanted (research, a mint, a town) and no mine reaches it (Caleb after Stage 5).
+      const goldWanted = (this.w.tech?.wanted(s).gold ?? 0) > 0 || s.stage === 'town' || s.stage === 'city' || count(BuildingKind.Mint) > 0;
+      const mines = mine.filter((b) => b.kind === BuildingKind.Mine);
+      if (goldWanted && hasStore && near(this.goldTiles, 30) && !mines.some((b) => this.oreNear(b, 'gold') >= 0)) options.push({ kind: BuildingKind.Mine, test: (a) => this.nearList(this.goldTiles, a, 8) });
     };
     const tradeOption = () => {
       if (!hasStore) return;
@@ -1129,6 +1183,14 @@ export class Economy {
       if (food >= people) options.unshift(hall);
       else options.push(hall);
     }
+    // A settlement on a coast or lakeside builds a dock, where people board boats across wide water (Caleb).
+    if (hasStore && people >= DOCK_PEOPLE && !count(BuildingKind.Dock) && food >= people && this.coastal(s)) options.unshift({ kind: BuildingKind.Dock, test: (a, w, d) => this.shoreSpot(a, w, d) && this.deepBeside(a, w, d) });
+    // A nation's biggest city builds its castle, where the ruler lives (Caleb), before anything else once fed.
+    if (hasStore && this.w.nations?.wantsCastle(s) && !count(BuildingKind.Castle)) {
+      const castle = { kind: BuildingKind.Castle, test: any };
+      if (food >= people) options.unshift(castle);
+      else options.push(castle);
+    }
     // A nation's capital and its towns keep barracks for a standing army (Caleb), two in a city; an
     // armory and a stable beside them once its technology allows (SPEC 10: a rule).
     const barracks = count(BuildingKind.Barracks);
@@ -1146,6 +1208,11 @@ export class Economy {
    * out those another workplace of its kind already works (Caleb: mines and the like stand at
    * their resource, often outside the settlement).
    */
+  /** Iron and gold ore deposits. */
+  oreList() {
+    return this.oreTiles;
+  }
+
   resourceSpots(kind: BuildingKind, from: number, range: number): number[] {
     if (kind === BuildingKind.Woodcutter) {
       const t = this.t.nearestTree(from, range);
@@ -1165,6 +1232,56 @@ export class Economy {
   }
 
   /** Whether a footprint has a tile beside water. */
+  /** Whether a settlement's land has a shore with deep water near it (a coast or lake, not a river). */
+  private coastal(s: Settlement): boolean {
+    // Looked at again once a year (land grows slowly).
+    const year = Math.floor(this.w.state.tick / TICKS_PER_YEAR);
+    const hit = this.coastCache.get(s.id);
+    if (hit && hit.year === year) return hit.coastal;
+    const coastal = this.findCoast(s);
+    this.coastCache.set(s.id, { year, coastal });
+    return coastal;
+  }
+
+  private coastCache = new Map<number, { year: number; coastal: boolean }>();
+
+  private findCoast(s: Settlement): boolean {
+    const w = this.w;
+    const size = w.size;
+    const cx = s.center % size;
+    const cy = Math.floor(s.center / size);
+    for (let dy = -24; dy <= 24; dy++) {
+      for (let dx = -24; dx <= 24; dx++) {
+        const x = cx + dx;
+        const y = cy + dy;
+        if (x < 1 || y < 1 || x >= size - 1 || y >= size - 1) continue;
+        const t = y * size + x;
+        if (this.t.territory[t] !== s.id) continue;
+        if (!(isWater(w.terrain[t + 1]) || isWater(w.terrain[t - 1]) || isWater(w.terrain[t + size]) || isWater(w.terrain[t - size]))) continue;
+        if (this.deepNear(x, y, 1, 1)) return true;
+      }
+    }
+    return false;
+  }
+
+  /** Whether deep water lies within a few tiles of a footprint (a dock reaches the open water). */
+  private deepBeside(anchor: number, fw: number, fd: number): boolean {
+    return this.deepNear(anchor % this.w.size, Math.floor(anchor / this.w.size), fw, fd);
+  }
+
+  private deepNear(ax: number, ay: number, fw: number, fd: number): boolean {
+    const w = this.w;
+    const size = w.size;
+    const r = 4;
+    for (let y = ay - r; y < ay + fd + r; y++) {
+      for (let x = ax - r; x < ax + fw + r; x++) {
+        if (x < 0 || y < 0 || x >= size || y >= size) continue;
+        if (w.terrain[y * size + x] === Terrain.DeepWater) return true;
+      }
+    }
+    return false;
+  }
+
   shoreSpot(anchor: number, fw: number, fd: number) {
     const size = this.w.size;
     const x0 = anchor % size;

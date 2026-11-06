@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router';
-import { Amphora, Anvil, Apple, Axe, Blocks, BookOpen, Building, Coins, Crosshair, Crown, Fence, Shield, Sword, Swords, Eraser, GraduationCap, ScrollText, Landmark, MapPinPlus, Fish, Flag, Flame, Footprints, Hammer, Hand, House, ListChecks, LogOut, Maximize, Minus, Moon, Pause, Pencil, Pickaxe, Play, Plus, RotateCcw, Save, Split, Store, Tent, User, Users, Warehouse, Wheat, X } from 'lucide-react';
+import { Amphora, Anchor, Anvil, Castle, Apple, Axe, Blocks, BookOpen, Building, Coins, Crosshair, Crown, Fence, Shield, Sword, Swords, Eraser, GraduationCap, ScrollText, Landmark, MapPinPlus, Fish, Flag, Flame, Footprints, Hammer, Hand, House, ListChecks, LogOut, Maximize, Minus, Moon, Pause, Pencil, Pickaxe, Play, Plus, RotateCcw, Save, Split, Store, Tent, User, Users, Warehouse, Wheat, X } from 'lucide-react';
 import { ButtonLink, Button, IconButton, Input, Segmented, Spinner, cx } from '../components/ui';
 import { alertDialog, confirmDialog, notify, promptDialog } from '../components/dialogs';
 import { useApp } from '../lib/store';
@@ -10,9 +10,9 @@ import { SimClient } from '../sim/client';
 import { CLOTHES, SKINS, unpackLook } from '../sim/look';
 import { ADULT_AGE, DEFAULT_TOGGLES, ELDER_AGE, MONTHS_PER_YEAR, TICKS_PER_MONTH, TICKS_PER_YEAR, type PersonDetails, type PersonEdit, type Speed, type Toggles } from '../sim/types';
 import { Deposit, Terrain } from '../map/terrain';
-import { ARMS, BUILDINGS, BuildingKind, GOODS, GOOD_NAME, JOB_NAME, LIGHT_JOB_NAME, STAGE_NAME, anchorFor, footprint, kindAllowsTerrain, needsShore } from '../sim/buildings';
+import { ARMS, BUILDINGS, BuildingKind, GOODS, GOOD_NAME, type Good, JOB_NAME, LIGHT_JOB_NAME, STAGE_NAME, anchorFor, footprint, kindAllowsTerrain, needsShore } from '../sim/buildings';
 import { maxTrees } from '../sim/towns';
-import { TileField, type BuildingView, type CultureEdit, type CultureView, type Focus, type NationEdit, type NationView, type RelationKind, type SettlementDetails, type SettlementView, type SoldierKind } from '../sim/types';
+import { TileField, type BuildingView, type CultureEdit, type CultureView, type Focus, type NationEdit, type NationView, type RelationKind, type SettlementDetails, type SettlementView, type SoldierKind, type BuildingDetails } from '../sim/types';
 import { NATION_COLORS, POLICY_DEFS, RELATION_NAME } from '../sim/nations';
 import { BUILDING_TECH, POLICY_TECH, TECHS, TECH_BY_ID } from '../sim/tech';
 import { CULTURE_COLORS, TRAIT_AXES } from '../sim/cultures';
@@ -82,6 +82,11 @@ function treeCounts(doc: WorldDoc): Uint8Array {
   return out;
 }
 
+function bridgesOf(doc: WorldDoc): Uint8Array {
+  const n = doc.size * doc.size;
+  return doc.state.bridges && doc.state.bridges.length === n ? doc.state.bridges.slice() : new Uint8Array(n);
+}
+
 function roadsOf(doc: WorldDoc): Uint8Array {
   const n = doc.size * doc.size;
   return doc.state.roads && doc.state.roads.length === n ? doc.state.roads.slice() : new Uint8Array(n);
@@ -126,13 +131,17 @@ const BUILDING_ICON: Record<number, typeof House> = {
   [BuildingKind.Barracks]: Shield,
   [BuildingKind.Armory]: Swords,
   [BuildingKind.Stable]: Fence,
+  [BuildingKind.Dock]: Anchor,
+  [BuildingKind.Castle]: Castle,
 };
 
-type OrderKind = 'move' | 'gather' | 'rest' | 'attack' | 'stop';
+type OrderKind = 'move' | 'gather' | 'collect' | 'rest' | 'attack' | 'stop';
 /** An imperative being given: waiting for who it is for, or for where (SPEC 4: either order works). */
 type Pending = { kind: OrderKind; stage: 'who' | 'where' } | null;
 
-const ORDER_LABEL: Record<OrderKind, string> = { move: 'Move', gather: 'Gather food', rest: 'Rest', attack: 'Attack', stop: 'Stop' };
+const ORDER_LABEL: Record<OrderKind, string> = { move: 'Move', gather: 'Gather food', collect: 'Gather resources', rest: 'Rest', attack: 'Attack', stop: 'Stop' };
+/** Resources people can be ordered to gather (Caleb after Stage 5). */
+const COLLECT_GOODS: Good[] = ['wood', 'stone', 'iron', 'gold', 'clay'];
 const SOLDIER_KINDS: { kind: SoldierKind; label: string; note: string }[] = [
   { kind: 'infantry', label: 'Infantry', note: 'a sword and mail' },
   { kind: 'archer', label: 'Archer', note: 'a bow' },
@@ -149,6 +158,11 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
   const [tab, setTab] = useState<Tab>('main');
   const [tool, setTool] = useState<UnitTool>('person');
   const [soldierKind, setSoldierKind] = useState<SoldierKind>('infantry');
+  const [collectGood, setCollectGood] = useState<Good>('wood');
+  const collectGoodRef = useRef(collectGood);
+  collectGoodRef.current = collectGood;
+  const [chosenBuilding, setChosenBuilding] = useState<number | null>(null);
+  const [buildingDetails, setBuildingDetails] = useState<BuildingDetails | null>(null);
   /** Which way round a building being placed or ordered goes (R turns it). */
   const [rot, setRot] = useState<0 | 1>(0);
   const [radius, setRadius] = useState(2);
@@ -175,6 +189,7 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
   const covered = useRef(new Uint8Array(doc.size * doc.size));
   const walls = useRef(wallsOf(doc));
   const roads = useRef(roadsOf(doc));
+  const bridges = useRef(bridgesOf(doc));
   const buildingsRef = useRef<BuildingView[]>([]);
   const buildingAt = useRef(new Map<number, BuildingView>());
   const settlementsRef = useRef<SettlementView[]>([]);
@@ -260,6 +275,18 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
   };
   const chooseSettlementRef = useRef(chooseSettlement);
   chooseSettlementRef.current = chooseSettlement;
+  /** Opens a building's info panel (Caleb after Stage 5), or closes it. */
+  const chooseBuilding = (id: number | null) => {
+    if (id !== null) {
+      setChosenCultureState(null);
+      setChosenNationState(null);
+    }
+    setChosenBuilding(id);
+    if (id === null) setBuildingDetails(null);
+    clientRef.current?.watchBuilding(id);
+  };
+  const chooseBuildingRef = useRef(chooseBuilding);
+  chooseBuildingRef.current = chooseBuilding;
 
   const choose = (ids: number[]) => {
     if (ids.length) {
@@ -280,6 +307,7 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
     const client = clientRef.current;
     if (!client || !ids.length) return;
     if (kind === 'stop') client.order(ids, { kind: 'stop' });
+    else if (kind === 'collect') client.order(ids, { kind, tile, good: collectGoodRef.current });
     else client.order(ids, { kind, tile });
     setWorldUnsaved(true);
     notify(`${ORDER_LABEL[kind]}: ${ids.length === 1 ? '1 person' : `${ids.length} people`}.`);
@@ -384,7 +412,7 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
   // Start the simulation and the view once, when the screen opens.
   useEffect(() => {
     const canvas = canvasRef.current!;
-    const view = new IsoView(canvas, { size: doc.size, terrain: doc.terrain, elevation: doc.elevation, deposit: doc.deposit, empty: empty.current, trees: trees.current, territory: territory.current, covered: covered.current, walls: walls.current, roads: roads.current });
+    const view = new IsoView(canvas, { size: doc.size, terrain: doc.terrain, elevation: doc.elevation, deposit: doc.deposit, empty: empty.current, trees: trees.current, territory: territory.current, covered: covered.current, walls: walls.current, roads: roads.current, bridges: bridges.current });
     const client = new SimClient();
     viewRef.current = view;
     clientRef.current = client;
@@ -418,6 +446,7 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
         else if (f === TileField.Trees) trees.current[t] = v;
         else if (f === TileField.Walls) walls.current[t] = v;
         else if (f === TileField.Roads) roads.current[t] = v;
+        else if (f === TileField.Bridges) bridges.current[t] = v;
         else territory.current[t] = v;
         stockDirty.add(t);
       }
@@ -463,6 +492,7 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
       view.redraw();
     };
     client.onWatchedSettlement = (d) => setSettlementDetails(d);
+    client.onWatchedBuilding = (d) => setBuildingDetails(d);
     // Bushes being picked, trees cut and land claimed are redrawn together about once a
     // second, not on every step, since each redraw of the terrain costs far more than drawing people.
     const stockDirty = new Set<number>();
@@ -548,7 +578,7 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
       }
       chooseRef.current(ids);
       if (pending?.stage === 'who' && ids.length) {
-        if (pending.kind === 'move' || pending.kind === 'gather' || pending.kind === 'attack') setPending({ kind: pending.kind, stage: 'where' });
+        if (pending.kind === 'move' || pending.kind === 'gather' || pending.kind === 'collect' || pending.kind === 'attack') setPending({ kind: pending.kind, stage: 'where' });
         else {
           giveRef.current(pending.kind, ids);
           setPending(null);
@@ -587,7 +617,8 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
           if (id !== null) return chooseRef.current([id]);
           chooseRef.current([]);
           const b = p.tile ? buildingAt.current.get(p.tile.y * doc.size + p.tile.x) : undefined;
-          chooseSettlementRef.current(b && b.settlement ? b.settlement : null);
+          chooseSettlementRef.current(null);
+          chooseBuildingRef.current(b ? b.id : null);
           return;
         }
         if (tab === 'imperatives' && live.current.pendingS) {
@@ -752,7 +783,7 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
       setPending({ kind, stage: 'who' });
       return;
     }
-    if (kind === 'move' || kind === 'gather' || kind === 'attack') setPending({ kind, stage: 'where' });
+    if (kind === 'move' || kind === 'gather' || kind === 'collect' || kind === 'attack') setPending({ kind, stage: 'where' });
     else {
       giveOrder(kind, selection);
       setPending(null);
@@ -826,9 +857,10 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
     covered.current.fill(0);
     walls.current.set(wallsOf(setup));
     roads.current.set(roadsOf(setup));
+    bridges.current.set(bridgesOf(setup));
     buildingsRef.current = [];
     buildingAt.current = new Map();
-    viewRef.current?.replaceTiles({ size: setup.size, terrain: doc.terrain, elevation: doc.elevation, deposit: doc.deposit, empty: empty.current, trees: trees.current, territory: territory.current, covered: covered.current, walls: walls.current, roads: roads.current });
+    viewRef.current?.replaceTiles({ size: setup.size, terrain: doc.terrain, elevation: doc.elevation, deposit: doc.deposit, empty: empty.current, trees: trees.current, territory: territory.current, covered: covered.current, walls: walls.current, roads: roads.current, bridges: bridges.current });
     choose([]);
     chooseSettlement(null);
     setSavedTick(setup.state.tick);
@@ -950,6 +982,20 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
             setWorldUnsaved(true);
             choose([]);
           }}
+        />
+      )}
+      {chosenCulture === null && chosenNation === null && chosenSettlement === null && chosenBuilding !== null && selection.length === 0 && (
+        <BuildingPanel
+          details={buildingDetails}
+          onSettlement={(id) => {
+            chooseBuilding(null);
+            chooseSettlement(id);
+          }}
+          onPerson={(id) => {
+            chooseBuilding(null);
+            choose([id]);
+          }}
+          onClose={() => chooseBuilding(null)}
         />
       )}
       {chosenCulture === null && chosenNation === null && chosenSettlement !== null && selection.length === 0 && (
@@ -1129,17 +1175,23 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
           )}
 
           {tab === 'imperatives' && (
-            <div className="flex items-stretch gap-3 p-2">
+            <div className="flex max-w-[calc(100vw-2rem)] items-stretch gap-3 overflow-x-auto p-2 scrollbar-thin">
               <div className="flex flex-col justify-center gap-1 pr-1">
                 <span className="label-caps text-muted">Units</span>
                 <span className="text-[0.6875rem] text-muted">Click or box people</span>
               </div>
               <div className="flex gap-1">
-                {(['move', 'gather', 'rest', 'attack', 'stop'] as const).map((k) => (
+                {(['move', 'gather', 'collect', 'rest', 'attack', 'stop'] as const).map((k) => (
                   <ToolButton key={k} active={pending?.kind === k} label={ORDER_LABEL[k]} onClick={() => onOrderButton(k)}>
-                    {k === 'move' ? <Footprints className="size-5" /> : k === 'gather' ? <Apple className="size-5" /> : k === 'rest' ? <Moon className="size-5" /> : k === 'attack' ? <Crosshair className="size-5" /> : <Hand className="size-5" />}
+                    {k === 'move' ? <Footprints className="size-5" /> : k === 'gather' ? <Apple className="size-5" /> : k === 'collect' ? <Pickaxe className="size-5" /> : k === 'rest' ? <Moon className="size-5" /> : k === 'attack' ? <Crosshair className="size-5" /> : <Hand className="size-5" />}
                   </ToolButton>
                 ))}
+                {pending?.kind === 'collect' && (
+                  <div className="flex shrink-0 flex-col justify-center gap-1 pl-1">
+                    <span className="text-xs text-muted">Resource</span>
+                    <Segmented size="xs" value={collectGood} onChange={(v) => setCollectGood(v as Good)} options={COLLECT_GOODS.map((g) => ({ value: g, label: GOOD_NAME[g] }))} />
+                  </div>
+                )}
               </div>
               <div className="flex flex-col justify-center gap-1 border-l border-line pl-3 pr-1">
                 <span className="label-caps text-muted">Settlements</span>
@@ -1196,7 +1248,7 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
                     : pending?.stage === 'who'
                   ? `${ORDER_LABEL[pending.kind]}: now click a person or drag a box around people. Esc cancels.`
                   : pending?.stage === 'where'
-                    ? `${ORDER_LABEL[pending.kind]}: now click ${pending.kind === 'move' ? 'where to go' : pending.kind === 'attack' ? 'where to go; on the way they fight any enemy of their nation at war' : 'where to look for food'}. Esc cancels.`
+                    ? `${ORDER_LABEL[pending.kind]}: now click ${pending.kind === 'move' ? 'where to go' : pending.kind === 'attack' ? 'where to go; on the way they fight any enemy of their nation at war' : pending.kind === 'collect' ? `where to gather ${GOOD_NAME[collectGood].toLowerCase()}; they bring a load to their settlement's store` : 'where to look for food'}. Esc cancels.`
                     : selection.length
                       ? `${selection.length === 1 ? '1 person' : `${selection.length} people`} chosen. Pick an order.`
                       : 'Choose people first (click one, or drag a box), or pick an order first and then choose.'}
@@ -1260,6 +1312,7 @@ const TASK_TEXT: Record<string, string> = {
   build: 'Building',
   fight: 'Fighting',
   drill: 'Drilling by the barracks',
+  collect: 'Gathering resources (by order)',
 };
 
 const WALK_TEXT: Record<string, string> = {
@@ -1282,6 +1335,8 @@ const WALK_TEXT: Record<string, string> = {
   tax: 'Going to collect taxes',
   taxHome: 'Bringing taxes to the hall',
   pave: 'Going to pave',
+  bridge: 'Going to build a bridge',
+  collect: 'Going to gather resources (by order)',
 };
 
 function doingText(d: PersonDetails) {
@@ -2298,6 +2353,134 @@ function NationPanel({
   );
 }
 
+/** What each building is and does, for its info panel (Caleb after Stage 5). */
+const BUILDING_INFO: Record<number, string> = {
+  [BuildingKind.Campfire]: 'The heart of a settlement: where it was founded and what it grows around. Its store until a storehouse is built. Removing it abandons the settlement.',
+  [BuildingKind.Hut]: 'A small home of wattle and thatch, for a family of a camp or village.',
+  [BuildingKind.House]: 'A timber and plaster home for a family, built with stone once a village has some.',
+  [BuildingKind.Storehouse]: 'The settlement\'s store: workers bring what they make here, builders and buyers take from it.',
+  [BuildingKind.Farm]: 'A field. Farmers tend it from March to November until the wheat ripens, then harvest it and carry the sheaves to the store as food.',
+  [BuildingKind.Woodcutter]: 'Woodcutters fell the trees nearby and carry the wood to the store.',
+  [BuildingKind.Quarry]: 'Quarrymen break stone from the deposits nearby and carry it to the store.',
+  [BuildingKind.Mine]: 'Miners dig iron ore or gold ore from the deposits nearby, whichever the settlement needs more, and carry it to the store.',
+  [BuildingKind.FishingHut]: 'Fishers catch fish from the shore nearby and carry them to the store as food.',
+  [BuildingKind.Market]: 'Traders load goods the settlement has plenty of, sell them where they pay most, and bring back what home lacks.',
+  [BuildingKind.Smithy]: 'Blacksmiths turn iron ore from the store into tools, which make every kind of work quicker.',
+  [BuildingKind.Pottery]: 'Potters dig clay and make pottery, which people buy for their homes.',
+  [BuildingKind.Mint]: 'Minters strike coins for the settlement\'s treasury from gold ore.',
+  [BuildingKind.Townhouse]: 'A tall stone and timber home with room for several families (towns and cities).',
+  [BuildingKind.Hall]: 'Officials work here, collecting taxes from the nation\'s settlements for its treasury. Flies the nation\'s banner.',
+  [BuildingKind.Scriptorium]: 'Scholars study here, adding to their culture\'s research.',
+  [BuildingKind.University]: 'Scholars study here twice as fast as at a scriptorium (towns and cities).',
+  [BuildingKind.Barracks]: 'Home of an army: soldiers serve here full time, drill, and march out at war. Flies the nation\'s banner.',
+  [BuildingKind.Armory]: 'Armorers make spears, swords, bows, crossbows, mail, plate and catapults from iron ore and wood, whatever the soldiers here lack most.',
+  [BuildingKind.Stable]: 'Grooms raise horses from food, for cavalry.',
+  [BuildingKind.Dock]: 'A landing where people board boats to cross wide water: settlers, traders and armies going where there is no way on foot.',
+  [BuildingKind.Castle]: 'The seat of the nation\'s ruler, built in its biggest city, which becomes the capital. An enemy takes the capital only by claiming the castle.',
+};
+
+function BuildingPanel({ details, onSettlement, onPerson, onClose }: { details: BuildingDetails | null; onSettlement: (id: number) => void; onPerson: (id: number) => void; onClose: () => void }) {
+  const d = details;
+  const Icon = d ? BUILDING_ICON[d.kind] : null;
+  return (
+    <div className="absolute right-3 top-16 max-h-[calc(100%-14.5rem)] w-72 overflow-y-auto rounded-xl border border-line bg-surface/97 p-3.5 text-sm shadow-pop scrollbar-thin">
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-center gap-2.5">
+          {Icon && (
+            <span className="grid size-9 shrink-0 place-items-center rounded-lg border-2 border-navy bg-raised">
+              <Icon className="size-5" />
+            </span>
+          )}
+          <div>
+            <p className="label-caps text-muted">Building</p>
+            <p className="font-display text-lg uppercase leading-tight">{d ? BUILDINGS[d.kind].name : 'Gone'}</p>
+          </div>
+        </div>
+        <IconButton label="Close" onClick={onClose}>
+          <X className="size-4" />
+        </IconButton>
+      </div>
+      {d && (
+        <>
+          <p className="mt-2 text-xs leading-relaxed text-muted">{BUILDING_INFO[d.kind]}</p>
+          <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+            <dt className="text-muted">Settlement</dt>
+            <dd>
+              {d.settlement !== undefined && d.settlementName ? (
+                <button className="text-ink underline decoration-accent decoration-2 underline-offset-2 hover:text-accent" onClick={() => onSettlement(d.settlement!)}>
+                  {d.settlementName}
+                </button>
+              ) : (
+                <span className="text-muted">None</span>
+              )}
+            </dd>
+            <dt className="text-muted">State</dt>
+            <dd className={d.burning ? 'text-warn' : ''}>{d.burning ? 'Burning' : d.progress >= 1 ? 'Built' : `Being built, ${Math.floor(d.progress * 100)}%`}</dd>
+            {d.materials && (
+              <>
+                <dt className="text-muted">Materials</dt>
+                <dd>
+                  Wood {d.materials.wood[0]}/{d.materials.wood[1]}, stone {d.materials.stone[0]}/{d.materials.stone[1]}
+                  {d.materials.tools ? `, tools ${d.materials.tools[0]}/${d.materials.tools[1]}` : ''}
+                  <span className="text-muted"> · {d.builders} builder{d.builders === 1 ? '' : 's'}</span>
+                </dd>
+              </>
+            )}
+            {d.jobs > 0 && (
+              <>
+                <dt className="text-muted">Workers</dt>
+                <dd>
+                  {d.workers} of {d.jobs}
+                  {d.lightJobs > 0 && <span className="text-muted"> · children {d.lightWorkers} of {d.lightJobs}</span>}
+                </dd>
+              </>
+            )}
+            {d.homes > 0 && (
+              <>
+                <dt className="text-muted">Living here</dt>
+                <dd>
+                  {d.residents} of {d.homes}
+                </dd>
+              </>
+            )}
+            {d.ruler && (
+              <>
+                <dt className="text-muted">Ruler</dt>
+                <dd>
+                  <button className="text-left text-ink underline decoration-accent decoration-2 underline-offset-2 hover:text-accent" onClick={() => onPerson(d.ruler!.id)}>
+                    {d.ruler.name}
+                  </button>
+                  {d.residents > 1 && <span className="text-muted"> and family ({d.residents - 1})</span>}
+                </dd>
+              </>
+            )}
+            {d.growth !== undefined && (
+              <>
+                <dt className="text-muted">Crop</dt>
+                <dd>
+                  <Bar value={Math.round(d.growth * 100)} warn={false} />
+                </dd>
+              </>
+            )}
+            {(d.output ?? 0) > 0 && (
+              <>
+                <dt className="text-muted">Waiting</dt>
+                <dd>{d.output} food in sheaves, to carry in</dd>
+              </>
+            )}
+            {d.doing.length > 0 && (
+              <>
+                <dt className="text-muted">Now</dt>
+                <dd>{d.doing.map((x) => x.replace(/making (\w+)/, (_m, g: string) => `making ${(GOOD_NAME[g as Good] ?? g).toLowerCase()}`).replace(/carrying (\d+) (\w+)/, (_m, n: string, g: string) => `carrying ${n} ${(GOOD_NAME[g as Good] ?? g).toLowerCase()}`)).join('; ')}</dd>
+              </>
+            )}
+          </dl>
+        </>
+      )}
+    </div>
+  );
+}
+
 function SettlementPanel({
   details,
   cultures,
@@ -2408,6 +2591,14 @@ function SettlementPanel({
                   <dt className="text-muted">Pavement</dt>
                   <dd>
                     {d.paved} of {d.paved + d.toPave} tiles laid
+                  </dd>
+                </>
+              )}
+              {d.bridges + d.toBridge > 0 && (
+                <>
+                  <dt className="text-muted">Bridges</dt>
+                  <dd>
+                    {d.bridges} of {d.bridges + d.toBridge} tiles built
                   </dd>
                 </>
               )}

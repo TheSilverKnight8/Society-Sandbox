@@ -75,6 +75,8 @@ export const LAND = {
   duneMark: shadeHex(BIOME[Terrain.Desert], 0.74),
   foam: '#ffffff',
   paving: '#d4c7ac',
+  bridge: '#a7774a',
+  bridgeLine: '#7d5533',
   pavingJoint: '#ad9f84',
 };
 

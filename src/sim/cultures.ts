@@ -326,6 +326,12 @@ export class Cultures {
   }
 
   /** The traits of a settlement's culture, if it has one. */
+  /** A settlement's main culture. */
+  cultureOf(s: Settlement): Culture | undefined {
+    const c = this.dominant.get(s.id);
+    return c !== undefined ? this.byId.get(c) : undefined;
+  }
+
   traitsOf(s: Settlement): CultureTraits | undefined {
     const c = this.dominant.get(s.id);
     return c !== undefined ? this.byId.get(c)?.traits : undefined;
