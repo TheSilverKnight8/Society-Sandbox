@@ -56,6 +56,8 @@ const LAND_PER_PERSON = 12;
 const BRIDGE_WOOD = 2;
 const BRIDGE_STEPS = 40;
 const MAX_BRIDGE = 4;
+/** Households that move up to a bigger home in a settlement each month, at most. */
+const MOVES_UP_A_MONTH = 3;
 /** How far each settlement's map of where its people can walk reaches from its middle (tiles). */
 const WALK_MAP = 64;
 const BRIDGE_GOAL_RANGE = 90;
@@ -838,6 +840,7 @@ export class Towns {
     if (!homes.length) return;
     const room = (b: Building) => this.def(b).homes - (this.occupants.get(b.id) ?? 0);
     const members = this.w.state.people.filter((p) => p.settlement === s.id);
+    this.easeCrowding(s, homes, members, room);
     // Homeless children by parent, worked out once.
     const kids = new Map<number, Person[]>();
     for (const q of members) {
@@ -863,6 +866,98 @@ export class Towns {
         this.occupants.set(home.id, (this.occupants.get(home.id) ?? 0) + 1);
         const c = this.counts.get(s.id);
         if (c) c.housed++;
+      }
+    }
+  }
+
+  /**
+   * Homes fill past their beds as children are born and pairs move in. Once a month, in a home with
+   * more people than beds the eldest household stays and the others move out (to be housed where
+   * there is room, or to count as homeless so more homes are built); a household too big for its
+   * home moves, whole, to one with room for it (Caleb after Stage 5: new houses stood empty while
+   * huts were overfull).
+   */
+  private easeCrowding(s: Settlement, homes: Building[], members: Person[], room: (b: Building) => number) {
+    const w = this.w;
+    const byHome = new Map<number, Person[]>();
+    for (const p of members) {
+      if (p.home === undefined) continue;
+      const l = byHome.get(p.home);
+      if (l) l.push(p);
+      else byHome.set(p.home, [p]);
+    }
+    const c = this.counts.get(s.id);
+    const leave = (p: Person) => {
+      if (p.home === undefined) return;
+      this.occupants.set(p.home, (this.occupants.get(p.home) ?? 1) - 1);
+      delete p.home;
+      if (p.indoors) delete p.indoors;
+      if (c) c.housed--;
+    };
+    const move = (hh: Person[], to: Building) => {
+      for (const q of hh) leave(q);
+      for (const q of hh) {
+        q.home = to.id;
+        this.occupants.set(to.id, (this.occupants.get(to.id) ?? 0) + 1);
+        if (c) c.housed++;
+      }
+    };
+    for (const b of homes) {
+      const living = byHome.get(b.id);
+      if (!living || living.length <= this.def(b).homes) continue;
+      // Households: each grown-up with their pair and young children who live here.
+      const placed = new Set<Person>();
+      const households: Person[][] = [];
+      for (const p of [...living].sort((a, b2) => a.born - b2.born)) {
+        if (placed.has(p) || w.ageOf(p) < ADULT_AGE) continue;
+        const hh = [p];
+        placed.add(p);
+        const partner = p.pair !== undefined ? living.find((q) => q.id === p.pair) : undefined;
+        if (partner && !placed.has(partner)) {
+          hh.push(partner);
+          placed.add(partner);
+        }
+        for (const q of living) {
+          if (placed.has(q) || w.ageOf(q) >= ADULT_AGE) continue;
+          if (hh.some((a) => q.mother === a.id || q.father === a.id)) {
+            hh.push(q);
+            placed.add(q);
+          }
+        }
+        households.push(hh);
+      }
+      // Children whose parents live elsewhere stay with whoever they live with (the eldest household).
+      if (households.length) for (const q of living) if (!placed.has(q)) households[0].push(q);
+      // The eldest household stays; the others move out, until the home has beds for those left.
+      let over = living.length - this.def(b).homes;
+      for (const hh of households.slice(1)) {
+        if (over <= 0) break;
+        for (const q of hh) leave(q);
+        over -= hh.length;
+      }
+      // Still too many (one big household): the whole household moves to a home with room for it.
+      if (over > 0 && households.length) {
+        const hh = households[0];
+        const to = homes.find((h) => h !== b && room(h) >= hh.length);
+        if (to) move(hh, to);
+      }
+    }
+    // A few households a month move up from a smaller home to a bigger one standing empty enough
+    // for them (a hut family into a new house), so new homes fill and old huts empty first.
+    let moves = 0;
+    const bigFirst = [...homes].sort((a, b2) => this.def(b2).homes - this.def(a).homes);
+    for (const to of bigFirst) {
+      if (moves >= MOVES_UP_A_MONTH) break;
+      if (room(to) < 2) continue;
+      for (const from of homes) {
+        if (this.def(from).homes >= this.def(to).homes) continue;
+        const living = (byHome.get(from.id) ?? []).filter((q) => q.home === from.id);
+        if (!living.length || living.length > room(to)) continue;
+        move(living, to);
+        byHome.set(to.id, [...(byHome.get(to.id) ?? []), ...living]);
+        byHome.delete(from.id);
+        moves++;
+        break;
       }
     }
   }
