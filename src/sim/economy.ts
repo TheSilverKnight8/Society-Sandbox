@@ -495,6 +495,8 @@ export class Economy {
     }
     if (job === 'smith' || job === 'minter' || job === 'potter') return this.make(p, b, s, job);
     if (job === 'armorer' || job === 'groom') return this.makeArms(p, b, s);
+    // Hunters and herders: see creatures.ts (Stage 6).
+    if (job === 'hunter' || job === 'herder') return this.w.creatures.work(p, b, s);
     // Soldiers' days are the military's (see Military.soldierWork).
     if (job === 'soldier') return false;
     // Carrying what they made: take it to the store.
@@ -1008,9 +1010,12 @@ export class Economy {
         const before = this.cropLook(b);
         const s = b.settlement !== undefined ? this.t.byId(b.settlement) : undefined;
         const tool = s && this.hasTools(s) ? TOOL_SPEED : 1;
-        // Crop rotation makes fields ripen a quarter faster (Stage 4c).
+        // Crop rotation makes fields ripen a quarter faster (Stage 4c); so do oxen at the plough,
+        // and a drought slows them (Stage 6).
         const rotation = this.w.tech.has(s, 'cropRotation') ? 1.25 : 1;
-        b.growth = Math.min(1, (b.growth ?? 0) + TEND_GROWTH * tool * rotation * (this.ageOf(p) < ADULT_AGE ? 0.5 : 1));
+        const oxen = s ? this.w.creatures.ploughFactor(s, this.t.buildings.filter((o) => o.settlement === s.id && o.kind === BuildingKind.Farm).length) : 1;
+        const dry = this.w.weather.growthFactor(b.tile);
+        b.growth = Math.min(1, (b.growth ?? 0) + TEND_GROWTH * tool * rotation * oxen * dry * (this.ageOf(p) < ADULT_AGE ? 0.5 : 1));
         if (this.cropLook(b) !== before) this.t.buildingsChanged = true;
       }
       // Very hungry or tired: stop and see to it.
@@ -1140,8 +1145,14 @@ export class Economy {
     const foodOption = () => {
       if (wantFood) {
         options.push({ kind: BuildingKind.Farm, test: any });
+        // Game near: a hunter's lodge (Stage 6: animals).
+        if (!count(BuildingKind.HuntingLodge) && people >= 15 && this.w.creatures.gameNear(center, 28, false) >= 3) options.push({ kind: BuildingKind.HuntingLodge, test: any });
         if (fishNear && fishing < Math.max(1, Math.floor(people / 25))) options.push({ kind: BuildingKind.FishingHut, test: (a, w, d) => this.shoreSpot(a, w, d) && this.nearList(this.fishTiles, a, 14) });
       }
+    };
+    // Wild cattle or sheep near: a pasture to tame them, a few as the settlement grows (Stage 6: livestock and work animals).
+    const pastureOption = () => {
+      if (people >= 20 && count(BuildingKind.Pasture) < Math.min(3, 1 + Math.floor(people / 60)) && this.w.creatures.gameNear(center, 40, true) >= 2) options.push({ kind: BuildingKind.Pasture, test: any });
     };
     const goodsOption = () => {
       if (!count(BuildingKind.Woodcutter) && this.t.nearestTree(center, 22) >= 0) options.push({ kind: BuildingKind.Woodcutter, test: (a) => this.t.nearestTree(a, 16) >= 0 });
@@ -1193,6 +1204,7 @@ export class Economy {
       foodOption();
       tradeOption();
     }
+    pastureOption();
     moreOption();
     // A nation's capital, and its towns and cities, build a hall for officials (taxes), first unless food is short.
     if (hasStore && this.w.nations?.wantsHall(s) && !count(BuildingKind.Hall)) {

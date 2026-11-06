@@ -7,6 +7,7 @@ import { STEP, isoX, isoY } from './iso';
 import type { IsoView } from './IsoView';
 import { NAVY } from './style';
 import { NATION_COLORS } from '../sim/nations';
+import { creatureColor, creatureSprite } from './creatures';
 
 // Draws people as small stick figures in Stickman Arena's style: a round head, a tunic
 // (a long dress for women), arms and legs, in skin and clothing colors inside a navy
@@ -39,12 +40,16 @@ interface Sprite {
 
 const sprites = new Map<string, Sprite>();
 
-function sprite(look: number, male: boolean, pose: number, frame: number, px: number, elder: boolean, carrying = false, crown = false, gear = 0, boat = false, fight = false): Sprite {
-  const key = `${look}|${male ? 1 : 0}|${pose}|${frame}|${px}|${elder ? 1 : 0}|${carrying ? 1 : 0}|${crown ? 1 : 0}|${gear}|${boat ? 1 : 0}|${fight ? 1 : 0}`;
+/** Extra marks on a figure (Stage 6): a criminal's hood, a sick person's pallor. */
+const HOOD = 1;
+const SICK = 2;
+
+function sprite(look: number, male: boolean, pose: number, frame: number, px: number, elder: boolean, carrying = false, crown = false, gear = 0, boat = false, fight = false, extra = 0): Sprite {
+  const key = `${look}|${male ? 1 : 0}|${pose}|${frame}|${px}|${elder ? 1 : 0}|${carrying ? 1 : 0}|${crown ? 1 : 0}|${gear}|${boat ? 1 : 0}|${fight ? 1 : 0}|${extra}`;
   const hit = sprites.get(key);
   if (hit) return hit;
   if (sprites.size > 4000) sprites.clear();
-  const s = pose === Pose.Sleep && !boat ? drawSleeping(look, male, px, elder) : drawStanding(look, male, pose === Pose.Sleep ? Pose.Stand : pose, frame, px, elder, carrying, crown, gear, boat, fight);
+  const s = pose === Pose.Sleep && !boat ? drawSleeping(look, male, px, elder) : drawStanding(look, male, pose === Pose.Sleep ? Pose.Stand : pose, frame, px, elder, carrying, crown, gear, boat, fight, extra);
   sprites.set(key, s);
   return s;
 }
@@ -134,7 +139,7 @@ function drawSleeping(look: number, male: boolean, px: number, elder: boolean, z
   return { canvas, ax, ay };
 }
 
-function drawStanding(look: number, male: boolean, pose: number, frame: number, px: number, elder: boolean, carrying: boolean, crown: boolean, gear = 0, boat = false, fight = false): Sprite {
+function drawStanding(look: number, male: boolean, pose: number, frame: number, px: number, elder: boolean, carrying: boolean, crown: boolean, gear = 0, boat = false, fight = false, extra = 0): Sprite {
   const H = px;
   const lw = Math.max(1.2, H * 0.08);
   // A soldier's arms (see Snapshot.gear): weapon, armor, horse, catapult, leader's banner, nation color.
@@ -401,10 +406,10 @@ function drawStanding(look: number, male: boolean, pose: number, frame: number, 
     ctx.closePath();
     outline(WOOD);
   }
-  // Head, then hair on top.
+  // Head, then hair on top. (Someone sick looks pale and greenish.)
   ctx.beginPath();
   ctx.arc(0, -0.84 * H, 0.13 * H, 0, Math.PI * 2);
-  ctx.fillStyle = skinC;
+  ctx.fillStyle = extra & SICK ? '#c9cf9a' : skinC;
   ctx.fill();
   ctx.save();
   ctx.clip();
@@ -416,6 +421,22 @@ function drawStanding(look: number, male: boolean, pose: number, frame: number, 
   ctx.strokeStyle = NAVY;
   ctx.lineWidth = lw;
   ctx.stroke();
+  // A criminal wears a dark hood over their head and shoulders.
+  if (extra & HOOD && !soldier && !crown) {
+    ctx.beginPath();
+    ctx.moveTo(-0.17 * H, -0.66 * H);
+    ctx.quadraticCurveTo(-0.2 * H, -1.02 * H, 0, -1.03 * H);
+    ctx.quadraticCurveTo(0.2 * H, -1.02 * H, 0.17 * H, -0.66 * H);
+    ctx.lineTo(0.09 * H, -0.7 * H);
+    ctx.quadraticCurveTo(0.1 * H, -0.95 * H, 0, -0.95 * H);
+    ctx.quadraticCurveTo(-0.1 * H, -0.95 * H, -0.09 * H, -0.7 * H);
+    ctx.closePath();
+    ctx.fillStyle = '#3d3a36';
+    ctx.fill();
+    ctx.strokeStyle = NAVY;
+    ctx.lineWidth = lw;
+    ctx.stroke();
+  }
   // Soldiers wear a helmet: an iron cap, or a steel helm with plate.
   if (soldier && !crown) {
     ctx.beginPath();
@@ -524,8 +545,9 @@ export function drawPeople(
   selected: ReadonlySet<number>,
   buildings: readonly BuildingView[] = [],
   selectedSettlement: number | null = null,
+  selectedCreature: number | null = null,
 ) {
-  const n = client.population + buildings.length;
+  const n = client.population + buildings.length + Math.ceil((client.latest?.creatures?.length ?? 0) / 5);
   if (!n) return;
   if (buf.length < n * 7) {
     buf = new Float32Array(n * 7 + 600);
@@ -590,13 +612,32 @@ export function drawPeople(
     order[count] = count;
     count++;
   }
+  // Animals: marked with look = -2, their kind in the id slot and their ID in the gear slot.
+  client.forEachCreature(now, (id, x, y, kind, flags) => {
+    const tx = Math.min(size - 1, Math.max(0, Math.floor(x)));
+    const ty = Math.min(size - 1, Math.max(0, Math.floor(y)));
+    const h = kind === 6 ? 0 : elevation[ty * size + tx];
+    const [sx, sy] = view.toScreen(isoX(x, y), isoY(x, y, h));
+    if (sx < -120 || sy < -160 || sx > W + 120 || sy > Hs + 80 || count >= order.length) return;
+    const o = count * 7;
+    buf[o] = sx;
+    buf[o + 1] = sy;
+    // A flying dragon is drawn over everything.
+    buf[o + 2] = kind === 6 ? 1e9 : x + y;
+    buf[o + 3] = -2;
+    buf[o + 4] = flags;
+    buf[o + 5] = kind;
+    buf[o + 6] = id;
+    order[count] = count;
+    count++;
+  });
   const idx = Array.from(order.subarray(0, count)).sort((a, b) => buf[a * 7 + 2] - buf[b * 7 + 2]);
 
   const dpr = view.dpr;
   // Flat buildings (fields) lie on the ground: drawn first, under everyone.
   for (const k of idx) {
     const o = k * 7;
-    if (buf[o + 3] >= 0) continue;
+    if (buf[o + 3] !== -1) continue;
     const b = buildings[buf[o + 5]];
     if (BUILDINGS[b.kind].flat) drawBuilding(ctx, b, buf[o], buf[o + 1], z, dpr, now, 0, STEP);
   }
@@ -611,6 +652,35 @@ export function drawPeople(
     const flags = buf[o + 4];
     const id = buf[o + 5];
     const gear = buf[o + 6];
+    if (look === -2) {
+      // An animal (id slot: its kind; gear slot: its ID).
+      const tame = (flags & 4) !== 0;
+      if (gear === selectedCreature && selectedCreature !== null) drawSelection(ctx, sx, sy, z);
+      if (figurePx < MIN_FIGURE_PX && id !== 6) {
+        const r = Math.max(1, 0.05 * z);
+        ctx.beginPath();
+        ctx.arc(sx, sy - r, r, 0, Math.PI * 2);
+        ctx.fillStyle = creatureColor(id, tame);
+        ctx.fill();
+        ctx.lineWidth = Math.max(0.6, r * 0.4);
+        ctx.strokeStyle = NAVY;
+        ctx.stroke();
+        continue;
+      }
+      const frame = flags & 1 ? Math.floor(t / (id === 6 ? 2 : 1) + gear) % 4 : 0;
+      const sp = creatureSprite(id, frame, Math.max(6, Math.min(figurePx, 90)), (flags & 8) !== 0, tame);
+      const scale = figurePx > 90 ? figurePx / 90 : 1;
+      const dw = (sp.canvas.width * scale) / dpr;
+      const dh = (sp.canvas.height * scale) / dpr;
+      if (flags & 2) {
+        ctx.save();
+        ctx.translate(sx, 0);
+        ctx.scale(-1, 1);
+        ctx.drawImage(sp.canvas, -(sp.ax * scale) / dpr, sy - (sp.ay * scale) / dpr, dw, dh);
+        ctx.restore();
+      } else ctx.drawImage(sp.canvas, sx - (sp.ax * scale) / dpr, sy - (sp.ay * scale) / dpr, dw, dh);
+      continue;
+    }
     if (look < 0) {
       const b = buildings[id];
       if (BUILDINGS[b.kind].flat) continue;
@@ -635,7 +705,8 @@ export function drawPeople(
     const pose = (flags >> 3) & 3;
     const fight = (flags & 2048) !== 0;
     const frame = flags & 1 ? (t + id) % 4 : pose === Pose.Work ? Math.floor((t + id) / (fight ? 3 : 2)) % 2 : 0;
-    const sp = sprite(look, (flags & 4) !== 0, pose, frame, Math.max(6, Math.min(px, 90)), ageLook === AgeLook.Elder, (flags & 256) !== 0, (flags & 512) !== 0, gear, (flags & 1024) !== 0, fight);
+    const extra = (flags & 8192 ? HOOD : 0) | (flags & 4096 ? SICK : 0);
+    const sp = sprite(look, (flags & 4) !== 0, pose, frame, Math.max(6, Math.min(px, 90)), ageLook === AgeLook.Elder, (flags & 256) !== 0, (flags & 512) !== 0, gear, (flags & 1024) !== 0, fight, extra);
     const scale = px > 90 ? px / 90 : 1;
     const dw = (sp.canvas.width * scale) / dpr;
     const dh = (sp.canvas.height * scale) / dpr;
@@ -652,7 +723,7 @@ export function drawPeople(
 }
 
 /** How long blows and the fallen are drawn (ms): a swing's flash, an arrow, a bolt, a stone; a body lying. */
-const SHOT_MS = [220, 380, 300, 650];
+const SHOT_MS = [220, 380, 300, 650, 700];
 const FALL_MS = 6000;
 
 /** The fallen lie where they fell, fading (drawn on the ground, under everyone). */
@@ -713,6 +784,20 @@ function drawShots(ctx: CanvasRenderingContext2D, view: IsoView, client: SimClie
       ctx.lineWidth = Math.max(0.8, z * 0.02);
       ctx.strokeStyle = NAVY;
       ctx.stroke();
+      ctx.globalAlpha = 1;
+      continue;
+    }
+    if (s.kind === 4) {
+      // A dragon's fire: a burst of flame below it, spreading and fading.
+      const [cx, cy] = at(s.x0, s.y0, 0);
+      const r = Math.max(4, z * 0.7) * (0.4 + t);
+      ctx.globalAlpha = 0.85 * (1 - t);
+      for (const [color, k] of [['#e8562a', 1], ['#f5c542', 0.55]] as const) {
+        ctx.beginPath();
+        ctx.ellipse(cx, cy, r * k, r * k * 0.5, 0, 0, Math.PI * 2);
+        ctx.fillStyle = color;
+        ctx.fill();
+      }
       ctx.globalAlpha = 1;
       continue;
     }
@@ -788,3 +873,26 @@ export function pickPerson(view: IsoView, client: SimClient, sx: number, sy: num
   return best ?? nearest;
 }
 
+
+/** The animal under a screen point (or nearest within a few pixels), or null. */
+export function pickCreature(view: IsoView, client: SimClient, sx: number, sy: number, now: number): number | null {
+  const { size, elevation } = view.src;
+  const z = view.cam.zoom;
+  const H = Math.max(10, HEIGHT * z);
+  let best: number | null = null;
+  let bestD = Infinity;
+  client.forEachCreature(now, (id, x, y, kind) => {
+    const tx = Math.min(size - 1, Math.max(0, Math.floor(x)));
+    const ty = Math.min(size - 1, Math.max(0, Math.floor(y)));
+    const [px, py] = view.toScreen(isoX(x, y), isoY(x, y, kind === 6 ? 0 : elevation[ty * size + tx]));
+    // A dragon flies high over its shadow; others stand about half a person tall.
+    const cy = kind === 6 ? py - H * 2.2 : py - H * 0.3;
+    const reach = kind === 6 ? H * 1.6 : Math.max(8, H * 0.5);
+    const d = Math.hypot(sx - px, sy - cy);
+    if (d < reach && d < bestD) {
+      bestD = d;
+      best = id;
+    }
+  });
+  return best;
+}

@@ -1,5 +1,6 @@
 import { TICKS_PER_SECOND, type FromSim, type Speed, type ToSim } from './types';
 import { World } from './world';
+import { BuildingKind } from './buildings';
 
 // The simulation runs here, in its own thread, so drawing the map stays smooth however
 // busy the world is. The app sends it commands and gets back a snapshot of where
@@ -17,6 +18,7 @@ let owed = 0;
 let watching: number | null = null;
 let watchingSettlement: number | null = null;
 let watchingBuilding: number | null = null;
+let watchingCreature: number | null = null;
 let stepTime = 0;
 let stepCount = 0;
 let stepMs = 0;
@@ -30,7 +32,8 @@ function post(msg: FromSim, transfer: Transferable[] = []) {
 function sendSnapshot() {
   if (!world) return;
   const s = world.snapshot(stepMs);
-  post({ type: 'snap', ...s }, [s.ids.buffer, s.pos.buffer, s.look.buffer, s.flags.buffer, s.gear.buffer, s.shots.buffer, s.falls.buffer, s.tileChanges.buffer]);
+  post({ type: 'snap', ...s }, [s.ids.buffer, s.pos.buffer, s.look.buffer, s.flags.buffer, s.gear.buffer, s.shots.buffer, s.falls.buffer, s.tileChanges.buffer, s.creatures.buffer]);
+  if (watchingCreature !== null) post({ type: 'watchedCreature', creature: world.creatures.details(watchingCreature) });
   if (watchingSettlement !== null) post({ type: 'watchedSettlement', settlement: world.towns.details(watchingSettlement) });
   if (watchingBuilding !== null) post({ type: 'watchedBuilding', building: world.towns.buildingDetails(watchingBuilding) });
   if (watching !== null) {
@@ -91,7 +94,29 @@ ctx.onmessage = (e: MessageEvent<ToSim>) => {
         sendSoon = true;
         break;
       case 'placeBuilding':
-        world?.towns.place(m.kind, m.tile, m.rot);
+        // A bandit camp comes with its band (Stage 6).
+        if (m.kind === BuildingKind.BanditCamp) world?.crime.placeCamp(m.tile);
+        else world?.towns.place(m.kind, m.tile, m.rot);
+        sendSoon = true;
+        break;
+      case 'disaster':
+        world?.disasters.trigger(m.kind, m.tile);
+        sendSoon = true;
+        break;
+      case 'effect':
+        world?.disasters.effect(m.kind, m.tiles);
+        sendSoon = true;
+        break;
+      case 'placeCreatures':
+        world?.creatures.place(m.tiles, m.kind);
+        sendSoon = true;
+        break;
+      case 'placeCriminals':
+        world?.crime.place(m.tiles);
+        sendSoon = true;
+        break;
+      case 'watchCreature':
+        watchingCreature = m.id;
         sendSoon = true;
         break;
       case 'removeBuildings':

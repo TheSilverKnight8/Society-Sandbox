@@ -31,7 +31,7 @@ export const GOOD_NAME: Record<Good, string> = {
 export const BASE_PRICE: Record<Good, number> = { food: 2, wood: 1, stone: 1, iron: 3, gold: 6, tools: 10, pottery: 5, clay: 1, spear: 6, sword: 12, bow: 6, crossbow: 14, mail: 16, plate: 30, horse: 20, engine: 40 };
 
 /** The jobs a tradesman can hold (SPEC 6: "generic tradesman (works at various buildings)"). */
-export type JobKind = 'farmer' | 'woodcutter' | 'quarryman' | 'miner' | 'fisher' | 'trader' | 'smith' | 'potter' | 'minter' | 'official' | 'scholar' | 'soldier' | 'armorer' | 'groom';
+export type JobKind = 'farmer' | 'woodcutter' | 'quarryman' | 'miner' | 'fisher' | 'trader' | 'smith' | 'potter' | 'minter' | 'official' | 'scholar' | 'soldier' | 'armorer' | 'groom' | 'hunter' | 'herder';
 export const JOB_NAME: Record<JobKind, string> = {
   farmer: 'Farmer',
   woodcutter: 'Woodcutter',
@@ -47,9 +47,11 @@ export const JOB_NAME: Record<JobKind, string> = {
   soldier: 'Soldier',
   armorer: 'Armorer',
   groom: 'Groom',
+  hunter: 'Hunter',
+  herder: 'Herder',
 };
 /** Children's light jobs (SPEC 6: "children ... can hold light jobs"). */
-export const LIGHT_JOB_NAME: Partial<Record<JobKind, string>> = { farmer: 'Farm helper', fisher: "Fisher's helper" };
+export const LIGHT_JOB_NAME: Partial<Record<JobKind, string>> = { farmer: 'Farm helper', fisher: "Fisher's helper", herder: "Herder's helper" };
 
 export const BuildingKind = {
   Campfire: 0,
@@ -74,6 +76,9 @@ export const BuildingKind = {
   Stable: 19,
   Dock: 20,
   Castle: 21,
+  HuntingLodge: 22,
+  Pasture: 23,
+  BanditCamp: 24,
 } as const;
 export type BuildingKind = (typeof BuildingKind)[keyof typeof BuildingKind];
 
@@ -129,12 +134,15 @@ export const BUILDINGS: BuildingDef[] = [
   { kind: BuildingKind.Stable, name: 'Stable', wood: 14, stone: 4, work: 240, homes: 0, stage: 'village', buildable: true, w: 3, d: 2, jobs: 2, lightJobs: 0, job: 'groom' },
   { kind: BuildingKind.Dock, name: 'Dock', wood: 16, stone: 0, work: 220, homes: 0, stage: 'village', buildable: true, w: 2, d: 2, jobs: 0, lightJobs: 0 },
   { kind: BuildingKind.Castle, name: 'Castle', wood: 40, stone: 80, tools: 4, work: 1200, homes: 0, stage: 'city', buildable: true, w: 5, d: 5, jobs: 0, lightJobs: 0 },
+  { kind: BuildingKind.HuntingLodge, name: "Hunter's lodge", wood: 8, stone: 0, work: 160, homes: 0, stage: 'village', buildable: true, w: 2, d: 2, jobs: 2, lightJobs: 0, job: 'hunter' },
+  { kind: BuildingKind.Pasture, name: 'Pasture', wood: 8, stone: 0, work: 140, homes: 0, stage: 'village', buildable: true, w: 3, d: 3, jobs: 2, lightJobs: 1, job: 'herder', flat: true },
+  { kind: BuildingKind.BanditCamp, name: 'Bandit camp', wood: 0, stone: 0, work: 0, homes: 0, stage: 'camp', buildable: false, w: 2, d: 2, jobs: 0, lightJobs: 0 },
 ];
 
 /** Whether a building of this kind may stand on a tile of this terrain (fields need fertile ground). `cleared`: a forest tile with no trees left. */
 export function kindAllowsTerrain(kind: BuildingKind, terrain: number, cleared: boolean) {
   // Terrain numbers: see map/terrain.ts (2 sand, 3 grassland, 4 forest, 5 hills, 8 desert).
-  if (kind === BuildingKind.Farm) return terrain === 3 || terrain === 5 || (terrain === 4 && cleared);
+  if (kind === BuildingKind.Farm || kind === BuildingKind.Pasture) return terrain === 3 || terrain === 5 || (terrain === 4 && cleared);
   return terrain === 3 || terrain === 2 || terrain === 8 || terrain === 5 || terrain === 4;
 }
 

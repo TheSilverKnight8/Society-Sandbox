@@ -32,8 +32,12 @@ import type { WorldDoc } from './types';
 //  15  Settlements' yearly head counts (whether they are still growing) and the most people they
 //      have had (coins for newcomers). (New fields only. An older run's villages and towns are
 //      given coins for all their people the first month, since their coins had not kept pace.)
+//  16  Stage 6: weather fronts and droughts, floods, locusts and forest fires, animals (wild and
+//      tame), the record of events, people's sickness, criminals and their camps and raids,
+//      fires being put out; the events, criminals and record rules. (Runs from before get the
+//      animals the land holds when they open; the new rules start on.)
 
-export const WORLD_FORMAT_VERSION = 15;
+export const WORLD_FORMAT_VERSION = 16;
 
 export function upgradeWorld(version: number, doc: WorldDoc): WorldDoc {
   if (version > WORLD_FORMAT_VERSION) throw new Error('This was saved by a newer version of the app. Reload the app to update it, then try again.');
@@ -88,6 +92,10 @@ export function upgradeWorld(version: number, doc: WorldDoc): WorldDoc {
   if (version < 13) {
     // No armies yet; the new rule (war) starts on. Stores without arms get none (the simulation fills missing goods with 0).
     doc = { ...doc, state: { ...doc.state, toggles: { ...DEFAULT_TOGGLES, ...doc.state.toggles }, armies: doc.state.armies ?? [], nextArmyId: doc.state.nextArmyId ?? 1 } };
+  }
+  if (version < 16) {
+    // The new rules (events, criminals, record) start on. Weather, animals and the record start when the run opens.
+    doc = { ...doc, state: { ...doc.state, toggles: { ...DEFAULT_TOGGLES, ...doc.state.toggles } } };
   }
   return doc;
 }

@@ -6,7 +6,7 @@
 
 It is an installable web app (PWA) for Chrome on a computer, hosted on GitHub Pages. Everything runs in the browser. Maps are saved in the browser on your computer and nowhere else.
 
-## What is in it (Stages 1 to 5)
+## What is in it (Stages 1 to 6)
 
 | Area | What it does |
 | --- | --- |
@@ -25,11 +25,16 @@ It is an installable web app (PWA) for Chrome on a computer, hosted on GitHub Pa
 | Technology | Cultures research a tree of 17 medieval technologies, faster with scholars at a scriptorium or university; some need goods from the store. The market, smithy, mint, townhouse, hall and town fences need their technology first; others speed farming, building, workshops, trade and research, or allow policies. The sim picks what to research by a culture's traits; the culture panel or the Research order steers it. Nations take their main culture's technology and some of their other cultures'. |
 | Military and war | A nation's capital and towns keep barracks with a standing army, raised by levy or volunteers and paid each month; each army has a unique leader. Armories make spears, swords, bows, crossbows, mail, plate and catapults from iron ore and wood, and stables raise horses, as technology allows; soldiers fetch them from the store. Rival nations declare war; armies march on enemy settlements, break gates and fences, fight blow by blow (townspeople fight back on their own land), take settlements, carry off plunder and burn buildings. Worn-out sides make peace and pay tribute. Fights are animated: swords swing, spears thrust, arrows, bolts and catapult stones fly, and the fallen lie where they fell. The nation panel shows armies and wars; **Units: Soldier** places soldiers; **Imperatives: Attack** sends people to fight; a nation's relations can be set to War. **Rules** turns armies and war declarations off. |
 | Water | Water can't be walked or built on. Villages build bridges where the way to their neighbours or resources crosses a river or narrow water; settlements on a coast build a dock once their culture has researched Boatbuilding, and people on long journeys board boats there to cross wide water. |
+| Weather and seasons | Fronts of rain, snow, storm and fog drift over the map; rain falls as snow in winter. Bad weather slows walking and outdoor work; berries don't grow back in winter; droughts slow crops. People with no home are cold in winter (no healing, hurt by snow). Winter shows as a pale wash; the date shows the season. |
+| Disasters and effects | **Disasters & effects** sets going a fire, flood, earthquake (the view shakes), plague, locusts, drought, storm or a dragon, or puts rain, snow, fog or a clear sky over an area, or makes people sick or heals them. With **Rules: sim-triggered events** on, disasters also strike by themselves. Fire spreads between buildings and through forest; townspeople come to put it out. Sickness spreads from person to person. |
+| Animals | Deer, wild boar, wolves, bears, aurochs and wild sheep roam the land and breed back when hunted. Hunters from a hunter's lodge hunt game; herders at a pasture tame aurochs (cattle) and sheep, which breed, give food, and pull the plough. Wolves and bears hunt, and attack people when hungry or too close; townspeople and soldiers drive them off. Now and then a dragon flies out of the mountains and burns settlements until it flies home or is slain. **Units: Animal** places them; click one to see it. |
+| Criminals | People who fall on hard times may turn to crime and leave their settlement; bands of bandits set up camp in the wilds. Bands raid settlements nearby to steal coins and goods, or to kill, and are fought off by townspeople and soldiers. Criminals wear hoods. **Units: Criminal** and **Units: Bandit camp** place them; **Rules** turns crime off. |
+| Record | **Record** (Main tab) lists what has happened: settlements founded and grown, nations founded and fallen, rulers, wars, conquests and peace, cultures, disasters, crimes and beasts. Filter by kind; click an entry to go there. **Rules** turns writing it off. |
 | Life cycle | People age (children are drawn smaller, elders grey-haired) and can die of old age. Adults pair up, pairs have children, and children stay near their mother. Inspect shows the pair, parents and children. **Rules** (Main tab) turns pairing, births and aging off together, which freezes the population. |
 | Moving around | Wheel zooms toward the pointer. Right or middle drag moves the map; so do WASD and the arrow keys. **+** and **−** zoom; the corner button shows the whole map. |
 | Map files | The download button on a map saves it as one file (`<name>.map.json`). **Import map** adds a map from such a file. |
 
-Coming next (Stage 6): disasters, effects, beasts and criminals.
+Coming next (Stage 7, after Caleb tries Stage 6): a pass over every rule and imperative, tuning, and content Caleb asks for.
 
 ## Run it on your computer
 

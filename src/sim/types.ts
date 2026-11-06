@@ -13,10 +13,10 @@ export type Speed = 0 | 1 | 2 | 3;
 import type { BuildingKind, Good, JobKind, SettlementStage } from './buildings';
 
 /** What a person is doing right now. */
-export type Task = 'idle' | 'walk' | 'gather' | 'eat' | 'sleep' | 'chop' | 'quarry' | 'build' | 'farm' | 'harvest' | 'mine' | 'fish' | 'dig' | 'craft' | 'trade' | 'study' | 'fight' | 'drill' | 'collect';
+export type Task = 'idle' | 'walk' | 'gather' | 'eat' | 'sleep' | 'chop' | 'quarry' | 'build' | 'farm' | 'harvest' | 'mine' | 'fish' | 'dig' | 'craft' | 'trade' | 'study' | 'fight' | 'drill' | 'collect' | 'douse' | 'hunt' | 'herd';
 
 /** Why a person is walking. */
-export type Purpose = 'stroll' | 'food' | 'order' | 'home' | 'wood' | 'stone' | 'site' | 'settle' | 'job' | 'deliver' | 'fetch' | 'store' | 'trade' | 'tradeHome' | 'fence' | 'tax' | 'taxHome' | 'pave' | 'muster' | 'chase' | 'bridge' | 'collect';
+export type Purpose = 'stroll' | 'food' | 'order' | 'home' | 'wood' | 'stone' | 'site' | 'settle' | 'job' | 'deliver' | 'fetch' | 'store' | 'trade' | 'tradeHome' | 'fence' | 'tax' | 'taxHome' | 'pave' | 'muster' | 'chase' | 'bridge' | 'collect' | 'douse' | 'hunt' | 'herd' | 'raid' | 'camp';
 
 /** An imperative given to a unit by the player (SPEC 4). */
 export interface Order {
@@ -106,7 +106,7 @@ export interface Person {
   /** Their workplace (a building), if they have a job. */
   job?: number;
   /** What they are doing for their job, while walking to it. */
-  jobStep?: 'tend' | 'harvest' | 'collect' | 'gather' | 'fetch-wood' | 'fetch-stone' | 'fetch-tools' | 'fetch-input' | 'craft' | 'fetch-fence' | 'trade-load' | 'study' | 'fetch-pave' | 'fetch-gear' | 'drill' | 'fetch-bridge';
+  jobStep?: 'tend' | 'harvest' | 'collect' | 'gather' | 'fetch-wood' | 'fetch-stone' | 'fetch-tools' | 'fetch-input' | 'craft' | 'fetch-fence' | 'trade-load' | 'study' | 'fetch-pave' | 'fetch-gear' | 'drill' | 'fetch-bridge' | 'pasture' | 'tame';
   /** Their own coins (Caleb: coins; SPEC 6: wealth earned from jobs and trade). */
   coins?: number;
   /** Household goods they own (pottery). Wealth is coins plus what they own. */
@@ -157,6 +157,19 @@ export interface Person {
   making?: Good;
   /** A builder going to build this tile of bridge. */
   bridgeTile?: number;
+  /** Sick (Stage 6: plague and other sickness): steps left; immune to it again until this tick. */
+  sick?: number;
+  immune?: number;
+  /** A criminal (SPEC 6: lives outside settlements, enters to steal or kill), and their band's camp (a building). */
+  criminal?: boolean;
+  band?: number;
+  /** A criminal on a raid: the settlement, whether to kill (else to steal), whether it is done (heading back), and when they give up. */
+  raid?: { settlement: number; kill: boolean; done?: boolean; until: number };
+  /** A building on fire they are putting out. */
+  fireAt?: number;
+  /** A hunter's prey, or a herder's animal being led to the pasture (a creature's ID). */
+  prey?: number;
+  herding?: number;
 }
 
 export type Focus = 'balanced' | 'food' | 'housing' | 'goods';
@@ -237,7 +250,7 @@ export interface Culture {
 }
 
 /** Why someone is unique (SPEC 6). */
-export type UniqueWhy = 'ruler' | 'founder' | 'chosen' | 'influence' | 'revolt' | 'leader';
+export type UniqueWhy = 'ruler' | 'founder' | 'chosen' | 'influence' | 'revolt' | 'leader' | 'dragon';
 
 /** A nation's policies (SPEC 7: like WorldBox's culture traits; SPEC 11: the list is the builder's). */
 export interface Policies {
@@ -302,6 +315,8 @@ export interface Building {
   output?: number;
   /** Steps left while it burns (set alight by an enemy army; Caleb: destruction). */
   fire?: number;
+  /** Work done putting the fire out (Stage 6: townspeople fight fires). */
+  douse?: number;
 }
 
 /** Automatic behaviors the player can turn off (SPEC 10). More are added as their systems are built. */
@@ -324,9 +339,124 @@ export interface Toggles {
   research: boolean;
   /** Nations raising armies, and declaring war by themselves (SPEC 10). */
   war: boolean;
+  /** Disasters striking, and wars beginning, by themselves (SPEC 10: sim-triggered events). */
+  events: boolean;
+  /** Criminals appearing and entering settlements (SPEC 10). */
+  criminals: boolean;
+  /** The record of events being written (SPEC 10). */
+  record: boolean;
 }
 
-export const DEFAULT_TOGGLES: Toggles = { lifeCycle: true, founding: true, cultures: true, nations: true, diplomacy: true, policyChanges: true, uniques: true, research: true, war: true };
+export const DEFAULT_TOGGLES: Toggles = { lifeCycle: true, founding: true, cultures: true, nations: true, diplomacy: true, policyChanges: true, uniques: true, research: true, war: true, events: true, criminals: true, record: true };
+
+// ---------------------------------------------------------------- Stage 6: weather, disasters, creatures, the record
+
+/** Weather passing over the map (Caleb: real effects). */
+export type WeatherKind = 'rain' | 'snow' | 'storm' | 'fog';
+export interface Front {
+  id: number;
+  kind: WeatherKind;
+  /** Middle (tiles), radius (tiles), drift (tiles a step), and the tick it is gone. */
+  x: number;
+  y: number;
+  r: number;
+  vx: number;
+  vy: number;
+  until: number;
+}
+/** A region without rain for months (crops and berries grow slowly, fires spread). */
+export interface Drought {
+  x: number;
+  y: number;
+  r: number;
+  until: number;
+}
+/** Disasters (SPEC 3 and 10: they hit individuals, buildings and resources but never reshape the land). */
+export type DisasterKind = 'fire' | 'flood' | 'earthquake' | 'plague' | 'locusts' | 'drought' | 'storm' | 'dragon';
+/** Effects the player can set going (SPEC 4: effects are things like status effects and weather). */
+export type EffectKind = 'rain' | 'snow' | 'fog' | 'clear' | 'sicken' | 'heal';
+/** Water risen over low land beside a river or lake, for a while. */
+export interface Flood {
+  x: number;
+  y: number;
+  r: number;
+  until: number;
+  /** The flooded tiles. */
+  tiles: number[];
+}
+/** A swarm of locusts drifting over the land, eating crops and berries. */
+export interface Swarm {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  r: number;
+  until: number;
+}
+export interface WorldWeather {
+  fronts: Front[];
+  droughts: Drought[];
+  nextFrontId: number;
+}
+export interface WorldDisasters {
+  floods: Flood[];
+  swarms: Swarm[];
+  /** Forest tiles burning, and steps left (pairs: tile, steps). */
+  burning: number[];
+}
+
+/** Animals (SPEC 11: mobs and beasts; Caleb: hunted, tamed as livestock and work animals, or fought). */
+export type CreatureKind = 'deer' | 'boar' | 'wolf' | 'bear' | 'cattle' | 'sheep' | 'dragon';
+export interface Creature {
+  id: number;
+  kind: CreatureKind;
+  x: number;
+  y: number;
+  health: number;
+  born: number;
+  /** Tamed: the settlement it belongs to, and its pasture (a building). */
+  tame?: number;
+  pen?: number;
+  /** Where it is heading, and steps before it decides again. */
+  tx?: number;
+  ty?: number;
+  wait: number;
+  /** Steps left fleeing; someone it is attacking (a person's ID); an animal a predator is chasing (a creature's ID); a herder it follows (a person's ID). */
+  flee?: number;
+  foe?: number;
+  chase?: number;
+  follow?: number;
+  cooldown?: number;
+  /** A predator's hunger (0 to 100), and a dragon's lair (a tile) and the tick it leaves. */
+  hunger?: number;
+  lair?: number;
+  leaveAt?: number;
+}
+
+export const CREATURE_KINDS: CreatureKind[] = ['deer', 'boar', 'wolf', 'bear', 'cattle', 'sheep', 'dragon'];
+
+/** What the drawing needs of the weather. */
+export interface WeatherView {
+  /** 0 spring, 1 summer, 2 autumn, 3 winter. */
+  season: number;
+  fronts: { kind: WeatherKind; x: number; y: number; r: number }[];
+  droughts: { x: number; y: number; r: number }[];
+  /** Flooded tiles. */
+  flooded: number[];
+  swarms: { x: number; y: number; r: number }[];
+  /** Forest tiles on fire. */
+  burning: number[];
+}
+
+/** An entry in the record of events (SPEC 5: the sim leaves behind a record of events). */
+export type RecordKind = 'settlement' | 'nation' | 'war' | 'disaster' | 'culture' | 'crime' | 'creature';
+export interface RecordEntry {
+  tick: number;
+  kind: RecordKind;
+  text: string;
+  /** Where it happened, to look at it. */
+  tile?: number;
+}
 
 /** Life stages, for drawing and the inspect panel. */
 export const ADULT_AGE = 14;
@@ -363,6 +493,11 @@ export interface SimState {
   relations?: Relation[];
   armies?: Army[];
   nextArmyId?: number;
+  weather?: WorldWeather;
+  disasters?: WorldDisasters;
+  creatures?: Creature[];
+  nextCreatureId?: number;
+  record?: RecordEntry[];
 }
 
 /** What stands on a tile as a settlement's fence. Built fences cannot be walked through; gates can. */
@@ -592,6 +727,21 @@ export interface PersonDetails {
   soldier?: { kind: SoldierKind; weapon?: Weapon; armor?: Armor; horse: boolean; engine: boolean; army?: string; leads: boolean; kills: number };
   /** Enemies are near (SPEC 6: safety). */
   danger: boolean;
+  /** Status effects (Stage 6): sick, cold, wounded, hungry. */
+  status: string[];
+  /** A criminal, and their band's camp. */
+  criminal?: { band?: string; raiding: boolean };
+}
+
+/** What the info panel shows of an animal. */
+export interface CreatureDetails {
+  id: number;
+  kind: CreatureKind;
+  health: number;
+  ageYears: number;
+  /** The settlement it belongs to, if tame. */
+  tame?: string;
+  doing: string;
 }
 
 /** Changes the player can make to a person by hand (SPEC 1: everything can be modified). */
@@ -636,6 +786,14 @@ export type ToSim =
   | { type: 'nationOrder'; id: number; order: NationOrder }
   /** Places soldiers, armed (SPEC 4: placing units), of the nation whose land it is. */
   | { type: 'placeSoldiers'; tiles: number[]; kind: SoldierKind }
+  /** Sets a disaster going at a tile, or an effect over some tiles (SPEC 4: disasters and effects). */
+  | { type: 'disaster'; kind: DisasterKind; tile: number }
+  | { type: 'effect'; kind: EffectKind; tiles: number[] }
+  /** Places animals, or criminals (SPEC 4: placing units). */
+  | { type: 'placeCreatures'; tiles: number[]; kind: CreatureKind }
+  | { type: 'placeCriminals'; tiles: number[] }
+  /** Follows an animal for its info panel. */
+  | { type: 'watchCreature'; id: number | null }
   | { type: 'unpair'; id: number }
   | { type: 'save'; req: number }
   /** Development only: adds n people on land near (x, y), for speed tests. */
@@ -673,7 +831,7 @@ export interface Snapshot {
   flags: Uint16Array;
   /** Soldiers' arms, per person (see GEAR in render/people.ts): bits 0-2 weapon, 3-4 armor, 5 horse, 6 catapult, 7 leader, 8-12 nation color + 1. */
   gear: Uint16Array;
-  /** Blows struck since the last snapshot, five numbers each: from x, from y, to x, to y, kind (0 a swing, 1 an arrow, 2 a bolt, 3 a catapult stone). */
+  /** Blows struck since the last snapshot, five numbers each: from x, from y, to x, to y, kind (0 a swing, 1 an arrow, 2 a bolt, 3 a catapult stone, 4 a dragon's fire). */
   shots: Float32Array;
   /** People fallen in battle since the last snapshot, five numbers each: x, y, look, gear, sex. */
   falls: Float32Array;
@@ -687,6 +845,14 @@ export interface Snapshot {
   cultures?: CultureView[];
   /** The nations, when they changed. */
   nations?: NationView[];
+  /** Animals, five numbers each: ID, x, y, kind (index in CREATURE_KINDS), flags (bit 0 moving, bit 1 facing left, bit 2 tame, bit 3 young, bit 4 fighting). */
+  creatures: Float32Array;
+  /** The weather, when it changed (every few steps). */
+  weather?: WeatherView;
+  /** Entries added to the record since the last snapshot. */
+  record?: RecordEntry[];
+  /** An earthquake struck since the last snapshot (shakes the view): its middle tile. */
+  quake?: number;
   /** Average milliseconds per simulation step over the last second. */
   stepMs: number;
 }
@@ -696,5 +862,6 @@ export type FromSim =
   | { type: 'watched'; person: PersonDetails | null; died?: string }
   | { type: 'watchedSettlement'; settlement: SettlementDetails | null }
   | { type: 'watchedBuilding'; building: BuildingDetails | null }
+  | { type: 'watchedCreature'; creature: CreatureDetails | null }
   | { type: 'saved'; req: number; state: SimState; deposit: Uint8Array }
   | { type: 'error'; message: string };

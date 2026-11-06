@@ -90,6 +90,7 @@ const SHAPES: Partial<Record<BuildingKind, Shape>> = {
   [BuildingKind.Barracks]: { wall: 0.62, roof: 0.5, inset: 0.16, roofKind: 'gable', wallColor: C.stone, roofColor: C.slate, roofShade: C.slateDark, roofLine: C.slateDark },
   [BuildingKind.Armory]: { wall: 0.52, roof: 0.42, inset: 0.22, roofKind: 'gable', wallColor: C.stone, roofColor: C.shingle, roofShade: C.shingleDark, roofLine: C.shingleDark },
   [BuildingKind.Stable]: { wall: 0.46, roof: 0.5, inset: 0.18, roofKind: 'gable', wallColor: C.plank, roofColor: C.thatch, roofShade: C.thatchDark, roofLine: C.thatchLine },
+  [BuildingKind.HuntingLodge]: { wall: 0.4, roof: 0.46, inset: 0.26, roofKind: 'gable', wallColor: C.logWall, roofColor: C.thatch, roofShade: C.thatchDark, roofLine: C.thatchLine },
 };
 
 type P = [number, number];
@@ -390,6 +391,29 @@ function chimney(ctx: CanvasRenderingContext2D, base: P, rh: number) {
 function drawProps(ctx: CanvasRenderingContext2D, kind: BuildingKind, w: number, d: number, banner?: string) {
   const a = w / 2;
   const b = d / 2;
+  if (kind === BuildingKind.HuntingLodge) {
+    // Antlers over the door, and a hide stretched on a frame beside it.
+    const top = pt(0, b - 0.26, 0.44);
+    ctx.beginPath();
+    ctx.moveTo(top[0] - 0.02, top[1]);
+    ctx.lineTo(top[0] - 0.12, top[1] - 0.12);
+    ctx.moveTo(top[0] - 0.08, top[1] - 0.07);
+    ctx.lineTo(top[0] - 0.14, top[1] - 0.05);
+    ctx.moveTo(top[0] + 0.02, top[1]);
+    ctx.lineTo(top[0] + 0.12, top[1] - 0.12);
+    ctx.moveTo(top[0] + 0.08, top[1] - 0.07);
+    ctx.lineTo(top[0] + 0.14, top[1] - 0.05);
+    ctx.strokeStyle = '#e9dfc8';
+    ctx.lineWidth *= 1.6;
+    ctx.stroke();
+    ctx.lineWidth /= 1.6;
+    ctx.strokeStyle = NAVY;
+    const f = pt(a - 0.12, b + 0.02);
+    beam(ctx, [f[0] - 0.3, f[1]], [f[0] - 0.3, f[1] - 0.34], C.timber, 1);
+    beam(ctx, [f[0] - 0.08, f[1] + 0.06], [f[0] - 0.08, f[1] - 0.28], C.timber, 1);
+    poly(ctx, [[f[0] - 0.28, f[1] - 0.3], [f[0] - 0.1, f[1] - 0.25], [f[0] - 0.12, f[1] - 0.04], [f[0] - 0.27, f[1] - 0.09]], '#b58a5c');
+    return;
+  }
   if (kind === BuildingKind.Scriptorium || kind === BuildingKind.University) {
     // A sign by the door with an open book.
     const s0 = onLeft(a - (kind === BuildingKind.University ? 0.16 : 0.18), b - 0.18, 0.2, 0.46);
@@ -896,6 +920,73 @@ function drawFarm(ctx: CanvasRenderingContext2D, w: number, d: number, look: num
   }
 }
 
+/** A pasture: grass inside a rail fence, with a water trough. */
+function drawPasture(ctx: CanvasRenderingContext2D, w: number, d: number, progress: number) {
+  const a = w / 2 - 0.08;
+  const b = d / 2 - 0.08;
+  poly(ctx, [pt(-a, b), pt(a, b), pt(a, -b), pt(-a, -b)], '#8fbf5a');
+  // Tufts of grass.
+  ctx.beginPath();
+  for (let k = 0; k < 14; k++) {
+    const u = -a + 0.2 + ((k * 0.37) % 1) * (2 * a - 0.4);
+    const v = -b + 0.2 + ((k * 0.61) % 1) * (2 * b - 0.4);
+    const p = pt(u, v);
+    ctx.moveTo(p[0] - 0.03, p[1]);
+    ctx.lineTo(p[0], p[1] - 0.05);
+    ctx.lineTo(p[0] + 0.03, p[1]);
+  }
+  ctx.strokeStyle = '#5f9f47';
+  ctx.stroke();
+  ctx.strokeStyle = NAVY;
+  // A trough near one corner.
+  const t0 = pt(a - 0.5, -b + 0.35);
+  poly(ctx, [[t0[0] - 0.14, t0[1]], [t0[0] + 0.14, t0[1] - 0.07], [t0[0] + 0.14, t0[1] - 0.01], [t0[0] - 0.14, t0[1] + 0.06]], C.plank);
+  // The fence, as far as the work has gone: posts and two rails.
+  const H = 0.16;
+  const corners: [number, number][] = [
+    [-a, -b],
+    [a, -b],
+    [a, b],
+    [-a, b],
+  ];
+  const sides = Math.max(1, Math.round(progress * 4 + 0.49));
+  for (let k = 0; k < sides; k++) {
+    const [u0, v0] = corners[k];
+    const [u1, v1] = corners[(k + 1) % 4];
+    beam(ctx, pt(u0, v0, H * 0.45), pt(u1, v1, H * 0.45), C.fence, 1.2);
+    beam(ctx, pt(u0, v0, H * 0.85), pt(u1, v1, H * 0.85), C.fence, 1.2);
+    const n = Math.max(2, Math.round(Math.hypot(u1 - u0, v1 - v0) / 0.7));
+    for (let j = 0; j <= n; j++) {
+      const u = u0 + ((u1 - u0) * j) / n;
+      const v = v0 + ((v1 - v0) * j) / n;
+      beam(ctx, pt(u, v), pt(u, v, H), C.timber, 1.4);
+    }
+  }
+}
+
+/** A bandit camp: two patched tents and a fire between them. */
+function drawBanditCamp(ctx: CanvasRenderingContext2D, w: number, d: number, frame: number) {
+  const tent = (u: number, v: number, color: string, dark: string) => {
+    const L = pt(u - 0.32, v + 0.3);
+    const R = pt(u + 0.32, v - 0.3);
+    const B = pt(u - 0.32, v - 0.3);
+    const top = pt(u, v, 0.55);
+    const topB = pt(u - 0.3, v - 0.02, 0.55);
+    poly(ctx, [B, topB, top, R], dark);
+    poly(ctx, [L, top, R], color);
+    poly(ctx, [B, topB, top, L], color);
+    // The opening.
+    const m = pt(u, v + 0.0);
+    poly(ctx, [[m[0] - 0.05, m[1] + 0.02], [top[0], top[1] + 0.22], [m[0] + 0.06, m[1] - 0.01]], '#3d3a36');
+  };
+  tent(-w / 2 + 0.55, -d / 2 + 0.6, '#8a7a5a', '#6d5f44');
+  ctx.save();
+  ctx.translate(...pt(0.35, 0.35));
+  drawCampfire(ctx, frame);
+  ctx.restore();
+  tent(w / 2 - 0.5, -d / 2 + 0.55, '#7a6a52', '#5e5240');
+}
+
 function drawCampfire(ctx: CanvasRenderingContext2D, frame: number) {
   // Stones in a ring.
   for (let k = 0; k < 8; k++) {
@@ -986,6 +1077,8 @@ function sprite(b: BuildingView, step: number, frame: number, px: number, plinth
   ctx.lineWidth = Math.max(1, px * 0.03) / px;
   ctx.strokeStyle = NAVY;
   if (b.kind === BuildingKind.Farm) drawFarm(ctx, w, d, b.look, step / 10);
+  else if (b.kind === BuildingKind.Pasture) drawPasture(ctx, w, d, step / 10);
+  else if (b.kind === BuildingKind.BanditCamp) drawBanditCamp(ctx, w, d, frame);
   else if (b.kind === BuildingKind.Market) {
     drawMarket(ctx, w, d, step / 10);
     if (step < 10) drawPiles(ctx, w, d);
@@ -1038,7 +1131,7 @@ export function drawBuilding(ctx: CanvasRenderingContext2D, b: BuildingView, sx:
   const want = z * dpr;
   const px = Math.max(8, Math.min(220, Math.round(Math.pow(1.18, Math.round(Math.log(Math.max(8, want)) / Math.log(1.18))))));
   const prog = b.progress >= 1 ? 10 : Math.min(9, Math.floor(b.progress * 10));
-  const frame = b.kind === BuildingKind.Campfire ? Math.floor(now / 260 + b.id) % 2 : 0;
+  const frame = b.kind === BuildingKind.Campfire || b.kind === BuildingKind.BanditCamp ? Math.floor(now / 260 + b.id) % 2 : 0;
   const sp = sprite(b, prog, frame, px, plinthLevels * step);
   const scale = want / px;
   ctx.drawImage(sp.canvas, sx - (sp.ax * scale) / dpr, sy - (sp.ay * scale) / dpr, (sp.canvas.width * scale) / dpr, (sp.canvas.height * scale) / dpr);

@@ -79,8 +79,9 @@ export class Military {
   byId = new Map<number, Army>();
   /** People who might fight now (soldiers, and grown-ups in settlements at war), by cell, rebuilt every few steps. */
   private grid = new Map<number, Person[]>();
-  /** Whether any war is on (nothing here runs otherwise). */
+  /** Whether any war is on, and whether any fight could happen (a war, or bandits raiding): nothing here runs otherwise. */
   private atWar = false;
+  private active = false;
   /** Settlements with enemy soldiers on their land. */
   underAttack = new Set<number>();
   /** Fences and gates that have been struck: how much they have left. */
@@ -119,6 +120,8 @@ export class Military {
   }
 
   hostile(p: Person, q: Person) {
+    // Bandits on a raid, and soldiers against any bandit (Stage 6: criminals).
+    if (p.criminal || q.criminal) return this.w.crime.outlaws(p, q);
     return this.atWarWith(this.nationOf(p), this.nationOf(q));
   }
 
@@ -164,19 +167,31 @@ export class Military {
     }
     if (tick % 5 === 0) {
       this.atWar = this.nations.relations.some((r) => r.kind === 'war');
+      const raiders = w.crime.raiders;
+      this.active = this.atWar || raiders.length > 0;
       this.grid.clear();
       this.underAttack.clear();
-      if (this.atWar) {
+      if (this.active) {
         const warring = new Set<number>();
         for (const r of this.nations.relations) if (r.kind === 'war') warring.add(r.a).add(r.b);
+        // Settlements with bandits on their land.
+        const raided = new Set<number>();
+        for (const r of raiders) {
+          const own = w.towns.territory[w.tileOf(r)];
+          if (own) raided.add(own);
+        }
+        for (const s of raided) this.underAttack.add(s);
         for (const p of w.state.people) {
+          if (w.ageOf(p) < ADULT_AGE) continue;
           const n = this.nationOf(p);
-          if (n === undefined || !warring.has(n) || w.ageOf(p) < ADULT_AGE) continue;
+          const inWar = n !== undefined && warring.has(n);
+          const inRaid = raiders.length > 0 && (p.criminal ? !!p.raid : !!p.soldier || (p.settlement !== undefined && raided.has(p.settlement)));
+          if (!inWar && !inRaid) continue;
           const cell = this.cell(p.x, p.y);
           const list = this.grid.get(cell);
           if (list) list.push(p);
           else this.grid.set(cell, [p]);
-          if (p.soldier) {
+          if (p.soldier && inWar) {
             const own = w.towns.territory[w.tileOf(p)];
             const s = own ? w.towns.byId(own) : undefined;
             if (s && this.atWarWith(n, s.nation)) this.underAttack.add(s.id);
@@ -209,8 +224,8 @@ export class Military {
       for (let gx = cx - r; gx <= cx + r; gx++) {
         for (const q of this.grid.get(gy * 1024 + gx) ?? []) {
           if (q === p || !this.w.byId.has(q.id) || q.indoors || !this.hostile(p, q)) continue;
-          // Soldiers do not chase townspeople who are not fighting.
-          if (!q.soldier && q.task !== 'fight') continue;
+          // Soldiers do not chase townspeople who are not fighting (bandits on a raid are fair game).
+          if (!q.soldier && q.task !== 'fight' && !(q.criminal && q.raid)) continue;
           const d = (q.x - p.x) ** 2 + (q.y - p.y) ** 2;
           if (d < bestD) {
             bestD = d;
@@ -224,12 +239,12 @@ export class Military {
 
   /** Whether enemies are near someone (SPEC 6: their safety need). */
   danger(p: Person): boolean {
-    if (!this.atWar) return false;
+    if (!this.active) return false;
     const cx = Math.floor(p.x / 8);
     const cy = Math.floor(p.y / 8);
     for (let gy = cy - 2; gy <= cy + 2; gy++) {
       for (let gx = cx - 2; gx <= cx + 2; gx++) {
-        for (const q of this.grid.get(gy * 1024 + gx) ?? []) if (q.soldier && this.hostile(p, q) && (q.x - p.x) ** 2 + (q.y - p.y) ** 2 < 100) return true;
+        for (const q of this.grid.get(gy * 1024 + gx) ?? []) if ((q.soldier || (q.criminal && q.raid)) && this.hostile(p, q) && (q.x - p.x) ** 2 + (q.y - p.y) ** 2 < 100) return true;
       }
     }
     return false;
@@ -244,12 +259,12 @@ export class Military {
     const w = this.w;
     if (p.cooldown) p.cooldown--;
     if (p.siegeTile !== undefined) return this.siege(p);
-    if (!this.atWar) {
+    if (!this.active) {
       if (p.task === 'fight') this.stand(p);
       return false;
     }
-    // Someone the player ordered to attack fights like a soldier on the way (SPEC 4).
-    const soldier = !!p.soldier || p.order?.kind === 'attack';
+    // Someone the player ordered to attack fights like a soldier on the way (SPEC 4); so do bandits on a raid.
+    const soldier = !!p.soldier || p.order?.kind === 'attack' || (!!p.criminal && !!p.raid);
     if (!soldier) {
       // Townspeople only fight on their own land, when enemy soldiers are there.
       if (p.settlement === undefined || !this.underAttack.has(p.settlement) || w.ageOf(p) < ADULT_AGE || w.ageOf(p) >= 60 || p.task === 'sleep') {
@@ -314,7 +329,11 @@ export class Military {
       p.kills = (p.kills ?? 0) + 1;
       this.fallen(foe, p);
       this.falls.push(foe.x, foe.y, foe.look, this.gearOf(foe), foe.sex);
-      w.kill(foe, 'battle');
+      if (p.criminal) {
+        w.crime.murdered(foe);
+        if (p.raid) p.raid.done = true;
+      }
+      w.kill(foe, p.criminal ? 'bandits' : 'battle');
       delete p.foe;
     }
     return true;
@@ -324,6 +343,16 @@ export class Military {
   private blow(p: Person, tx: number, ty: number) {
     const kind = p.engine ? 3 : p.weapon === 'crossbow' ? 2 : p.weapon === 'bow' ? 1 : 0;
     this.shots.push(p.x, p.y, tx, ty, kind);
+  }
+
+  /** A blow struck by someone or something else (a beast, a hunter, a bandit), for the app to draw: 0 a swing, 1 an arrow, 2 a bolt, 3 a stone, 4 fire. */
+  strike(x: number, y: number, tx: number, ty: number, kind: number) {
+    this.shots.push(x, y, tx, ty, kind);
+  }
+
+  /** Someone has fallen (to a beast, a bandit, a disaster), for the app to draw where they lie. */
+  fallAt(p: Person) {
+    this.falls.push(p.x, p.y, p.look, this.gearOf(p), p.sex);
   }
 
   /** Blows struck and people fallen since the last snapshot (taken by the snapshot). */
@@ -831,6 +860,8 @@ export class Military {
       w.towns.buildingsChanged = true;
     }
     // It changes hands; its people stay (Caleb).
+    const winner = this.nations.byId.get(a.nation);
+    if (winner) w.record.add('war', `The ${winner.name} took ${s.name}${loser ? ` from the ${loser.name}` : ''}.`, s.center);
     s.nation = a.nation;
     delete s.unrest;
     const war = loser ? this.warBetween(a.nation, loser.id) : undefined;
@@ -866,8 +897,8 @@ export class Military {
       const chance = Math.min(0.9, Math.max(0, Math.max(ta, tb) - 0.5) + Math.max(0, years - 6) * 0.08);
       if (w.rand.next() < chance) this.makePeace(r.a, r.b, ta > tb ? r.a : r.b);
     }
-    // War between rivals (SPEC 10: units declaring war, a rule).
-    if (!w.toggles.war) return;
+    // War between rivals (SPEC 10: units declaring war, a rule; and sim-triggered events, another).
+    if (!w.toggles.war || !w.toggles.events) return;
     const alive = this.nations.alive();
     for (const a of alive) {
       const mine = strength.get(a.id) ?? 0;
@@ -895,6 +926,8 @@ export class Military {
       if (ally === a || ally === b || this.nations.relation(ally.id, b.id) !== 'alliance' || this.atWarWith(ally.id, a.id)) continue;
       this.nations.setWar(ally.id, a.id, { start: this.w.state.tick, by: ally.id, strength: { [ally.id]: strength(ally), [a.id]: strength(a) }, lost: {}, taken: {} });
     }
+    const front = this.w.towns.byId(b.capital);
+    this.w.record.add('war', `The ${a.name} declared war on the ${b.name}.`, front?.center);
     this.nations.majorEvents([a, b]);
     this.atWar = true;
     this.changed = true;
@@ -911,6 +944,7 @@ export class Military {
       from.coins -= tribute;
       to.coins += tribute;
     }
+    if (na && nb) this.w.record.add('war', `The ${na.name} and the ${nb.name} made peace${payer !== undefined ? `; the ${(payer === a ? na : nb).name} paid tribute` : ''}.`);
     this.nations.endWar(a, b);
     for (const army of this.armies) if ((army.nation === a || army.nation === b) && army.order?.kind !== 'return') army.order = { kind: 'return' };
     this.nations.majorEvents([na, nb].filter((x): x is Nation => !!x));

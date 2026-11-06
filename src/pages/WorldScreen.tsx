@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router';
-import { Amphora, Anchor, Anvil, Castle, Apple, Axe, Blocks, BookOpen, Building, Coins, Crosshair, Crown, Fence, Shield, Sword, Swords, Eraser, GraduationCap, ScrollText, Landmark, MapPinPlus, Fish, Flag, Flame, Footprints, Hammer, Hand, House, ListChecks, LogOut, Maximize, Minus, Moon, Pause, Pencil, Pickaxe, Play, Plus, RotateCcw, Save, Split, Store, Tent, User, Users, Warehouse, Wheat, X } from 'lucide-react';
+import { Activity, Amphora, Beef, Target, Anchor, Anvil, Biohazard, Bug, Castle, Apple, Axe, Blocks, BookOpen, Building, CloudFog, CloudLightning, CloudRain, Coins, Crosshair, Crown, Fence, HeartPulse, History, PawPrint, Shield, Skull, Snowflake, Sun, Sword, Swords, ThermometerSun, Eraser, GraduationCap, ScrollText, Landmark, MapPinPlus, Fish, Flag, Flame, Footprints, Hammer, Hand, House, ListChecks, LogOut, Maximize, Minus, Moon, Pause, Pencil, Pickaxe, Play, Plus, RotateCcw, Save, Split, Store, Tent, User, Users, VenetianMask, Warehouse, Waves, Wheat, X } from 'lucide-react';
 import { ButtonLink, Button, IconButton, Input, Segmented, Spinner, cx } from '../components/ui';
 import { alertDialog, confirmDialog, notify, promptDialog } from '../components/dialogs';
 import { useApp } from '../lib/store';
@@ -12,13 +12,16 @@ import { ADULT_AGE, DEFAULT_TOGGLES, ELDER_AGE, MONTHS_PER_YEAR, TICKS_PER_MONTH
 import { Deposit, Terrain } from '../map/terrain';
 import { ARMS, BUILDINGS, BuildingKind, GOODS, GOOD_NAME, type Good, JOB_NAME, LIGHT_JOB_NAME, STAGE_NAME, anchorFor, footprint, kindAllowsTerrain, needsShore } from '../sim/buildings';
 import { maxTrees } from '../sim/towns';
-import { TileField, type BuildingView, type CultureEdit, type CultureView, type Focus, type NationEdit, type NationView, type RelationKind, type SettlementDetails, type SettlementView, type SoldierKind, type BuildingDetails } from '../sim/types';
+import { TileField, type BuildingView, type CultureEdit, type CultureView, type Focus, type NationEdit, type NationView, type RelationKind, type SettlementDetails, type SettlementView, type SoldierKind, type BuildingDetails, type CreatureDetails, type CreatureKind, type DisasterKind, type EffectKind, type RecordEntry, type RecordKind } from '../sim/types';
+import { CREATURES } from '../sim/creatures';
+import { drawWeatherGround, drawWeatherSky } from '../render/weather';
+import { SHAKE_MS } from '../render/IsoView';
 import { NATION_COLORS, POLICY_DEFS, RELATION_NAME } from '../sim/nations';
 import { BUILDING_TECH, POLICY_TECH, TECHS, TECH_BY_ID } from '../sim/tech';
 import { CULTURE_COLORS, TRAIT_AXES } from '../sim/cultures';
 import { STEP } from '../render/iso';
 import { IsoView } from '../render/IsoView';
-import { drawPeople, pickPerson } from '../render/people';
+import { drawPeople, pickCreature, pickPerson } from '../render/people';
 import { BACKDROP } from '../render/style';
 import type { WorldDoc } from '../world/types';
 
@@ -28,7 +31,9 @@ import type { WorldDoc } from '../world/types';
 // in place of god powers.
 
 type Tab = 'main' | 'units' | 'disasters' | 'imperatives';
-type UnitTool = 'person' | 'remove' | 'nation' | 'soldier' | BuildingKind;
+type UnitTool = 'person' | 'remove' | 'nation' | 'soldier' | 'creature' | 'criminal' | BuildingKind;
+/** A tool in the Disasters & effects tab (SPEC 4). */
+type HazardTool = { type: 'disaster'; kind: DisasterKind } | { type: 'effect'; kind: EffectKind };
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
@@ -133,6 +138,9 @@ const BUILDING_ICON: Record<number, typeof House> = {
   [BuildingKind.Stable]: Fence,
   [BuildingKind.Dock]: Anchor,
   [BuildingKind.Castle]: Castle,
+  [BuildingKind.HuntingLodge]: Target,
+  [BuildingKind.Pasture]: Beef,
+  [BuildingKind.BanditCamp]: VenetianMask,
 };
 
 type OrderKind = 'move' | 'gather' | 'collect' | 'rest' | 'attack' | 'stop';
@@ -148,6 +156,44 @@ const SOLDIER_KINDS: { kind: SoldierKind; label: string; note: string }[] = [
   { kind: 'cavalry', label: 'Cavalry', note: 'a sword, mail and a horse' },
   { kind: 'artillery', label: 'Artillery', note: 'a catapult and a spear' },
 ];
+/** Animals the player can place (Stage 6). */
+const CREATURE_TOOLS: { kind: CreatureKind; label: string; note: string }[] = [
+  { kind: 'deer', label: 'Deer', note: 'Game that runs from people. Hunters hunt them for meat.' },
+  { kind: 'boar', label: 'Boar', note: 'Game that fights back when struck.' },
+  { kind: 'wolf', label: 'Wolf', note: 'Hunts game, and people out on their own when hungry, mostly in winter.' },
+  { kind: 'bear', label: 'Bear', note: 'Attacks anyone who comes too close, and hunts when hungry.' },
+  { kind: 'cattle', label: 'Aurochs', note: 'Wild cattle, which fight back when struck. Herders tame them as cattle, which give food and pull the plough.' },
+  { kind: 'sheep', label: 'Wild sheep', note: 'Run from people. Herders tame them as sheep, which give food.' },
+  { kind: 'dragon', label: 'Dragon', note: 'Click once: a dragon flies out of the nearest mountains, burns the settlements near them for some months, and flies home unless it is slain.' },
+];
+const DISASTER_TOOLS: { kind: DisasterKind; label: string; icon: ReactNode; note: string }[] = [
+  { kind: 'fire', label: 'Fire', icon: <Flame className="size-5" />, note: 'Sets the building clicked (or the trees there) alight. Fire leaps to buildings near it, and spreads through forest; townspeople come to put it out, and rain helps.' },
+  { kind: 'flood', label: 'Flood', icon: <Waves className="size-5" />, note: 'Water rises over the low land beside the nearest river, lake or coast for a month or more: crops and berries are lost, part of a flooded store spoils, and walking is slow.' },
+  { kind: 'earthquake', label: 'Earthquake', icon: <Activity className="size-5" />, note: 'The ground shakes where you click: buildings near it may fall (stone stands better than timber), and people near are hurt.' },
+  { kind: 'plague', label: 'Plague', icon: <Biohazard className="size-5" />, note: 'A sickness breaks out among the people clicked, or in the nearest settlement. It passes from person to person; the sick lose health, and some die.' },
+  { kind: 'locusts', label: 'Locusts', icon: <Bug className="size-5" />, note: 'A swarm comes down and drifts for a few months, eating the crops and berries under it.' },
+  { kind: 'drought', label: 'Drought', icon: <ThermometerSun className="size-5" />, note: 'No rain over a wide area for months: crops and berries grow slowly there, and fires spread.' },
+  { kind: 'storm', label: 'Storm', icon: <CloudLightning className="size-5" />, note: 'A great storm that drifts across the land: walking and work are slow, and lightning may set buildings and trees alight.' },
+  { kind: 'dragon', label: 'Dragon', icon: <Skull className="size-5" />, note: 'A dragon flies out of the mountains nearest where you click, burns the settlements near them for some months, and flies home unless it is slain.' },
+];
+const EFFECT_TOOLS: { kind: EffectKind; label: string; icon: ReactNode; note: string }[] = [
+  { kind: 'rain', label: 'Rain', icon: <CloudRain className="size-5" />, note: 'Rain over the brush for two months (snow in winter). Puts out fires; slows walking and work a little.' },
+  { kind: 'snow', label: 'Snow', icon: <Snowflake className="size-5" />, note: 'Snow over the brush for two months. Slows walking and work; people with no home are hurt by the cold in winter.' },
+  { kind: 'fog', label: 'Fog', icon: <CloudFog className="size-5" />, note: 'Fog over the brush for two months. Walking is a little slower.' },
+  { kind: 'clear', label: 'Clear sky', icon: <Sun className="size-5" />, note: 'Clears the weather over the brush, and ends a drought there.' },
+  { kind: 'sicken', label: 'Sickness', icon: <Biohazard className="size-5" />, note: 'Makes the people in the brush sick. It spreads to people near them.' },
+  { kind: 'heal', label: 'Heal', icon: <HeartPulse className="size-5" />, note: 'Cures the people in the brush of sickness and restores their health.' },
+];
+const RECORD_KINDS: { kind: RecordKind; label: string }[] = [
+  { kind: 'settlement', label: 'Settlements' },
+  { kind: 'nation', label: 'Nations' },
+  { kind: 'war', label: 'Wars' },
+  { kind: 'culture', label: 'Cultures' },
+  { kind: 'disaster', label: 'Disasters' },
+  { kind: 'crime', label: 'Crime' },
+  { kind: 'creature', label: 'Beasts' },
+];
+const SEASONS = ['Spring', 'Summer', 'Autumn', 'Winter'];
 
 function WorldScreen({ doc }: { doc: WorldDoc }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -158,6 +204,14 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
   const [tab, setTab] = useState<Tab>('main');
   const [tool, setTool] = useState<UnitTool>('person');
   const [soldierKind, setSoldierKind] = useState<SoldierKind>('infantry');
+  const [creatureKind, setCreatureKind] = useState<CreatureKind>('deer');
+  const [hazard, setHazard] = useState<HazardTool>({ type: 'disaster', kind: 'fire' });
+  const [chosenCreature, setChosenCreature] = useState<number | null>(null);
+  const [creatureDetails, setCreatureDetails] = useState<CreatureDetails | null>(null);
+  const chosenCreatureRef = useRef<number | null>(null);
+  chosenCreatureRef.current = chosenCreature;
+  const [recordOpen, setRecordOpen] = useState(false);
+  const [record, setRecord] = useState<RecordEntry[]>(() => doc.state.record ?? []);
   const [collectGood, setCollectGood] = useState<Good>('wood');
   const collectGoodRef = useRef(collectGood);
   collectGoodRef.current = collectGood;
@@ -254,8 +308,8 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
   useEffect(() => applyLandRef.current(), [mapView]);
 
   const selectedSet = useRef<Set<number>>(new Set());
-  const live = useRef({ tab, tool, radius, pending, selection, pendingS, chosenSettlement, rot, soldierKind });
-  live.current = { tab, tool, radius, pending, selection, pendingS, chosenSettlement, rot, soldierKind };
+  const live = useRef({ tab, tool, radius, pending, selection, pendingS, chosenSettlement, rot, soldierKind, creatureKind, hazard });
+  live.current = { tab, tool, radius, pending, selection, pendingS, chosenSettlement, rot, soldierKind, creatureKind, hazard };
   /** The box being dragged out to choose people, in screen pixels. */
   const box = useRef<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const atStart = tick === savedTick;
@@ -287,6 +341,15 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
   };
   const chooseBuildingRef = useRef(chooseBuilding);
   chooseBuildingRef.current = chooseBuilding;
+  /** Follows an animal for its panel. */
+  const chooseCreature = (id: number | null) => {
+    setChosenCreature(id);
+    if (id === null) setCreatureDetails(null);
+    clientRef.current?.watchCreature(id);
+    viewRef.current?.redraw();
+  };
+  const chooseCreatureRef = useRef(chooseCreature);
+  chooseCreatureRef.current = chooseCreature;
 
   const choose = (ids: number[]) => {
     if (ids.length) {
@@ -423,6 +486,8 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
     let lastPopAt = 0;
     let shownAtStart = true;
     client.onSnapshot = (s) => {
+      if (s.quake !== undefined) view.shakeUntil = performance.now() + SHAKE_MS;
+      if (s.weather) view.redraw();
       const month = Math.floor(s.tick / TICKS_PER_MONTH);
       const atStartNow = s.tick === savedTickRef.current;
       if (month !== shownMonth || atStartNow !== shownAtStart) {
@@ -493,6 +558,8 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
     };
     client.onWatchedSettlement = (d) => setSettlementDetails(d);
     client.onWatchedBuilding = (d) => setBuildingDetails(d);
+    client.onWatchedCreature = (d) => setCreatureDetails(d);
+    client.onRecord = (entries) => setRecord((r) => (r.length + entries.length > 3000 ? [...r, ...entries].slice(-3000) : [...r, ...entries]));
     // Bushes being picked, trees cut and land claimed are redrawn together about once a
     // second, not on every step, since each redraw of the terrain costs far more than drawing people.
     const stockDirty = new Set<number>();
@@ -514,12 +581,35 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
     client.onError = (m) => notify(`The simulation stopped with an error: ${m}`, 'warn');
 
     const placed = new Set<number>();
-    const act = (t: { x: number; y: number } | null) => {
+    const act = (t: { x: number; y: number } | null, first = false) => {
       if (!t) return;
       const { tab, tool, radius } = live.current;
-      if (tab !== 'units') return;
       const i = t.y * doc.size + t.x;
-      if (tool === 'person') {
+      if (tab === 'disasters') {
+        const hz = live.current.hazard;
+        if (hz.type === 'disaster' || hz.kind === 'rain' || hz.kind === 'snow' || hz.kind === 'fog' || hz.kind === 'clear') {
+          // Once per click (a drag does not set off a disaster on every tile).
+          if (!first) return;
+          if (hz.type === 'disaster') client.disaster(hz.kind, i);
+          else client.effect(hz.kind, brushTiles(t.x, t.y, radius - 0.5, doc.size).map(([x, y]) => y * doc.size + x));
+        } else {
+          const tiles = brushTiles(t.x, t.y, radius - 0.5, doc.size).map(([x, y]) => y * doc.size + x).filter((x) => !placed.has(x));
+          for (const x of tiles) placed.add(x);
+          client.effect(hz.kind, tiles);
+        }
+        setWorldUnsaved(true);
+        return;
+      }
+      if (tab !== 'units') return;
+      if (tool === 'creature') {
+        if (placed.has(i) || (live.current.creatureKind === 'dragon' && !first)) return;
+        placed.add(i);
+        client.placeCreatures([i], live.current.creatureKind);
+      } else if (tool === 'criminal') {
+        if (placed.has(i)) return;
+        placed.add(i);
+        client.placeCriminals([i]);
+      } else if (tool === 'person') {
         if (placed.has(i)) return;
         placed.add(i);
         client.place([i]);
@@ -614,8 +704,18 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
         const { tab } = live.current;
         if (tab === 'main') {
           const id = pickPerson(view, client, p.sx, p.sy, performance.now());
-          if (id !== null) return chooseRef.current([id]);
+          if (id !== null) {
+            chooseCreatureRef.current(null);
+            return chooseRef.current([id]);
+          }
           chooseRef.current([]);
+          const animal = pickCreature(view, client, p.sx, p.sy, performance.now());
+          chooseCreatureRef.current(animal);
+          if (animal !== null) {
+            chooseSettlementRef.current(null);
+            chooseBuildingRef.current(null);
+            return;
+          }
           const b = p.tile ? buildingAt.current.get(p.tile.y * doc.size + p.tile.x) : undefined;
           chooseSettlementRef.current(null);
           chooseBuildingRef.current(b ? b.id : null);
@@ -630,7 +730,7 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
           return;
         }
         placed.clear();
-        act(p.tile);
+        act(p.tile, true);
       },
       onPointerMove: (p) => {
         if (live.current.tab === 'imperatives' && box.current) {
@@ -653,7 +753,11 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
           imperativePick(id === null ? [] : [id], p.tile, false);
         }
       },
-      objects: (ctx, v, now) => drawPeople(ctx, v, client, now, selectedSet.current, buildingsRef.current, chosenSettlementRef.current),
+      ground: (ctx, v) => drawWeatherGround(ctx, v, client.weather),
+      objects: (ctx, v, now) => {
+        drawPeople(ctx, v, client, now, selectedSet.current, buildingsRef.current, chosenSettlementRef.current, chosenCreatureRef.current);
+        drawWeatherSky(ctx, v, client.weather, now);
+      },
       overlay: (ctx, v) => {
         const b = box.current;
         if (b && Math.hypot(b.x1 - b.x0, b.y1 - b.y0) > 6) {
@@ -670,8 +774,9 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
         drawLabels(ctx, v, settlementsRef.current, chosenSettlementRef.current);
         const h = v.hover;
         const { tab, tool, radius, pending, pendingS, rot } = live.current;
-        const showTile = tab === 'imperatives' && (pending?.stage === 'where' || pendingS?.stage === 'where');
-        if (!h || (tab !== 'units' && !showTile)) return;
+        const showTile = (tab === 'imperatives' && (pending?.stage === 'where' || pendingS?.stage === 'where')) || (tab === 'disasters' && live.current.hazard.type === 'disaster');
+        const brush = tab === 'disasters' && live.current.hazard.type === 'effect';
+        if (!h || (tab !== 'units' && !showTile && !brush)) return;
         ctx.beginPath();
         // A building's whole footprint, red where it fits and navy where it does not.
         const placing = tab === 'units' && typeof tool === 'number' ? tool : pendingS?.stage === 'where' && pendingS.kind === 'build' ? pendingS.building : undefined;
@@ -716,7 +821,7 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
             if (!shore) fits = false;
           }
         } else {
-          const r = tab === 'units' && tool === 'remove' ? radius - 0.5 : 0.5;
+          const r = (tab === 'units' && tool === 'remove') || brush ? radius - 0.5 : 0.5;
           for (const [x, y] of brushTiles(h.x, h.y, r, doc.size)) v.traceTile(ctx, x, y);
         }
         ctx.fillStyle = fits ? 'rgba(252, 63, 63, 0.18)' : 'rgba(0, 38, 87, 0.28)';
@@ -743,7 +848,7 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
   useEffect(() => {
     if (viewRef.current) viewRef.current.animating = speed > 0;
   }, [speed]);
-  useEffect(() => viewRef.current?.redraw(), [tab, tool, radius, selection, pending, pendingS, chosenSettlement, rot]);
+  useEffect(() => viewRef.current?.redraw(), [tab, tool, radius, selection, pending, pendingS, chosenSettlement, rot, hazard, chosenCreature]);
   // Changing tabs drops a half-given imperative.
   useEffect(() => {
     setPending(null);
@@ -883,7 +988,7 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
         <dl className="mt-1.5 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
           <dt className="text-muted">Date</dt>
           <dd>
-            {MONTHS[month]}, year {year}
+            {MONTHS[month]}, year {year} <span className="text-muted">· {SEASONS[Math.floor(((month + 10) % 12) / 3)]}</span>
           </dd>
           <dt className="text-muted">People</dt>
           <dd>{population}</dd>
@@ -998,6 +1103,25 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
           onClose={() => chooseBuilding(null)}
         />
       )}
+      {chosenCulture === null && chosenNation === null && chosenSettlement === null && chosenBuilding === null && chosenCreature !== null && selection.length === 0 && (
+        <CreaturePanel details={creatureDetails} onClose={() => chooseCreature(null)} />
+      )}
+      {recordOpen && tab === 'main' && (
+        <RecordPanel
+          entries={record}
+          onGo={(tile) => {
+            const v = viewRef.current;
+            if (!v) return;
+            const x = tile % doc.size;
+            const y = Math.floor(tile / doc.size);
+            v.cam.x = (x - y) * 0.5;
+            v.cam.y = (x + y) * 0.25;
+            v.cam.zoom = Math.max(v.cam.zoom, 24);
+            v.redraw();
+          }}
+          onClose={() => setRecordOpen(false)}
+        />
+      )}
       {chosenCulture === null && chosenNation === null && chosenSettlement !== null && selection.length === 0 && (
         <SettlementPanel
           details={settlementDetails}
@@ -1045,7 +1169,7 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
             <TabButton active={tab === 'units'} onClick={() => setTab('units')}>
               Units
             </TabButton>
-            <TabButton active={false} disabled title="Disasters and effects come in Stage 6.">
+            <TabButton active={tab === 'disasters'} onClick={() => setTab('disasters')}>
               Disasters &amp; effects
             </TabButton>
             <TabButton active={tab === 'imperatives'} onClick={() => setTab('imperatives')}>
@@ -1056,7 +1180,9 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
                 ? 'Click a person to inspect · Space pauses · 1 2 3 set the speed'
                 : tab === 'imperatives'
                   ? 'Click a person or drag a box to choose · right drag moves'
-                  : 'Left drag places · right drag moves · wheel zooms'}
+                  : tab === 'disasters'
+                    ? 'Click to set it going · right drag moves · wheel zooms'
+                    : 'Left drag places · right drag moves · wheel zooms'}
             </span>
           </div>
 
@@ -1096,9 +1222,27 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
                   Start again from setup
                 </Button>
               )}
-              <Button size="sm" variant={rulesOpen ? 'navy' : 'secondary'} onClick={() => setRulesOpen((o) => !o)}>
+              <Button
+                size="sm"
+                variant={rulesOpen ? 'navy' : 'secondary'}
+                onClick={() => {
+                  setRulesOpen((o) => !o);
+                  setRecordOpen(false);
+                }}
+              >
                 <ListChecks className="size-4" />
                 Rules
+              </Button>
+              <Button
+                size="sm"
+                variant={recordOpen ? 'navy' : 'secondary'}
+                onClick={() => {
+                  setRecordOpen((o) => !o);
+                  setRulesOpen(false);
+                }}
+              >
+                <History className="size-4" />
+                Record
               </Button>
               <p className="max-w-64 text-xs text-muted">
                 {isSetup && atStart
@@ -1122,6 +1266,12 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
                 <ToolButton active={tool === 'soldier'} label="Soldier" onClick={() => setTool('soldier')}>
                   <Sword className="size-5" />
                 </ToolButton>
+                <ToolButton active={tool === 'creature'} label="Animal" onClick={() => setTool('creature')}>
+                  <PawPrint className="size-5" />
+                </ToolButton>
+                <ToolButton active={tool === 'criminal'} label="Criminal" onClick={() => setTool('criminal')}>
+                  <VenetianMask className="size-5" />
+                </ToolButton>
                 {PLACE_KINDS.map((k) => {
                   const Icon = BUILDING_ICON[k];
                   return (
@@ -1138,6 +1288,12 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
                 <div className="flex shrink-0 flex-col justify-center gap-1 border-l border-line pl-3">
                   <span className="text-xs text-muted">Kind</span>
                   <Segmented size="xs" value={soldierKind} onChange={(v) => setSoldierKind(v as SoldierKind)} options={SOLDIER_KINDS.map((k) => ({ value: k.kind, label: k.label }))} />
+                </div>
+              ) : null}
+              {tool === 'creature' ? (
+                <div className="flex shrink-0 flex-col justify-center gap-1 border-l border-line pl-3">
+                  <span className="text-xs text-muted">Kind</span>
+                  <Segmented size="xs" value={creatureKind} onChange={(v) => setCreatureKind(v as CreatureKind)} options={CREATURE_TOOLS.map((k) => ({ value: k.kind, label: k.label }))} />
                 </div>
               ) : null}
               {tool === 'remove' ? (
@@ -1165,11 +1321,64 @@ function WorldScreen({ doc }: { doc: WorldDoc }) {
                     ? `Click or drag on a nation’s land to place soldiers of that nation, armed with ${SOLDIER_KINDS.find((k) => k.kind === soldierKind)!.note}. They serve in its army raised for placed soldiers.`
                   : tool === 'nation'
                     ? 'Click a settlement outside any nation: it becomes the capital of a new nation, and its most influential adult its ruler.'
+                    : tool === 'creature'
+                    ? CREATURE_TOOLS.find((k) => k.kind === creatureKind)!.note + (creatureKind === 'dragon' ? '' : ' Click or drag to place, one per tile.')
+                    : tool === 'criminal'
+                    ? 'Click or drag to place criminals, one per tile. They join the nearest bandit camp (three or more placed together set up one), live outside settlements, and raid them to steal or kill.'
+                    : tool === BuildingKind.BanditCamp
+                    ? 'A bandit camp with its band of four to seven bandits, outside any settlement’s land. They raid settlements near it.'
                     : tool === 'remove'
-                    ? 'Removes everyone and every building inside the brush. Removing a campfire abandons its settlement.'
+                    ? 'Removes everyone, every animal and every building inside the brush. Removing a campfire abandons its settlement.'
                     : tool === BuildingKind.Campfire
                       ? 'A campfire founds a camp; unsettled people nearby join it.'
                       : `${BUILDINGS[tool].name}: ${footprint(tool, rot).w} by ${footprint(tool, rot).d} tiles, R turns it. ${tool === BuildingKind.Farm ? 'Needs grassland or hills. ' : needsShore(tool) ? 'Must stand by water. ' : ''}Placed buildings appear finished and belong to the settlement whose land they are on, or the nearest within 15 tiles.`}
+              </p>
+            </div>
+          )}
+
+          {tab === 'disasters' && (
+            <div className="flex max-w-[calc(100vw-2rem)] items-stretch gap-3 overflow-x-auto p-2 scrollbar-thin">
+              <div className="flex shrink-0 flex-col justify-center gap-1 pr-1">
+                <span className="label-caps text-muted">Disasters</span>
+                <div className="flex gap-1">
+                  {DISASTER_TOOLS.map((d) => (
+                    <ToolButton key={d.kind} active={hazard.type === 'disaster' && hazard.kind === d.kind} label={d.label} onClick={() => setHazard({ type: 'disaster', kind: d.kind })}>
+                      {d.icon}
+                    </ToolButton>
+                  ))}
+                </div>
+              </div>
+              <div className="flex shrink-0 flex-col justify-center gap-1 border-l border-line pl-3 pr-1">
+                <span className="label-caps text-muted">Effects</span>
+                <div className="flex gap-1">
+                  {EFFECT_TOOLS.map((d) => (
+                    <ToolButton key={d.kind} active={hazard.type === 'effect' && hazard.kind === d.kind} label={d.label} onClick={() => setHazard({ type: 'effect', kind: d.kind })}>
+                      {d.icon}
+                    </ToolButton>
+                  ))}
+                </div>
+              </div>
+              {hazard.type === 'effect' ? (
+                <div className="flex w-40 shrink-0 flex-col justify-center gap-1 border-l border-line pl-3">
+                  <span className="flex justify-between text-xs text-muted">
+                    <span>Brush size</span>
+                    <span className="font-mono">{radius}</span>
+                  </span>
+                  <input
+                    type="range"
+                    className="slider"
+                    min={1}
+                    max={8}
+                    value={radius}
+                    style={{ ['--fill' as string]: `${((radius - 1) / 7) * 100}%` }}
+                    onChange={(e) => setRadius(Number(e.target.value))}
+                    aria-label="Brush size"
+                  />
+                </div>
+              ) : null}
+              <p className="w-64 shrink-0 self-center text-xs text-muted">
+                {hazard.type === 'disaster' ? DISASTER_TOOLS.find((d) => d.kind === hazard.kind)!.note : EFFECT_TOOLS.find((d) => d.kind === hazard.kind)!.note}
+                {hazard.type === 'disaster' && !toggles.events ? ' (Sim-triggered events are off in Rules; disasters you set going still happen.)' : ''}
               </p>
             </div>
           )}
@@ -1401,6 +1610,7 @@ function InspectPanel({
     if (!d.hasHome) needs.push('Shelter');
     if (d.jobNeed === 'unmet') needs.push('Job');
     if (d.danger) needs.push('Safety');
+    if (d.status.includes('Sick') || d.status.includes('Cold')) needs.push('Health');
   }
   return (
     <div className="absolute right-3 top-16 max-h-[calc(100%-14.5rem)] w-72 overflow-y-auto rounded-xl border border-line bg-surface/97 p-3.5 text-sm shadow-pop scrollbar-thin">
@@ -1518,7 +1728,19 @@ function InspectPanel({
             <dt className="text-muted">Shelter</dt>
             <dd className="text-xs">{d.hasHome ? 'Has a home' : <span className="text-warn">No home</span>}</dd>
             <dt className="text-muted">Safety</dt>
-            <dd className="text-xs">{d.danger ? <span className="text-warn">In danger (enemy soldiers near)</span> : 'Safe'}</dd>
+            <dd className="text-xs">{d.danger ? <span className="text-warn">In danger (enemies near)</span> : 'Safe'}</dd>
+            {d.status.length > 0 && (
+              <>
+                <dt className="text-muted">Status</dt>
+                <dd className="text-xs text-warn">{d.status.join(', ')}</dd>
+              </>
+            )}
+            {d.criminal && (
+              <>
+                <dt className="text-muted">Criminal</dt>
+                <dd className="text-xs">{d.criminal.raiding ? <span className="text-warn">On a raid</span> : d.criminal.band ? 'Lives at a bandit camp' : 'Lives in the wilds'}</dd>
+              </>
+            )}
           </dl>
           <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
             <dt className="text-muted">Doing</dt>
@@ -1554,7 +1776,7 @@ function InspectPanel({
           {editing && <EditPerson details={d} cultures={cultures} onEdit={onEdit} onUnpair={onUnpair} onMakeRuler={d.nation !== undefined && !d.office && d.ageYears >= ADULT_AGE ? () => onMakeRuler(d.nation!) : undefined} />}
         </>
       ) : (
-        <p className="mt-3 text-muted">{died === 'battle' ? 'This person fell in battle.' : died ? `This person died of ${died}.` : 'This person is no longer in the world.'}</p>
+        <p className="mt-3 text-muted">{died ? deathText(died) : 'This person is no longer in the world.'}</p>
       )}
     </div>
   );
@@ -1704,6 +1926,9 @@ function RulesPanel({ toggles, onChange, onClose }: { toggles: Toggles; onChange
     { key: 'uniques', label: 'Emergence of unique individuals', note: 'Off: people no longer become unique by their influence. Rulers are still unique, and you can still name anyone.' },
     { key: 'research', label: 'Culture research and nation tech derivation', note: 'Off: cultures stop researching and nations stop taking up technology from their cultures. What they know stays, and you can still set it in a culture’s panel.' },
     { key: 'war', label: 'Nations raising armies; units declaring war', note: 'Off: nations build no new barracks and declare no wars by themselves. Armies already raised stay, wars already begun go on until peace, and you can still declare war and make peace in a nation’s panel.' },
+    { key: 'events', label: 'Sim-triggered events (wars and natural disasters)', note: 'Off: no disaster strikes by itself (fires, floods, earthquakes, plague, locusts, droughts, lightning, dragons) and no nation declares war by itself, and no new bandit band appears. Weather still comes and goes, and you can still set disasters going.' },
+    { key: 'criminals', label: 'Criminals entering settlements', note: 'Off: nobody turns to crime and bands raid no settlements. Criminals who are already about stay outside settlements, and you can still place them.' },
+    { key: 'record', label: 'Writing the record of events', note: 'Off: nothing new is written in the record. What is written stays.' },
     { key: 'cultures', label: 'Culture formation', note: 'Off: no new cultures form, and none break away by themselves. Cultures that exist stay; newcomers still take up the culture they live among, and you can still order a settlement to break away.' },
   ];
   return (
@@ -2029,7 +2254,17 @@ function ResearchSection({ culture: c, onEdit }: { culture: CultureView; onEdit:
 
 const TRAIT_NOTE = 'Mercantile cultures build markets sooner; agrarian ones keep more fields. Progressive cultures break away more readily when far from home than traditional ones. Traits also shape what a culture researches, and nations’ policies; temper matters more once wars exist.';
 
-const UNIQUE_WHY: Record<string, string> = { ruler: 'a ruler', founder: 'a founder', chosen: 'named by you', influence: 'by their influence', revolt: 'led a revolt', leader: 'leads an army' };
+const UNIQUE_WHY: Record<string, string> = { ruler: 'a ruler', founder: 'a founder', chosen: 'named by you', influence: 'by their influence', revolt: 'led a revolt', leader: 'leads an army', dragon: 'slew a dragon' };
+
+/** How a person died, as a sentence. */
+function deathText(cause: string): string {
+  if (cause === 'battle') return 'This person fell in battle.';
+  if (cause === 'bandits') return 'This person was killed by bandits.';
+  if (cause.startsWith('a ') || cause.startsWith('the ')) return `This person was killed by ${cause}.`;
+  if (cause === 'fire') return 'This person died in a fire.';
+  if (cause === 'earthquake') return 'This person died in an earthquake.';
+  return `This person died of ${cause}.`;
+}
 const SOLDIER_NAME: Record<SoldierKind, string> = { infantry: 'Infantry', archer: 'Archer', cavalry: 'Cavalry', artillery: 'Artillery' };
 
 /** A nation's name with its color, opening its panel. */
@@ -2377,6 +2612,9 @@ const BUILDING_INFO: Record<number, string> = {
   [BuildingKind.Stable]: 'Grooms raise horses from food, for cavalry.',
   [BuildingKind.Dock]: 'A landing where people board boats to cross wide water: settlers, traders and armies going where there is no way on foot.',
   [BuildingKind.Castle]: 'The seat of the nation\'s ruler, built in its biggest city, which becomes the capital. An enemy takes the capital only by claiming the castle.',
+  [BuildingKind.HuntingLodge]: 'Hunters hunt deer and wild boar nearby and carry the meat to the store as food.',
+  [BuildingKind.Pasture]: 'A fenced field where herders keep the cattle and sheep they tame. The herd breeds, gives food for the store, and cattle pull the plough (fields ripen faster). Herders slaughter an animal when the store runs short.',
+  [BuildingKind.BanditCamp]: 'Tents of a band of criminals, outside any settlement. They raid settlements near it to steal or kill.',
 };
 
 function BuildingPanel({ details, onSettlement, onPerson, onClose }: { details: BuildingDetails | null; onSettlement: (id: number) => void; onPerson: (id: number) => void; onClose: () => void }) {
@@ -2691,4 +2929,107 @@ function drawLabels(ctx: CanvasRenderingContext2D, view: IsoView, list: readonly
     ctx.strokeText(stage, sx, ty);
     ctx.fillText(stage, sx, ty);
   }
+}
+
+/** An animal's panel (Stage 6). */
+function CreaturePanel({ details, onClose }: { details: CreatureDetails | null; onClose: () => void }) {
+  const d = details;
+  const def = d ? CREATURES[d.kind] : null;
+  const name = d && def ? (d.tame === undefined && def.wildName ? def.wildName : def.name) : 'Gone';
+  const note = d ? CREATURE_TOOLS.find((k) => k.kind === d.kind)?.note : undefined;
+  return (
+    <div className="absolute right-3 top-16 w-72 rounded-xl border border-line bg-surface/97 p-3.5 text-sm shadow-pop">
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-center gap-2.5">
+          <span className="grid size-9 shrink-0 place-items-center rounded-lg border-2 border-navy bg-raised">
+            <PawPrint className="size-5" />
+          </span>
+          <div>
+            <p className="label-caps text-muted">{d?.tame !== undefined ? 'Livestock' : 'Animal'}</p>
+            <p className="font-display text-lg uppercase leading-tight">{name}</p>
+          </div>
+        </div>
+        <IconButton label="Close" onClick={onClose}>
+          <X className="size-4" />
+        </IconButton>
+      </div>
+      {d ? (
+        <>
+          {note && <p className="mt-2 text-xs leading-relaxed text-muted">{note}</p>}
+          <dl className="mt-3 grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-1">
+            <dt className="text-muted">Health</dt>
+            <dd>
+              <Bar value={d.health} warn={d.health < 40} />
+            </dd>
+            <dt className="text-muted">Age</dt>
+            <dd>{d.ageYears < 1 ? 'Young (under a year)' : `${d.ageYears} year${d.ageYears === 1 ? '' : 's'}`}</dd>
+            {d.tame !== undefined && (
+              <>
+                <dt className="text-muted">Belongs to</dt>
+                <dd>{d.tame}</dd>
+              </>
+            )}
+            <dt className="text-muted">Doing</dt>
+            <dd>{d.doing}</dd>
+          </dl>
+        </>
+      ) : (
+        <p className="mt-3 text-muted">This animal is no longer in the world.</p>
+      )}
+    </div>
+  );
+}
+
+/** The record of events (SPEC 5), newest first, with a filter by kind; clicking an entry goes to where it happened. */
+function RecordPanel({ entries, onGo, onClose }: { entries: RecordEntry[]; onGo: (tile: number) => void; onClose: () => void }) {
+  const [shown, setShown] = useState<Set<RecordKind>>(() => new Set(RECORD_KINDS.map((k) => k.kind)));
+  const list = entries.filter((e) => shown.has(e.kind)).slice(-400).reverse();
+  const toggle = (k: RecordKind) =>
+    setShown((s) => {
+      const n = new Set(s);
+      if (n.has(k)) n.delete(k);
+      else n.add(k);
+      return n;
+    });
+  return (
+    <div className="absolute bottom-36 left-1/2 flex max-h-[calc(100%-10.5rem)] w-[34rem] max-w-[calc(100%-1.5rem)] -translate-x-1/2 animate-rise flex-col rounded-2xl border border-line bg-surface p-4 text-sm shadow-pop">
+      <div className="flex shrink-0 items-start justify-between gap-2">
+        <div>
+          <h2 className="text-xl">Record</h2>
+          <p className="mt-0.5 text-xs text-muted">What has happened in this world, newest first. Click an entry to go there.</p>
+        </div>
+        <IconButton label="Close" onClick={onClose}>
+          <X className="size-4" />
+        </IconButton>
+      </div>
+      <div className="mt-2 flex shrink-0 flex-wrap gap-1">
+        {RECORD_KINDS.map((k) => (
+          <button
+            key={k.kind}
+            onClick={() => toggle(k.kind)}
+            className={cx('rounded-full border px-2 py-0.5 text-xs transition', shown.has(k.kind) ? 'border-navy bg-navy text-on-accent' : 'border-line text-muted hover:bg-raised')}
+          >
+            {k.label}
+          </button>
+        ))}
+      </div>
+      <ul className="-mr-2 mt-3 min-h-0 flex-1 space-y-1 overflow-y-auto pr-2 scrollbar-thin">
+        {list.length === 0 && <li className="text-xs text-muted">Nothing yet.</li>}
+        {list.map((e, k) => (
+          <li key={`${e.tick}-${k}`}>
+            <button
+              disabled={e.tile === undefined}
+              onClick={() => e.tile !== undefined && onGo(e.tile)}
+              className="flex w-full gap-2 rounded-lg px-2 py-1 text-left hover:bg-raised disabled:hover:bg-transparent"
+            >
+              <span className="w-24 shrink-0 font-mono text-xs text-muted">
+                {MONTHS[Math.floor(e.tick / TICKS_PER_MONTH) % MONTHS_PER_YEAR].slice(0, 3)} yr {Math.floor(e.tick / TICKS_PER_YEAR) + 1}
+              </span>
+              <span className="text-xs">{e.text}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
 }

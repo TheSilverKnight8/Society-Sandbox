@@ -483,6 +483,7 @@ export class Nations {
     delete s.nation;
     const leader = this.mostInfluential(members);
     if (leader) this.makeUnique(leader.p, 'revolt');
+    w.record.add('nation', `${s.name} revolted against the ${n.name}${leader?.p.unique ? `, led by ${leader.p.unique.name}` : ''}.`, s.center);
     if (this.rulers.has(leader?.p.id ?? -1)) this.checkRuler(n);
     if (w.toggles.nations && leader && leader.inf >= CLAIM_INFLUENCE / 2) this.found(s, leader.p);
     this.majorEvent([n]);
@@ -534,6 +535,8 @@ export class Nations {
     delete s.unrest;
     if (ruler) this.crown(n, ruler);
     else this.checkRuler(n);
+    const by = n.ruler !== undefined ? w.byId.get(n.ruler)?.unique?.name : undefined;
+    w.record.add('nation', `The ${n.name} was founded${by ? `, ruled by ${by}` : ''}.`, s.center);
     this.markChanged();
     return n;
   }
@@ -610,6 +613,10 @@ export class Nations {
     }
     if (!inNation(next)) next = this.mostInfluential(w.state.people.filter((q) => inNation(q)))?.p;
     if (next) this.crown(n, next);
+    if (had && next) {
+      const capital = this.towns.byId(n.capital);
+      w.record.add('nation', `${next.unique?.name ?? 'Someone'} became ruler of the ${n.name}.`, capital?.center);
+    }
     if (had) this.majorEvent([n]);
     this.markChanged();
   }
@@ -640,6 +647,7 @@ export class Nations {
   /** A nation with no settlements left is destroyed (SPEC 7: a major event). */
   private fall(n: Nation) {
     n.destroyed = this.w.state.tick;
+    this.w.record.add('nation', `The ${n.name} fell.`);
     if (n.ruler !== undefined) this.rulers.delete(n.ruler);
     delete n.ruler;
     const others = this.relations.filter((r) => r.a === n.id || r.b === n.id).map((r) => this.byId.get(r.a === n.id ? r.b : r.a)!);

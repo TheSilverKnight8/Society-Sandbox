@@ -7,6 +7,11 @@ import { Cultures } from './cultures';
 import { Nations } from './nations';
 import { Technology } from './tech';
 import { Military } from './military';
+import { Weather } from './weather';
+import { Disasters } from './disasters';
+import { Creatures } from './creatures';
+import { Crime } from './crime';
+import { EventRecord } from './record';
 import { BUILDINGS } from './buildings';
 import {
   ADULT_AGE,
@@ -69,6 +74,8 @@ const STARVE = 0.4;
 /** Health gained per step when fed and rested. */
 const HEAL = 0.15;
 const GATHER_STEPS = 20;
+/** Work done out of doors, which bad weather slows (Stage 6). */
+const OUTDOORS = new Set<string>(['gather', 'collect', 'chop', 'quarry', 'build', 'farm', 'harvest', 'mine', 'fish', 'dig', 'herd']);
 const EAT_STEPS = 10;
 
 /** Most food a tile holds, and the chance each month that it grows back by one. */
@@ -176,6 +183,11 @@ export class World {
   readonly nations: Nations;
   readonly tech: Technology;
   readonly military: Military;
+  readonly weather: Weather;
+  readonly disasters: Disasters;
+  readonly creatures: Creatures;
+  readonly crime: Crime;
+  readonly record: EventRecord;
   /** Why people died recently (for the inspect panel); cleared as it is read. */
   readonly deaths = new Map<number, string>();
 
@@ -229,6 +241,11 @@ export class World {
     this.nations = new Nations(this);
     this.tech = new Technology(this);
     this.military = new Military(this);
+    this.record = new EventRecord(this);
+    this.weather = new Weather(this);
+    this.disasters = new Disasters(this);
+    this.creatures = new Creatures(this);
+    this.crime = new Crime(this);
   }
 
   /** Records that a tile's drawing changed (deposit used up or back, trees, land). */
@@ -269,6 +286,10 @@ export class World {
     this.regrow();
     this.towns.step();
     this.military.step();
+    this.weather.step();
+    this.disasters.step();
+    this.creatures.step();
+    this.crime.step();
     if (st.tick % TICKS_PER_MONTH === 13) this.cultures.monthly();
     if (st.tick % TICKS_PER_MONTH === 19) this.nations.monthly();
     if (st.tick % TICKS_PER_MONTH === 23) this.tech.monthly();
@@ -360,7 +381,7 @@ export class World {
       for (let gx = cx - 1; gx <= cx + 1; gx++) {
         if (gx < 0 || gy < 0 || gx >= cells || gy >= cells) continue;
         for (const q of this.grid.get(gy * cells + gx) ?? []) {
-          if (q === p || q.sex === p.sex || q.pair !== undefined || !this.byId.has(q.id)) continue;
+          if (q === p || q.sex === p.sex || q.pair !== undefined || !this.byId.has(q.id) || !!q.criminal !== !!p.criminal) continue;
           const qa = this.ageOf(q);
           if (qa < PAIR_AGE || Math.abs(qa - age) > PAIR_AGE_GAP || this.related(p, q)) continue;
           const d = (q.x - p.x) ** 2 + (q.y - p.y) ** 2;
@@ -478,6 +499,8 @@ export class World {
       const i = tiles[this.regrowCursor];
       this.regrowCursor = (this.regrowCursor + 1) % tiles.length;
       const d = this.deposit[i];
+      // Berries do not grow back in winter, and seldom in a drought (Stage 6: weather).
+      if (d === Deposit.Berries && !this.weather.berriesGrow(i)) continue;
       if (this.stock[i] < FOOD_MAX[d] && this.rand.next() < REGROW[d]) {
         if (this.stock[i] === 0) this.tileChange(i, TileField.Empty, 0);
         this.touch(i, () => this.stock[i]++);
@@ -491,25 +514,31 @@ export class World {
     if ((this.state.tick + p.id) % TICKS_PER_MONTH === 0) {
       if (this.toggles.lifeCycle && !this.monthly(p)) return;
       this.towns.monthly(p);
+      this.crime.monthly(p);
     }
     if (this.toggles.lifeCycle && p.pregnant !== undefined && --p.pregnant <= 0) this.giveBirth(p);
-    // Needs change every step.
-    p.food = Math.max(0, p.food - FOOD_DECAY);
+    // Needs change every step (the cold makes people hungrier).
+    const cold = this.weather.cold(p);
+    p.food = Math.max(0, p.food - (cold ? FOOD_DECAY * 1.1 : FOOD_DECAY));
     // Sleeping at home (shelter) rests fully; sleeping out in the open rests more slowly.
     if (p.task === 'sleep') p.rest = Math.min(100, p.rest + (p.indoors ? REST_GAIN : REST_GAIN * 0.6));
     else p.rest = Math.max(0, p.rest - REST_DECAY);
     if (p.food <= 0) p.health -= STARVE;
-    else if (p.food > 30 && p.rest > 15) p.health = Math.min(100, p.health + HEAL);
+    else if (p.food > 30 && p.rest > 15 && !cold && !p.sick) p.health = Math.min(100, p.health + HEAL);
     if (p.health <= 0) {
       this.die(p, 'hunger');
       return;
     }
+    // Status effects: sickness and cold (Stage 6).
+    if ((p.sick || cold) && !this.weather.person(p)) return;
     // Too tired to stay awake: they fall asleep wherever they are (after eating, if they are).
     if (p.rest <= 0 && p.task !== 'sleep' && p.task !== 'eat') this.sleep(p);
     // Settlement land grows where its people go (Caleb), looked at every few steps.
     if ((this.state.tick + p.id) % 15 === 0) this.towns.explore(p);
     // Fighting comes before anything else (Stage 5).
     if (this.military.fight(p)) return;
+    // Bad weather slows work out of doors (Stage 6).
+    if (OUTDOORS.has(p.task) && this.weather.slowsWork(this.tileOf(p))) return;
 
     switch (p.task) {
       case 'sleep':
@@ -573,6 +602,15 @@ export class World {
             p.wait = 5 + this.rand.int(10);
           }
         }
+        return;
+      case 'douse':
+        this.disasters.douse(p);
+        return;
+      case 'hunt':
+        this.creatures.hunt(p);
+        return;
+      case 'herd':
+        this.creatures.herd(p);
         return;
       case 'idle':
         if (p.wait === Infinity) {
@@ -670,6 +708,8 @@ export class World {
     }
     // Soldiers serve full time (Stage 5).
     if (p.soldier && this.military.soldierWork(p)) return;
+    // Criminals go about their own business (Stage 6).
+    if (p.criminal && this.crime.decide(p)) return;
     // Their job first (now and then they help with building instead), then building work.
     const eco = this.towns.economy;
     if (p.job !== undefined && (p.load || this.rand.next() < 0.85) && eco.work(p)) return;
@@ -800,6 +840,8 @@ export class World {
   /** Stops whatever they are doing and lets go of any food they had claimed. */
   stop(p: Person) {
     this.towns?.dropWork(p);
+    delete p.fireAt;
+    delete p.prey;
     this.routes.delete(p.id);
     this.latestReq.delete(p.id);
     this.release(p);
@@ -816,8 +858,10 @@ export class World {
       return;
     }
     const size = this.size;
-    let budget = WALK_SPEED / this.finder.cost(this.tileOf(p));
+    const here = this.tileOf(p);
+    let budget = (WALK_SPEED / this.finder.cost(here)) * this.weather.walkFactor(here) * this.disasters.walkFactor(here);
     if (p.horse || p.engine) budget *= this.military.speedOf(p);
+    if (p.sick) budget *= 0.8;
     while (budget > 0 && r.step < r.tiles.length) {
       const next = r.tiles[r.step];
       // An enemy gate or fence in a soldier's way: they break it (Stage 5: sieges).
@@ -859,6 +903,7 @@ export class World {
       p.wait = purpose === 'chase' ? 0 : 10 + this.rand.int(30);
       return;
     }
+    if (this.disasters.arrive(p, purpose) || this.creatures.arrive(p, purpose) || (p.criminal && this.crime.arrive(p, purpose))) return;
     if (this.towns.arrive(p, purpose) || this.towns.economy.arrive(p, purpose)) return;
     if (purpose === 'food' && p.target !== undefined) {
       if (this.stock[p.target] > 0) {
@@ -965,6 +1010,7 @@ export class World {
   }
 
   private die(p: Person, cause: string) {
+    if (!this.byId.has(p.id)) return;
     this.stop(p);
     this.towns.leave(p);
     this.unpair(p.id);
@@ -1019,8 +1065,22 @@ export class World {
     return n;
   }
 
+  /** Adds someone made elsewhere (a band of bandits). */
+  addPerson(p: Person) {
+    this.state.people.push(p);
+    this.byId.set(p.id, p);
+  }
+
+  /** Food on a tile spoiled or eaten (a flood, locusts): up to n taken away. */
+  spoilFood(t: number, n: number) {
+    if (!isFood(this.deposit[t]) || this.stock[t] <= 0) return;
+    this.touch(t, () => (this.stock[t] = Math.max(0, this.stock[t] - n)));
+    if (this.stock[t] === 0) this.tileChange(t, TileField.Empty, 1);
+  }
+
   /** Removes everyone standing on the given tiles. */
   removeOn(tiles: number[]) {
+    this.creatures.removeOn(tiles);
     const set = new Set(tiles);
     for (const p of this.state.people) if (set.has(this.tileOf(p))) this.stop(p);
     this.removeWhere((p) => set.has(this.tileOf(p)));
@@ -1048,6 +1108,8 @@ export class World {
         this.towns.leave(p);
         this.cultures?.onGone(p);
         this.nations?.onGone(p);
+        this.weather?.onGone(p);
+        this.creatures?.onGone(p);
       } else keep.push(p);
     }
     this.state.people = keep;
@@ -1161,6 +1223,8 @@ export class World {
       nation: this.nations.nationOfPerson(p)?.id,
       soldier: this.military.detailsOf(p),
       danger: this.military.danger(p),
+      status: this.weather.statusOf(p),
+      criminal: p.criminal ? { band: p.band !== undefined && this.towns.byBuildingId(p.band) ? 'a bandit camp' : undefined, raiding: !!p.raid } : undefined,
     };
   }
 
@@ -1193,7 +1257,7 @@ export class World {
       const pose = p.task === 'sleep' ? Pose.Sleep : p.task === 'walk' || p.task === 'idle' ? Pose.Stand : Pose.Work;
       const age = (this.state.tick - p.born) / TICKS_PER_YEAR;
       const ageLook = age < 7 ? AgeLook.Young : age < ADULT_AGE ? AgeLook.Child : age >= ELDER_AGE ? AgeLook.Elder : AgeLook.Adult;
-      let f = (p.task === 'walk' ? 1 : 0) | (p.sex === 1 ? 4 : 0) | (pose << 3) | (ageLook << 5) | (p.indoors ? 128 : 0) | (p.load || p.taxCoins ? 256 : 0) | (this.nations.rulers.has(p.id) ? 512 : 0) | (this.finder.water(this.tileOf(p)) ? 1024 : 0) | (p.task === 'fight' ? 2048 : 0);
+      let f = (p.task === 'walk' ? 1 : 0) | (p.sex === 1 ? 4 : 0) | (pose << 3) | (ageLook << 5) | (p.indoors ? 128 : 0) | (p.load || p.taxCoins ? 256 : 0) | (this.nations.rulers.has(p.id) ? 512 : 0) | (this.finder.water(this.tileOf(p)) ? 1024 : 0) | (p.task === 'fight' || p.task === 'hunt' ? 2048 : 0) | (p.sick ? 4096 : 0) | (p.criminal ? 8192 : 0);
       const r = p.task === 'walk' ? this.routes.get(p.id) : undefined;
       if (r && r.step < r.tiles.length) {
         // Facing left on screen when heading toward smaller (x - y).
@@ -1225,7 +1289,13 @@ export class World {
     this.military.changed = false;
     const { shots, falls } = this.military.takeEffects();
     if (this.facing.size > people.length * 2) for (const id of this.facing.keys()) if (!this.byId.has(id)) this.facing.delete(id);
-    return { tick: this.state.tick, ids, pos, look, flags, gear, shots, falls, tileChanges, buildings, settlements, cultures, nations, stepMs };
+    const creatures = this.creatures.snapshot();
+    const weather = this.weather.changed || this.disasters.changed ? { season: this.weather.season(), fronts: this.weather.fronts(), droughts: this.weather.st.droughts.map((d) => ({ x: d.x, y: d.y, r: d.r })), ...this.disasters.view() } : undefined;
+    this.weather.changed = false;
+    this.disasters.changed = false;
+    const quake = this.disasters.quake;
+    this.disasters.quake = undefined;
+    return { tick: this.state.tick, ids, pos, look, flags, gear, shots, falls, tileChanges, buildings, settlements, cultures, nations, creatures, weather, record: this.record.take(), quake, stepMs };
   }
 
   /** A copy of everything that is saved. */
@@ -1246,6 +1316,10 @@ export class World {
       nations: this.nations.list.map((n) => ({ ...n, policies: { ...n.policies }, techs: n.techs ? [...n.techs] : undefined })),
       relations: this.nations.relations.map((r) => ({ ...r, war: r.war ? { ...r.war, strength: { ...r.war.strength }, lost: { ...r.war.lost }, taken: { ...r.war.taken } } : undefined })),
       armies: this.military.armies.map((a) => ({ ...a, order: a.order ? { ...a.order } : undefined })),
+      weather: { ...this.weather.st, fronts: this.weather.st.fronts.map((f) => ({ ...f })), droughts: this.weather.st.droughts.map((d) => ({ ...d })) },
+      disasters: { floods: this.disasters.st.floods.map((f) => ({ ...f, tiles: [...f.tiles] })), swarms: this.disasters.st.swarms.map((x) => ({ ...x })), burning: [...this.disasters.st.burning] },
+      creatures: this.creatures.save(),
+      record: this.record.list.map((e) => ({ ...e })),
       people: this.state.people.map((p) => {
         const q: Person = { ...p, wait: Number.isFinite(p.wait) ? Math.min(p.wait, 100) : 0 };
         // Routes and claims are not saved; anyone on the move starts again from standing.
@@ -1255,6 +1329,11 @@ export class World {
         if (q.load) q.load = { ...q.load };
         else delete q.site;
         if (q.unique) q.unique = { ...q.unique };
+        if (q.raid) q.raid = { ...q.raid };
+        // Hunting, herding and fire-fighting start again from standing too.
+        delete q.prey;
+        delete q.herding;
+        delete q.fireAt;
         return q;
       }),
     };

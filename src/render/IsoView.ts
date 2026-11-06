@@ -31,18 +31,24 @@ export interface ViewHooks {
   onPointerMove?(p: TilePointer): void;
   onPointerUp?(p: TilePointer): void;
   onHover?(tile: { x: number; y: number } | null): void;
+  /** Draws on the ground, over the terrain and under everything standing on it (seasons, floods), in screen pixels. */
+  ground?(ctx: CanvasRenderingContext2D, view: IsoView, now: number): void;
   /** Draws things standing on the terrain (people, later buildings), in screen pixels. */
   objects?(ctx: CanvasRenderingContext2D, view: IsoView, now: number): void;
   /** Draws on top of everything, in screen pixels. */
-  overlay?(ctx: CanvasRenderingContext2D, view: IsoView): void;
+  overlay?(ctx: CanvasRenderingContext2D, view: IsoView, now: number): void;
 }
 
 const MAX_ZOOM = 96;
+/** How long an earthquake shakes the view (ms). */
+export const SHAKE_MS = 1400;
 /** Time per frame spent drawing chunk pictures that are missing or out of date. */
 const RENDER_BUDGET_MS = 10;
 
 export class IsoView {
   readonly canvas: HTMLCanvasElement;
+  /** The view shakes until then (an earthquake). */
+  shakeUntil = 0;
   private ctx: CanvasRenderingContext2D;
   src: TileSource;
   chunks: TerrainChunks;
@@ -243,11 +249,26 @@ export class IsoView {
       this.terrainDirty = this.drawTerrain(this.layer.getContext('2d', { alpha: false })!);
       this.layerKey = key;
     }
+    // An earthquake shakes the view for a moment.
+    let sx = 0;
+    let sy = 0;
+    if (now < this.shakeUntil) {
+      const k = (this.shakeUntil - now) / SHAKE_MS;
+      sx = (Math.random() - 0.5) * 10 * k * this.dpr;
+      sy = (Math.random() - 0.5) * 6 * k * this.dpr;
+      this.dirty = true;
+    }
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.drawImage(this.layer, 0, 0);
-    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    if (sx || sy) {
+      ctx.fillStyle = BACKDROP;
+      ctx.fillRect(0, 0, W, H);
+    }
+    ctx.drawImage(this.layer, sx, sy);
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, sx, sy);
+    this.hooks.ground?.(ctx, this, now);
     this.hooks.objects?.(ctx, this, now);
-    this.hooks.overlay?.(ctx, this);
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    this.hooks.overlay?.(ctx, this, now);
     if (this.terrainDirty) this.dirty = true;
   }
 

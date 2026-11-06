@@ -1,5 +1,5 @@
 import type { BuildingKind } from './buildings';
-import type { BuildingDetails, CultureEdit, FromSim, NationEdit, NationOrder, Order, PersonDetails, PersonEdit, SettlementDetails, SimState, Snapshot, SoldierKind, Speed, Toggles, ToSim } from './types';
+import type { BuildingDetails, CreatureDetails, CreatureKind, CultureEdit, DisasterKind, EffectKind, FromSim, NationEdit, NationOrder, Order, PersonDetails, PersonEdit, RecordEntry, SettlementDetails, SimState, Snapshot, SoldierKind, Speed, Toggles, ToSim, WeatherView } from './types';
 
 type SettlementOrder = Extract<ToSim, { type: 'settlementOrder' }>['order'];
 
@@ -25,7 +25,16 @@ export class SimClient {
   onWatched?: (p: PersonDetails | null, died?: string) => void;
   onWatchedSettlement?: (s: SettlementDetails | null) => void;
   onWatchedBuilding?: (b: BuildingDetails | null) => void;
+  onWatchedCreature?: (c: CreatureDetails | null) => void;
+  /** Called when entries are added to the record. */
+  onRecord?: (entries: RecordEntry[]) => void;
   onError?: (message: string) => void;
+  /** The weather and disasters as last sent (they are sent only when they change). */
+  weather: WeatherView | null = null;
+  /** When an earthquake was last felt (for shaking the view), and where. */
+  quake: { tile: number; at: number } | null = null;
+  private prevCreatureIndex = new Map<number, number>();
+  private currCreatureIndex = new Map<number, number>();
 
   constructor() {
     this.worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
@@ -52,6 +61,12 @@ export class SimClient {
         for (let k = 0; k + 4 < m.falls.length; k += 5) this.falls.push({ x: m.falls[k], y: m.falls[k + 1], look: m.falls[k + 2], gear: m.falls[k + 3], male: m.falls[k + 4] === 1, at: now });
         if (this.shots.length > 800) this.shots.splice(0, this.shots.length - 800);
         if (this.falls.length > 300) this.falls.splice(0, this.falls.length - 300);
+        this.prevCreatureIndex = this.currCreatureIndex;
+        this.currCreatureIndex = new Map();
+        for (let k = 0; k + 4 < m.creatures.length; k += 5) this.currCreatureIndex.set(m.creatures[k], k);
+        if (m.weather) this.weather = m.weather;
+        if (m.quake !== undefined) this.quake = { tile: m.quake, at: now };
+        if (m.record) this.onRecord?.(m.record);
         this.onSnapshot?.(m);
         break;
       }
@@ -63,6 +78,9 @@ export class SimClient {
         break;
       case 'watchedBuilding':
         this.onWatchedBuilding?.(m.building);
+        break;
+      case 'watchedCreature':
+        this.onWatchedCreature?.(m.creature);
         break;
       case 'saved':
         this.saveWaiters.get(m.req)?.({ state: m.state, deposit: m.deposit });
@@ -159,6 +177,28 @@ export class SimClient {
     this.send({ type: 'cultureEdit', id, edit });
   }
 
+  /** Sets a disaster going at a tile (SPEC 4). */
+  disaster(kind: DisasterKind, tile: number) {
+    this.send({ type: 'disaster', kind, tile });
+  }
+
+  /** Sets an effect going over some tiles: weather, sickness or healing (SPEC 4). */
+  effect(kind: EffectKind, tiles: number[]) {
+    if (tiles.length) this.send({ type: 'effect', kind, tiles });
+  }
+
+  placeCreatures(tiles: number[], kind: CreatureKind) {
+    if (tiles.length) this.send({ type: 'placeCreatures', tiles, kind });
+  }
+
+  placeCriminals(tiles: number[]) {
+    if (tiles.length) this.send({ type: 'placeCriminals', tiles });
+  }
+
+  watchCreature(id: number | null) {
+    this.send({ type: 'watchCreature', id });
+  }
+
   setToggles(toggles: Toggles) {
     this.send({ type: 'toggles', toggles });
   }
@@ -211,6 +251,30 @@ export class SimClient {
         }
       }
       fn(k, id, x, y, c.look[k], c.flags[k], c.gear ? c.gear[k] : 0);
+    }
+  }
+
+  /** Calls `fn` for each animal, its position blended between the last two snapshots. */
+  forEachCreature(now: number, fn: (id: number, x: number, y: number, kind: number, flags: number) => void) {
+    const c = this.curr;
+    if (!c || !c.creatures) return;
+    const p = this.prev;
+    const a = this.speed === 0 || !p ? 1 : Math.max(0, Math.min(1, (now - this.currAt) / this.interval));
+    const cr = c.creatures;
+    for (let k = 0; k + 4 < cr.length; k += 5) {
+      const id = cr[k];
+      let x = cr[k + 1];
+      let y = cr[k + 2];
+      if (a < 1 && p && p.creatures) {
+        const j = this.prevCreatureIndex.get(id);
+        if (j !== undefined) {
+          const px = p.creatures[j + 1];
+          const py = p.creatures[j + 2];
+          x = px + (x - px) * a;
+          y = py + (y - py) * a;
+        }
+      }
+      fn(id, x, y, cr[k + 3], cr[k + 4]);
     }
   }
 

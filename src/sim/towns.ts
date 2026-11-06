@@ -428,6 +428,8 @@ export class Towns {
     this.claim(s, 4);
     for (const p of founders) this.join(p, s);
     this.settlementsChanged = true;
+    const parent = from !== undefined ? this.sById.get(from) : undefined;
+    w.record?.add('settlement', parent ? `${s.name} was founded by settlers from ${parent.name}.` : `${s.name} was founded.`, tile);
     return s;
   }
 
@@ -656,6 +658,7 @@ export class Towns {
     if (next && c.people >= STAGE_NEEDS[next].people && (c.homeBuildings >= STAGE_NEEDS[next].homes || c.homes >= STAGE_NEEDS[next].people)) {
       s.stage = next;
       this.economy.onStage(s);
+      this.w.record.add('settlement', `${s.name} became a ${next}.`, s.center);
       this.settlementsChanged = true;
     }
     // A settlement whose people are all gone stands empty.
@@ -1005,6 +1008,8 @@ export class Towns {
 
   /** Once a month for each person: unsettled people join a settlement near them, or a pair founds one. */
   monthly(p: Person) {
+    // Criminals never live in a settlement (SPEC 6).
+    if (p.criminal) return;
     if (p.settlement !== undefined) {
       this.economy.monthly(p);
       this.moveForPair(p);
@@ -1480,7 +1485,7 @@ export class Towns {
   private planFence(s: Settlement) {
     const w = this.w;
     const size = w.size;
-    const outside = new Set<number>([BuildingKind.Farm, BuildingKind.Mine, BuildingKind.Quarry, BuildingKind.FishingHut, BuildingKind.Woodcutter]);
+    const outside = new Set<number>([BuildingKind.Farm, BuildingKind.Mine, BuildingKind.Quarry, BuildingKind.FishingHut, BuildingKind.Woodcutter, BuildingKind.Pasture, BuildingKind.HuntingLodge]);
     const MARGIN = 2;
     const CLOSE = 3;
     const own = this.buildings.filter((b) => b.settlement === s.id);
@@ -2325,6 +2330,7 @@ export class Towns {
   /** Its people leave and its land is given up; its buildings stand empty for anyone to take over. */
   private abandon(s: Settlement) {
     const w = this.w;
+    if (!s.abandoned) w.record.add('settlement', `${s.name} was abandoned.`, s.center);
     s.abandoned = true;
     s.queue = [];
     for (const p of w.state.people) {
@@ -2362,6 +2368,36 @@ export class Towns {
   }
 
   /** The person has died or been removed. */
+  /** Someone leaves their settlement for good (to live outside it: a criminal). */
+  outcast(p: Person) {
+    if (p.settlement === undefined) return;
+    this.w.stop(p);
+    this.dropWork(p);
+    this.economy.quit(p);
+    if (p.home !== undefined) this.occupants.set(p.home, Math.max(0, (this.occupants.get(p.home) ?? 1) - 1));
+    delete p.settlement;
+    delete p.home;
+    delete p.indoors;
+    this.recount();
+    this.settlementsChanged = true;
+  }
+
+  /** A bandit camp at a tile (Stage 6: criminals live outside settlements): a finished building of no settlement. Returns it, or null when the ground is not free. */
+  addCamp(tile: number): Building | null {
+    const { w: fw, d: fd } = footprint(BuildingKind.BanditCamp, 0);
+    const [x, y] = this.tileXY(tile);
+    for (let dy = 0; dy < fd; dy++) for (let dx = 0; dx < fw; dx++) {
+      const t = (y + dy) * this.w.size + x + dx;
+      if (x + dx >= this.w.size || y + dy >= this.w.size || !this.buildable(t) || this.territory[t] !== 0 || this.bByTile.has(t)) return null;
+    }
+    return this.addBuilding(BuildingKind.BanditCamp, tile, undefined, true);
+  }
+
+  /** Trees on a tile burn down (a forest fire). */
+  burnTrees(t: number) {
+    if (this.trees[t] > 0) this.setTrees(t, 0);
+  }
+
   leave(p: Person) {
     this.economy.inherit(p);
     this.dropWork(p);

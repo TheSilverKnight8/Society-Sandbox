@@ -200,6 +200,7 @@ export class Cultures {
     for (const c of this.list) {
       if (c.extinct === undefined && !(this.members.get(c.id) ?? 0) && tick - c.founded > TICKS_PER_MONTH) {
         c.extinct = tick;
+        w.record.add('culture', `The ${c.name} culture died out.`);
         this.changed = true;
       }
     }
@@ -256,6 +257,7 @@ export class Cultures {
   /** A culture forms among a settlement's people (SPEC 7: after a period of having no culture). */
   private form(s: Settlement, people: Person[]) {
     const c = this.newCulture(s);
+    this.w.record.add('culture', `The ${c.name} culture formed at ${s.name}.`, s.center);
     for (const p of people) this.setCulture(p, c.id);
     this.dominant.set(s.id, c.id);
     delete s.cultureless;
@@ -268,6 +270,7 @@ export class Cultures {
     const parent = old !== undefined ? this.byId.get(old) : undefined;
     if (!parent) return;
     const c = this.newCulture(s, parent);
+    this.w.record.add('culture', `${s.name} broke away from the ${parent.name} culture, forming the ${c.name} culture.`, s.center);
     for (const p of people) if (p.culture === old) this.setCulture(p, c.id);
     this.dominant.set(s.id, c.id);
     delete s.farSince;
@@ -277,6 +280,7 @@ export class Cultures {
   /** A group breaks from its culture over its nation's policies, taking up the ways given (Caleb; see nations.ts). */
   splitOff(s: Settlement, parent: Culture, members: Person[], set: Partial<CultureTraits>) {
     const c = this.newCulture(s, parent, set);
+    this.w.record.add('culture', `People of ${s.name} broke from the ${parent.name} culture over their nation's ways, forming the ${c.name} culture.`, s.center);
     for (const p of members) if (p.culture === parent.id) this.setCulture(p, c.id);
     this.recount();
   }
