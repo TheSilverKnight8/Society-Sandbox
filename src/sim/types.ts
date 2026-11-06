@@ -193,6 +193,12 @@ export interface Settlement {
   /** Since when many of its people have been homeless (it sends people out after a while), and when it last sent people out. */
   crowdedSince?: number;
   spreadAt?: number;
+  /** How many people it had at the last yearly count, and the one before (to tell whether it is growing), and when it was counted. */
+  counted?: number;
+  yearAgo?: number;
+  countedAt?: number;
+  /** The most people it has had, as a village or bigger, each of whom brought coins (Caleb: coins were too sparse). */
+  funded?: number;
   /** The nation it belongs to, if any. */
   nation?: number;
   /** Months its people have been unhappy with their nation's policies (unrest; revolts come after a while). */

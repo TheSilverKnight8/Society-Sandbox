@@ -58,6 +58,10 @@ const BRIDGE_STEPS = 40;
 const MAX_BRIDGE = 4;
 /** Households that move up to a bigger home in a settlement each month, at most. */
 const MOVES_UP_A_MONTH = 3;
+/** Most pairs living apart who move in together in a settlement each month. */
+const PAIR_MOVES_A_MONTH = 6;
+/** Gates on a town's fence are at least this far apart (tiles). */
+const GATE_GAP = 8;
 /** How far each settlement's map of where its people can walk reaches from its middle (tiles). */
 const WALK_MAP = 64;
 const BRIDGE_GOAL_RANGE = 90;
@@ -75,9 +79,11 @@ const MAX_PEOPLE: Record<Settlement['stage'], number> = { camp: 40, village: 120
 /** A village or bigger with more than this share of its people homeless for this many years is crowded, and a group leaves. */
 const CROWDED_SHARE = 0.3;
 const CROWDED_YEARS = 2;
-/** Chance each year that a young family strikes out from a village or bigger with at least this many people. */
+/** Chance each year that a few young families strike out from a settlement with at least this many people that is still growing (Caleb after the post-5 checkpoint: towns grow first). */
 const STRIKE_OUT_CHANCE = 0.08;
-const STRIKE_OUT_MIN = 50;
+const STRIKE_OUT_MIN = 100;
+/** Growing: at least this many more people than a year before (and at least a twentieth more). */
+const GROWING_BY = 3;
 /** A group striking out: this many young families at most (at least two), with this many young people not yet paired, and at least this many people in all. */
 const STRIKE_OUT_FAMILIES = 3;
 const STRIKE_OUT_SINGLES = 3;
@@ -90,7 +96,7 @@ const SPREAD_NEAR: [number, number] = [25, 50];
 const SPREAD_FAR: [number, number] = [60, 100];
 const SPREAD_FAR_SHARE = 0.2;
 /** At least this long between groups leaving one settlement, and nobody leaves a settlement this young. */
-const SPREAD_GAP_YEARS = 1;
+const SPREAD_GAP_YEARS = 3;
 const SETTLING_YEARS = 2;
 
 /** Terrain a building can stand on. */
@@ -654,6 +660,7 @@ export class Towns {
     }
     // A settlement whose people are all gone stands empty.
     if (c.people === 0 && this.w.state.tick - s.founded > TICKS_PER_YEAR * 2) return;
+    this.economy.newcomersCoins(s, c.people);
     this.housePeople(s);
     this.spread(s, c);
     this.economy.assignJobs(s);
@@ -841,6 +848,7 @@ export class Towns {
     const room = (b: Building) => this.def(b).homes - (this.occupants.get(b.id) ?? 0);
     const members = this.w.state.people.filter((p) => p.settlement === s.id);
     this.easeCrowding(s, homes, members, room);
+    this.pairsTogether(members, room);
     // Homeless children by parent, worked out once.
     const kids = new Map<number, Person[]>();
     for (const q of members) {
@@ -867,6 +875,39 @@ export class Towns {
         const c = this.counts.get(s.id);
         if (c) c.housed++;
       }
+    }
+  }
+
+  /**
+   * Pairs who live in different homes (they paired after both had one) move in together: one
+   * into the other's home where there is a bed, else both into a home with two (so they have
+   * children; Caleb: towns should grow more).
+   */
+  private pairsTogether(members: Person[], room: (b: Building) => number) {
+    const w = this.w;
+    let moves = 0;
+    const moveTo = (q: Person, to: number) => {
+      if (q.home !== undefined) this.occupants.set(q.home, (this.occupants.get(q.home) ?? 1) - 1);
+      q.home = to;
+      if (q.indoors) delete q.indoors;
+      this.occupants.set(to, (this.occupants.get(to) ?? 0) + 1);
+    };
+    for (const p of members) {
+      if (moves >= PAIR_MOVES_A_MONTH) return;
+      if (p.sex !== 0 || p.pair === undefined || p.home === undefined) continue;
+      const q = w.byId.get(p.pair);
+      if (!q || q.settlement !== p.settlement || q.home === undefined || q.home === p.home) continue;
+      const hers = this.bById.get(p.home);
+      const his = this.bById.get(q.home);
+      if (hers && room(hers) >= 1) moveTo(q, hers.id);
+      else if (his && room(his) >= 1) moveTo(p, his.id);
+      else {
+        const both = this.buildings.find((b) => b.settlement === p.settlement && b.progress >= 1 && this.def(b).homes > 0 && room(b) >= 2);
+        if (!both) continue;
+        moveTo(p, both.id);
+        moveTo(q, both.id);
+      }
+      moves++;
     }
   }
 
@@ -1582,13 +1623,41 @@ export class Towns {
       }
     }
     const [cx, cy] = this.tileXY(s.center);
-    // Gates where the lines through the middle cross the fence, and wherever a path does.
-    const isGateSpot = (t: number) => {
-      const [x, y] = this.tileXY(t);
-      return x === cx || y === cy || Math.abs(x - cx) === Math.abs(y - cy) || this.roads[t] > 0;
+    // Gates go on straight stretches of fence (fence on two opposite sides, so the way through is
+    // clear), where the lines through the middle cross it or a path leads out; spaced apart, so
+    // there is one gate at each crossing and never a row of them (Caleb: gates bunched at corners).
+    const straight = (t: number) => {
+      const ew = ringSet.has(t - 1) && ringSet.has(t + 1) && !ringSet.has(t - size) && !ringSet.has(t + size);
+      const ns = ringSet.has(t - size) && ringSet.has(t + size) && !ringSet.has(t - 1) && !ringSet.has(t + 1);
+      return ew || ns;
     };
+    // Best first: gates already there or planned (so they stay put), then where a path leads out, then the lines through the middle.
+    const rank = (t: number) => {
+      const [x, y] = this.tileXY(t);
+      const v = this.walls[t];
+      let r = 0;
+      if (v === Wall.Gate || v === Wall.PlannedGate) r += 4;
+      if (this.roads[t] > 0) r += 2;
+      if (x === cx || y === cy) r += 2;
+      else if (Math.abs(x - cx) === Math.abs(y - cy)) r += 1;
+      return r;
+    };
+    const near = (a: number, b: number) => {
+      const [ax, ay] = this.tileXY(a);
+      const [bx, by] = this.tileXY(b);
+      return Math.max(Math.abs(ax - bx), Math.abs(ay - by)) < GATE_GAP;
+    };
+    const candidates = ring.filter((t) => straight(t) && rank(t) > 0).sort((a, b) => rank(b) - rank(a) || this.dist2(a, s.center) - this.dist2(b, s.center));
+    const gates = new Set<number>();
+    for (const t of candidates) {
+      let clear = true;
+      for (const g of gates) if (near(g, t)) {
+        clear = false;
+        break;
+      }
+      if (clear) gates.add(t);
+    }
     // Every separate loop gets at least one gate, so no one is shut in.
-    const gates = new Set<number>(ring.filter(isGateSpot));
     const done = new Set<number>();
     for (const t0 of ring) {
       if (done.has(t0)) continue;
@@ -1606,8 +1675,9 @@ export class Towns {
         }
       }
       if (part.some((t) => gates.has(t))) continue;
-      let best = part[0];
-      for (const t of part) if (this.dist2(t, s.center) < this.dist2(best, s.center)) best = t;
+      const pool = part.filter(straight);
+      let best = (pool.length ? pool : part)[0];
+      for (const t of pool.length ? pool : part) if (this.dist2(t, s.center) < this.dist2(best, s.center)) best = t;
       gates.add(best);
     }
     // Take down old fence that is no longer on the edge.
@@ -1618,11 +1688,14 @@ export class Towns {
     }
     for (const t of ring) {
       const v = this.walls[t];
-      if (v === Wall.None) this.walls[t] = gates.has(t) ? Wall.PlannedGate : Wall.PlannedFence;
-      else if (gates.has(t) && v === Wall.PlannedFence) this.walls[t] = Wall.PlannedGate;
-      else if (gates.has(t) && v === Wall.Fence) {
-        this.walls[t] = Wall.Gate;
-        w.tileChange(t, TileField.Walls, Wall.Gate);
+      const gate = gates.has(t);
+      if (v === Wall.None) this.walls[t] = gate ? Wall.PlannedGate : Wall.PlannedFence;
+      else if (gate && v === Wall.PlannedFence) this.walls[t] = Wall.PlannedGate;
+      else if (!gate && v === Wall.PlannedGate) this.walls[t] = Wall.PlannedFence;
+      else if (gate !== (v === Wall.Gate) && (v === Wall.Fence || v === Wall.Gate)) {
+        // A gate where one is now wanted, and gates no longer wanted closed up as fence.
+        this.walls[t] = gate ? Wall.Gate : Wall.Fence;
+        w.tileChange(t, TileField.Walls, this.walls[t]);
       }
     }
     s.fencePlan = ring;
@@ -2043,19 +2116,46 @@ export class Towns {
   private spread(s: Settlement, c: { people: number; housed: number; homes: number }) {
     const w = this.w;
     const tick = w.state.tick;
+    // How many people it had a year ago, to tell whether it is still growing.
+    if (s.countedAt === undefined || tick - s.countedAt >= TICKS_PER_YEAR) {
+      s.yearAgo = s.counted ?? c.people;
+      s.counted = c.people;
+      s.countedAt = tick;
+    }
     const homeless = c.people - Math.min(c.housed, c.homes);
     // Camps are not crowded: their people are still building their first homes.
     if (s.stage !== 'camp' && homeless > c.people * CROWDED_SHARE) s.crowdedSince ??= tick;
     else delete s.crowdedSince;
-    if (!w.toggles.founding || tick - s.founded < SETTLING_YEARS * TICKS_PER_YEAR) return;
-    if (s.spreadAt !== undefined && tick - s.spreadAt < SPREAD_GAP_YEARS * TICKS_PER_YEAR) return;
-    const over = c.people > MAX_PEOPLE[s.stage];
-    const crowded = s.crowdedSince !== undefined && tick - s.crowdedSince >= CROWDED_YEARS * TICKS_PER_YEAR;
-    if (over || crowded) {
+    if (!this.mayLeave(s)) return;
+    // Past what its stage holds: a quarter leaves (Caleb after 4a: an expansion threshold).
+    if (c.people > MAX_PEOPLE[s.stage]) {
       if (this.sendOut(s, 'quarter')) delete s.crowdedSince;
       return;
     }
-    if (s.stage !== 'camp' && c.people >= STRIKE_OUT_MIN && w.rand.next() < 1 - Math.pow(1 - STRIKE_OUT_CHANCE, 1 / 12)) this.sendOut(s, 'young');
+    // Otherwise only a big settlement that is still growing sends people out (Caleb: towns grow
+    // first, and do not spread while their numbers stand still): a quarter when it has been
+    // crowded for years, or now and then a few young families.
+    if (!this.mayStrikeOut(s, c.people)) return;
+    const crowded = s.crowdedSince !== undefined && tick - s.crowdedSince >= CROWDED_YEARS * TICKS_PER_YEAR;
+    if (crowded) {
+      if (this.sendOut(s, 'quarter')) delete s.crowdedSince;
+      return;
+    }
+    if (w.rand.next() < 1 - Math.pow(1 - STRIKE_OUT_CHANCE, 1 / 12)) this.sendOut(s, 'young');
+  }
+
+  /** Whether a group may leave a settlement now: founding is on, it is past its first years, and its last group left long enough ago. */
+  private mayLeave(s: Settlement) {
+    const tick = this.w.state.tick;
+    if (!this.w.toggles.founding || tick - s.founded < SETTLING_YEARS * TICKS_PER_YEAR) return false;
+    return s.spreadAt === undefined || tick - s.spreadAt >= SPREAD_GAP_YEARS * TICKS_PER_YEAR;
+  }
+
+  /** Whether a settlement is big enough, and still growing, to send young families out (by itself, or for an expansionist nation). */
+  mayStrikeOut(s: Settlement, people = this.peopleOf(s)) {
+    if (s.stage === 'camp' || people < STRIKE_OUT_MIN || !this.mayLeave(s)) return false;
+    const before = s.yearAgo;
+    return before !== undefined && people >= before + Math.max(GROWING_BY, before * 0.05);
   }
 
   /**
@@ -2113,6 +2213,8 @@ export class Towns {
     const size = w.size;
     const [cx, cy] = this.tileXY(s.center);
     const [r0, r1] = w.rand.next() < SPREAD_FAR_SHARE ? SPREAD_FAR : SPREAD_NEAR;
+    const home = w.finder.land(s.center);
+    const boats = w.finder.hasBoats && w.finder.dockOn(home);
     let best = -1;
     let bestScore = -Infinity;
     for (let k = 0; k < 24; k++) {
@@ -2123,6 +2225,8 @@ export class Towns {
       if (x < 2 || y < 2 || x >= size - 2 || y >= size - 2) continue;
       const t = y * size + x;
       if (!this.buildable(t) || this.territory[t] !== 0) continue;
+      // Land across water only by boat, from a dock on their own land (Caleb: boats are researched).
+      if (this.w.finder.land(t) !== home && !(boats && this.w.finder.land(t) >= 0)) continue;
       if (this.settlements.some((o) => !o.abandoned && this.dist2(o.center, t) < FOUND_GAP * FOUND_GAP)) continue;
       if (this.nearestTree(t, FOUND_WOOD_RANGE) < 0) continue;
       // Open grassland with stone near is best; nearer is a little better.

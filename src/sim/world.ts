@@ -89,7 +89,7 @@ const PAIR_CHANCE = 0.35;
 const FERTILE_MIN = 16;
 const FERTILE_MAX = 45;
 /** Chance each month that a fed, healthy, paired woman with her pair nearby becomes pregnant. */
-const CONCEIVE_CHANCE = 0.07;
+const CONCEIVE_CHANCE = 0.1;
 const PREGNANCY = 9 * TICKS_PER_MONTH;
 /** At least this long between births. */
 const BIRTH_GAP = 12 * TICKS_PER_MONTH;

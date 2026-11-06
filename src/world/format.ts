@@ -29,8 +29,11 @@ import type { WorldDoc } from './types';
 //  14  After Stage 5: bridges on each tile, settlements' planned bridges, docks and castles,
 //      builders' bridge work, orders to gather resources. (New fields only. Land on water or
 //      mountains, which older runs could hold, is let go when the run opens.)
+//  15  Settlements' yearly head counts (whether they are still growing) and the most people they
+//      have had (coins for newcomers). (New fields only. An older run's villages and towns are
+//      given coins for all their people the first month, since their coins had not kept pace.)
 
-export const WORLD_FORMAT_VERSION = 14;
+export const WORLD_FORMAT_VERSION = 15;
 
 export function upgradeWorld(version: number, doc: WorldDoc): WorldDoc {
   if (version > WORLD_FORMAT_VERSION) throw new Error('This was saved by a newer version of the app. Reload the app to update it, then try again.');

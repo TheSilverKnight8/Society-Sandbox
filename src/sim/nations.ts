@@ -364,8 +364,9 @@ export class Nations {
     if (w.toggles.founding) {
       for (const n of this.alive()) {
         if (n.policies.expansion !== 'expansionist' || w.rand.next() > EXPAND_CHANCE) continue;
+        // Only from a settlement big enough and still growing (Caleb: towns grow first).
         const from = this.settlementsOf(n)
-          .filter((s) => this.towns.peopleOf(s) >= 20)
+          .filter((s) => this.towns.mayStrikeOut(s))
           .sort((x, y) => this.towns.peopleOf(y) - this.towns.peopleOf(x))[0];
         if (from) this.towns.sendOut(from, 'young');
       }

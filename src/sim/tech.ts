@@ -41,6 +41,7 @@ export const TECHS: TechDef[] = [
   { id: 'writing', name: 'Writing', age: 'Classical', cost: 60, needs: [], lean: ['peaceful', 'progressive'], opens: 'Scriptorium (scholars research faster)' },
   { id: 'masonry', name: 'Masonry', age: 'Classical', cost: 60, needs: [], resource: { good: 'stone', n: 10 }, lean: ['hierarchical', 'traditional'], opens: 'Builders work a fifth faster' },
   { id: 'ironWorking', name: 'Iron working', age: 'Classical', cost: 80, needs: [], resource: { good: 'iron', n: 6 }, lean: ['martial'], opens: 'Smithy (tools from iron ore)' },
+  { id: 'boatbuilding', name: 'Boatbuilding', age: 'Classical', cost: 70, needs: [], resource: { good: 'wood', n: 10 }, lean: ['mercantile', 'progressive'], opens: 'Dock (boats across wide water)' },
   { id: 'cropRotation', name: 'Crop rotation', age: 'Early Medieval', cost: 80, needs: [], lean: ['agrarian', 'traditional'], opens: 'Fields ripen a quarter faster' },
   { id: 'commerce', name: 'Commerce', age: 'Classical', cost: 80, needs: ['writing'], lean: ['mercantile'], opens: 'Market (traders)' },
   { id: 'law', name: 'Law', age: 'Classical', cost: 90, needs: ['writing'], lean: ['communal'], opens: 'Elective succession' },
@@ -76,6 +77,7 @@ export const BUILDING_TECH: Partial<Record<BuildingKind, string>> = {
   [BuildingKind.Armory]: 'ironWorking',
   [BuildingKind.Stable]: 'horsemanship',
   [BuildingKind.Castle]: 'fortification',
+  [BuildingKind.Dock]: 'boatbuilding',
 };
 /** Arms that need a technology to make (Caleb: technology opens better kinds). Spears need only the armory (Iron working). */
 export const GOOD_TECH: Partial<Record<Good, string>> = { spear: 'ironWorking', sword: 'ironWorking', bow: 'archery', crossbow: 'crossbows', mail: 'mail', plate: 'plate', horse: 'horsemanship', engine: 'engineering' };
@@ -276,7 +278,9 @@ export class Technology {
       return;
     }
     const traits = Object.values(c.traits) as Pole[];
-    const weights = options.map((t) => (1 + 2 * t.lean.filter((p) => traits.includes(p)).length) * (100 / t.cost));
+    // A culture by the sea or a lake leans toward boats; one far from water seldom thinks of them.
+    const shore = options.some((t) => t.id === 'boatbuilding') ? this.w.towns.settlements.some((s) => !s.abandoned && this.w.cultures.dominant.get(s.id) === c.id && this.w.towns.economy.isCoastal(s)) : false;
+    const weights = options.map((t) => (1 + 2 * t.lean.filter((p) => traits.includes(p)).length) * (100 / t.cost) * (t.id === 'boatbuilding' ? (shore ? 3 : 0.3) : 1));
     let r = this.w.rand.next() * weights.reduce((a, b) => a + b, 0);
     let k = 0;
     while (k < options.length - 1 && r > weights[k]) r -= weights[k++];

@@ -49,9 +49,9 @@ const FOOD_RESERVE = 30;
 const JOB_GOOD: Partial<Record<JobKind, Good>> = { farmer: 'food', fisher: 'food', woodcutter: 'wood', quarryman: 'stone', miner: 'iron', smith: 'tools', potter: 'pottery' };
 /** Workers are paid this share of what they bring is worth at the settlement's price; builders a coin per spell of work. */
 const WAGE_SHARE = 0.6;
-/** Coins a settlement is given when it becomes a village (standing for coins brought in from outside), plus some per person. */
+/** Coins a settlement is given when it becomes a village, and for each person it gains past its most so far (standing for coins brought in from outside; Caleb: coins were too sparse). */
 const START_PURSE = 50;
-const START_PURSE_PER_PERSON = 3;
+const COINS_PER_NEWCOMER = 10;
 /** Coins a mint strikes from one gold ore, and what the minter is paid for it. */
 const COINS_PER_GOLD = 12;
 const MINTER_WAGE = 2;
@@ -69,6 +69,9 @@ const TRADE_GOODS: Good[] = ['food', 'wood', 'stone', 'iron', 'gold', 'tools', '
 const MAX_GOODS = 6;
 /** Coins an adult with a home pays their settlement each month. */
 const RENT = 1;
+/** Coins a tradesman is paid each month from the treasury besides what they are paid for what they bring (a child in a light job, half); soldiers, officials and traders are paid their own ways (Caleb: coins were too sparse). */
+const MONTHLY_WAGE = 2;
+const NO_MONTHLY_WAGE = new Set<JobKind>(['soldier', 'official', 'trader']);
 /** Officials tax settlements of their nation within this many tiles of their hall, at most twice a year each. */
 const TAX_RANGE = 100;
 /** Shares of taxes collected that go to the official who carried them and to the ruler (the rest to the nation's treasury). */
@@ -77,8 +80,8 @@ const OFFICIAL_SHARE = 0.1;
 const SCHOLAR_WAGE = 2;
 /** Ages at which people serve as soldiers, and what a nation's treasury needs for volunteers to enlist. */
 const SOLDIER_AGE = [16, 45];
-/** A settlement this big on a coast builds a dock. */
-const DOCK_PEOPLE = 25;
+/** A settlement this big on a coast builds a dock, once it knows boatbuilding. */
+const DOCK_PEOPLE = 20;
 const VOLUNTEER_TREASURY = 12;
 const SOLDIER_SHARE = 0.15;
 /** Workplaces that call workers from ordinary work when they have open places. */
@@ -188,7 +191,18 @@ export class Economy {
   /** A settlement has just moved up a stage. */
   onStage(s: Settlement) {
     this.stockOf(s);
-    if (s.stage === 'village') s.coins = (s.coins ?? 0) + START_PURSE + START_PURSE_PER_PERSON * this.t.peopleOf(s);
+    if (s.stage === 'village') s.coins = (s.coins ?? 0) + START_PURSE;
+  }
+
+  /**
+   * Once a month: a village or bigger that has more people than ever before gets coins for each
+   * of them into its treasury, so the coins in a settlement keep pace with its people.
+   */
+  newcomersCoins(s: Settlement, people: number) {
+    if (s.stage === 'camp' || people <= (s.funded ?? 0)) return;
+    s.coins = (s.coins ?? 0) + COINS_PER_NEWCOMER * (people - (s.funded ?? 0));
+    s.funded = people;
+    this.t.settlementsChanged = true;
   }
 
   /** Wealth: coins plus household goods at their usual price. */
@@ -219,11 +233,14 @@ export class Economy {
     p.goods = 0;
   }
 
-  /** Once a month for each person: adults with a home pay rent to their settlement; someone with coins to spare buys pottery for their home. */
+  /** Once a month for each person: tradesmen are paid a wage; adults with a home pay rent to their settlement; someone with coins to spare buys pottery for their home. */
   monthly(p: Person) {
-    if (p.settlement === undefined || this.ageOf(p) < ADULT_AGE) return;
+    if (p.settlement === undefined) return;
     const s = this.t.byId(p.settlement);
     if (!s) return;
+    const job = this.jobOf(p);
+    if (job && !NO_MONTHLY_WAGE.has(job)) this.pay(s, p, this.ageOf(p) < ADULT_AGE ? MONTHLY_WAGE / 2 : MONTHLY_WAGE);
+    if (this.ageOf(p) < ADULT_AGE) return;
     if (p.home !== undefined) this.charge(p, s, RENT);
     if ((p.goods ?? 0) >= MAX_GOODS) return;
     const st = this.stockOf(s);
@@ -1183,8 +1200,9 @@ export class Economy {
       if (food >= people) options.unshift(hall);
       else options.push(hall);
     }
-    // A settlement on a coast or lakeside builds a dock, where people board boats across wide water (Caleb).
-    if (hasStore && people >= DOCK_PEOPLE && !count(BuildingKind.Dock) && food >= people && this.coastal(s)) options.unshift({ kind: BuildingKind.Dock, test: (a, w, d) => this.shoreSpot(a, w, d) && this.deepBeside(a, w, d) });
+    // A settlement on a coast or lakeside builds a dock, where people board boats across wide water,
+    // once its technology has boats (Caleb: boats are researched).
+    if (hasStore && people >= DOCK_PEOPLE && !count(BuildingKind.Dock) && food >= people / 2 && this.w.tech.canBuild(s, BuildingKind.Dock) && this.coastal(s)) options.unshift({ kind: BuildingKind.Dock, test: (a, w, d) => this.shoreSpot(a, w, d) && this.deepBeside(a, w, d) });
     // A nation's biggest city builds its castle, where the ruler lives (Caleb), before anything else once fed.
     if (hasStore && this.w.nations?.wantsCastle(s) && !count(BuildingKind.Castle)) {
       const castle = { kind: BuildingKind.Castle, test: any };
@@ -1233,6 +1251,11 @@ export class Economy {
 
   /** Whether a footprint has a tile beside water. */
   /** Whether a settlement's land has a shore with deep water near it (a coast or lake, not a river). */
+  /** Whether a settlement lies on a coast or lakeside with deep water near (for boats). */
+  isCoastal(s: Settlement): boolean {
+    return this.coastal(s);
+  }
+
   private coastal(s: Settlement): boolean {
     // Looked at again once a year (land grows slowly).
     const year = Math.floor(this.w.state.tick / TICKS_PER_YEAR);
